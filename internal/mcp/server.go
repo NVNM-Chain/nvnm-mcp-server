@@ -16,7 +16,7 @@ import (
 
 const (
 	serverName    = "inveniam-evm"
-	serverVersion = "0.3.0"
+	serverVersion = "0.4.0"
 )
 
 // Server wraps the MCP server with its dependencies.
@@ -28,10 +28,12 @@ type Server struct {
 // NewServer creates a new MCP server and registers all tools.
 // When enableWriteTools is true, prepare-sign-submit tools and
 // evm_send_raw_transaction are registered.
+// Middleware (if any) is registered via AddReceivingMiddleware.
 func NewServer(
 	evmClient evm.Client,
 	anchorClient anchor.Client,
 	enableWriteTools bool,
+	middleware []mcp.Middleware,
 	logger *slog.Logger,
 ) *Server {
 	mcpSrv := mcp.NewServer(
@@ -41,6 +43,10 @@ func NewServer(
 		},
 		nil,
 	)
+
+	for _, mw := range middleware {
+		mcpSrv.AddReceivingMiddleware(mw)
+	}
 
 	s := &Server{
 		mcpServer: mcpSrv,

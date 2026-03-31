@@ -19,7 +19,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phase 3 complete.** Generic EVM tools, anchor read tools, and write support (prepare-sign-submit) are fully implemented and end-to-end tested against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3).
+**Observability phase complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), and full observability instrumentation are implemented and tested against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
@@ -98,6 +98,16 @@ All configuration is via environment variables. No config files required.
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
 
+### Observability
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(none)_ | OTel Collector endpoint (e.g. `localhost:4317`). Enables OTLP trace + metric export |
+| `OTEL_SERVICE_NAME` | `inveniam-mcp-server` | Service name in traces and metrics |
+| `ENABLE_PROMETHEUS` | `true` | Expose `/metrics` endpoint on metrics port |
+| `ENABLE_STDOUT_TELEMETRY` | `false` | Dump spans/metrics to stderr (dev only) |
+| `METRICS_ADDR` | `:9090` | Listen address for health + metrics endpoints |
+
 ## MCP Tools
 
 ### Phase 1: Generic EVM
@@ -151,6 +161,33 @@ This pattern means:
 - The caller needs minimal crypto capability (just ECDSA sign)
 - The MCP server handles all the "fiddly" ABI and RPC work
 
+## Observability
+
+The server includes vendor-agnostic observability via OpenTelemetry, with out-of-the-box support for Prometheus/Grafana and CloudWatch/X-Ray.
+
+### Endpoints
+
+The health and metrics server runs on a separate port (default `:9090`), independent of the MCP transport.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /healthz` | Liveness probe -- returns `200 OK` if the process is running |
+| `GET /readyz` | Readiness probe -- returns `200 OK` if the EVM RPC is reachable and the ABI is loaded |
+| `GET /metrics` | Prometheus scrape endpoint (when `ENABLE_PROMETHEUS=true`) |
+
+### What Gets Instrumented
+
+- **Every MCP tool call** gets a trace span and metrics (duration histogram, call counter, error counter, active request gauge)
+- **Every upstream EVM RPC call** gets a child trace span with method name and duration
+- **Structured logs** include request IDs and can be correlated with OTel traces
+- **Sensitive data** (addresses, URLs, tx data) is redacted in all log output
+
+### Deployment Integration
+
+- **Kubernetes:** Liveness/readiness probes on `:9090`. `ServiceMonitor`/`PodMonitor` for Prometheus auto-discovery. OTel Collector as DaemonSet or sidecar.
+- **AWS ECS/Fargate:** ALB health check on `/readyz`. `aws-otel-collector` sidecar for CloudWatch/X-Ray. Structured JSON logs via `awslogs` driver.
+- **Azure:** Compatible with AKS probes and Azure Monitor via OTel Collector.
+
 ## Development
 
 ```bash
@@ -188,12 +225,13 @@ docker run --rm \
   -e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
   -e MCP_TRANSPORT=http \
   -p 8080:8080 \
+  -p 9090:9090 \
   inveniam-mcp-server
 ```
 
 ### AWS (ECS/Fargate)
 
-The Docker image is designed for deployment on ECS/Fargate with HTTP transport. Configure environment variables through ECS task definitions. The server exposes a health-check compatible HTTP endpoint.
+The Docker image is designed for deployment on ECS/Fargate with HTTP transport. Configure environment variables through ECS task definitions. The server exposes health check endpoints on `:9090` (`/healthz`, `/readyz`). Add an `aws-otel-collector` sidecar for CloudWatch/X-Ray telemetry.
 
 ### MANTRA Validator Nodes
 
@@ -205,11 +243,12 @@ The server can run directly on MANTRA validator nodes, connecting to `localhost`
 cmd/inveniam-mcp-server/     Entrypoint
 internal/
   config/                    Environment-based configuration
-  logging/                   slog-based structured logging
+  logging/                   slog-based structured logging + redaction
   errors/                    Shared sentinel errors
-  evm/                       Generic EVM RPC client layer
+  evm/                       Generic EVM RPC client layer + tracing wrapper
   anchor/                    Inveniam anchor adapter
   mcp/                       MCP tool registration and handlers
+  telemetry/                 OTel providers, MCP middleware, health server, metrics
 abi/
   anchoring.json             Anchor precompile ABI
 docs/

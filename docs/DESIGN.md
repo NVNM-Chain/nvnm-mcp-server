@@ -76,8 +76,9 @@ NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set t
 cmd/inveniam-mcp-server/main.go
     │
     ├── internal/config      (env loading, validation)
-    ├── internal/logging     (slog wrapper)
-    ├── internal/evm         (ethclient wrapper, normalized types)
+    ├── internal/logging     (slog wrapper, redaction helpers)
+    ├── internal/telemetry   (OTel providers, MCP middleware, health server, metrics)
+    ├── internal/evm         (ethclient wrapper, normalized types, tracing wrapper)
     ├── internal/anchor      (anchor adapter, prepare-sign-submit)
     └── internal/mcp         (MCP server, tool handlers)
             │
@@ -96,10 +97,12 @@ Application entrypoint. Responsibilities:
 - Parse CLI flags (`--transport`)
 - Load and validate configuration
 - Initialize logger
-- Construct EVM client and anchor client
-- Register MCP tools
+- Initialize OpenTelemetry providers and MCP middleware
+- Construct EVM client (with tracing wrapper) and anchor client
+- Start health/metrics server on `:9090`
+- Register MCP tools with telemetry middleware
 - Select and start MCP transport
-- Handle graceful shutdown on SIGINT/SIGTERM
+- Handle graceful shutdown on SIGINT/SIGTERM (including telemetry flush)
 
 #### `internal/config`
 
@@ -113,11 +116,13 @@ Environment-based configuration loading and validation.
 
 #### `internal/logging`
 
-Thin wrapper over `log/slog` (Go stdlib).
+Wrapper over `log/slog` (Go stdlib) with OTel bridge and redaction.
 
-- `New(level string) *slog.Logger` -- creates a configured logger
-- JSON handler for production, text handler for development
-- No external dependencies
+- `New(level string) *slog.Logger` -- creates a configured JSON logger
+- `NewWithTraceCorrelation(level, serviceName)` -- JSON logger with OTel trace/span ID injection
+- `NewText(level string)` -- text logger for local development
+- Redaction helpers: `SafeAddr` (truncate addresses), `SafeURL` (hostname only), `SafeTxData` (length only)
+- Fanout handler sends logs to both JSON output and OTel bridge
 
 #### `internal/errors`
 
@@ -169,6 +174,7 @@ type Client interface {
     EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
     SendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
 
+    Ping(ctx context.Context) error // readiness probe
     Close()
 }
 ```
@@ -176,6 +182,7 @@ type Client interface {
 Design decisions:
 - Methods return **normalized types** directly, not raw go-ethereum types. Normalization happens at the EVM layer boundary.
 - The client wraps `ethclient.Client` and holds a configured timeout.
+- A **tracing wrapper** (`NewTracingClient`) implements the same `Client` interface, adding OTel spans and duration/error metrics to every RPC call without modifying the core client.
 - If an archive RPC URL is configured, a second client is available for historical queries.
 
 #### `internal/anchor`
@@ -377,6 +384,13 @@ type Config struct {
     EnableWriteTools bool          // default false; gates anchor_prepare_* tools
     Transport        string        // default "stdio"
     HTTPAddr         string        // default ":8080"
+
+    // Telemetry
+    OTELEndpoint     string        // OTEL_EXPORTER_OTLP_ENDPOINT; enables OTLP export
+    OTELServiceName  string        // default "inveniam-mcp-server"
+    EnablePrometheus bool          // default true; exposes /metrics
+    EnableStdoutTel  bool          // default false; for dev debugging
+    MetricsAddr      string        // default ":9090"; health + metrics server
 }
 ```
 
@@ -390,19 +404,63 @@ Note: there are no private key or signing configuration fields. The MCP server n
 
 ## 7. Logging & Observability
 
-### Phase 1-3: slog
+### Structured Logging
 
-Structured logging via `log/slog` (Go stdlib):
+Via `log/slog` (Go stdlib) with OTel bridge:
 - JSON format in production, text format for local development
-- Logged events: server start/stop, tool calls (name + duration), RPC errors, config validation
-- Sensitive fields (RPC URLs with credentials) are redacted
+- Every log record includes `trace_id` and `span_id` when an OTel trace context is active
+- Unique `request_id` per MCP method call for correlation
+- Redaction helpers ensure sensitive data never appears in logs:
+  - Addresses: truncated to `0x9f8a...A9CD`
+  - URLs: hostname only, no path/credentials
+  - Transaction data: byte length only, no content
+  - Private keys: never logged (never reach the server)
 
-### Phase 4: Metrics (future)
+### OpenTelemetry Instrumentation
 
-- Prometheus endpoint on HTTP transport
-- Counters: tool calls by name, errors by type
-- Histograms: tool call duration, RPC latency
-- Gauges: active sessions, latest block number
+Vendor-agnostic telemetry via OpenTelemetry SDK:
+
+**Exporters (configurable via env vars):**
+- **OTLP** (gRPC) -- sends traces and metrics to an OTel Collector (sidecar or service), which routes to CloudWatch/X-Ray, Grafana Cloud, etc.
+- **Prometheus** -- exposes `/metrics` endpoint for direct scraping
+- **Stdout** -- for local dev/debugging
+
+**MCP middleware (auto-instruments every tool call):**
+- Trace span per method call with `mcp.method`, `mcp.tool.name`, `mcp.request.id`
+- `mcp.server.tool.duration` histogram -- latency distribution per tool
+- `mcp.server.tool.calls` counter -- call count by tool name and status
+- `mcp.server.tool.errors` counter -- error count by tool name
+- `mcp.server.active_requests` gauge -- concurrent in-flight requests
+
+**RPC client tracing (auto-instruments every upstream RPC call):**
+- Child span per RPC call: `rpc.method`, `rpc.target` (hostname only)
+- `evm.rpc.duration` histogram -- upstream RPC latency
+- `evm.rpc.errors` counter -- errors by method
+
+**Privacy:** tool arguments, return values, error messages, and private keys are never recorded in traces or metrics.
+
+### Health Check Endpoints
+
+Separate HTTP server on `METRICS_ADDR` (default `:9090`):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /healthz` | Liveness probe -- always `200 OK` if the process is running |
+| `GET /readyz` | Readiness probe -- `200 OK` if EVM RPC is reachable and ABI is loaded; `503` otherwise |
+| `GET /metrics` | Prometheus scrape endpoint |
+
+Compatible with Kubernetes probes, AWS ALB health checks, and Azure health probes.
+
+#### `internal/telemetry`
+
+OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric definitions.
+
+- `New(ctx, cfg, logger)` -- creates `TracerProvider` and `MeterProvider` with configured exporters
+- `Shutdown(ctx)` -- flushes pending telemetry before exit
+- `NewMCPMiddleware(metrics, logger)` -- returns `mcp.Middleware` that auto-instruments all tool calls
+- `NewHealthServer(addr, promHandler, checker, abiLoaded, logger)` -- serves `/healthz`, `/readyz`, `/metrics`
+- `NewMetrics(provider)` -- creates all metric instruments
+- Readiness check polls EVM RPC every 30s (cached result)
 
 ## 8. Deployment Topology
 
@@ -437,11 +495,12 @@ Structured logging via `log/slog` (Go stdlib):
 The server handles `SIGINT` and `SIGTERM`:
 1. Stop accepting new MCP connections/requests
 2. Wait for in-flight tool calls to complete (with a deadline)
-3. Close EVM client connections
-4. Flush logs
-5. Exit 0
+3. Shut down health/metrics server
+4. Flush pending telemetry (traces and metrics)
+5. Close EVM client connections
+6. Exit 0
 
-Timeout: 10 seconds for graceful shutdown, then force exit.
+Timeout: 5 seconds for telemetry flush and health server shutdown.
 
 ## 10. Security Considerations
 
@@ -460,11 +519,14 @@ Timeout: 10 seconds for graceful shutdown, then force exit.
 |---|---|---|
 | MCP SDK | Official `go-sdk` v1.4.1 | Maintained by Google/Anthropic, typed tool binding, both transports |
 | EVM client | `go-ethereum/ethclient` | Industry standard, well-tested, directly wraps JSON-RPC |
-| Logging | `log/slog` (stdlib) | Zero dependencies, structured, good enough for Phase 1-3 |
+| Logging | `log/slog` + OTel bridge | Structured, zero-dep base, trace correlation via otelslog bridge |
+| Telemetry | OpenTelemetry SDK | Vendor-agnostic; native Prometheus + OTLP export; follows OTel env var conventions |
+| Health checks | Separate `:9090` server | Decoupled from MCP transport; compatible with K8s, ALB, Azure probes |
+| RPC tracing | Decorator pattern | `TracingClient` wraps `Client` interface; no changes to core client code |
 | Config | Plain env vars | Simplest possible; no framework overhead; 12-factor compliant |
 | Normalization | Inside `evm/` package | Reduces package count; normalization is a concern of the EVM layer |
 | Anchor isolation | Adapter pattern in `internal/anchor` | Must be swappable without touching EVM or MCP layers |
 | Write key management | Prepare-sign-submit (no server keys) | Keys never leave caller's domain; MCP server stays a stateless translator; supports HSM/Vault/any signer without server changes |
 | Nonce management | Fetch-at-prepare-time | Correct for serial writes; sufficient for document anchoring volumes; avoids statefulness in the server |
 | No `normalize/` package | Merged into `evm/` and `anchor/` | Original plan had too much indirection for the value |
-| No `observability/` package (Phase 1) | Deferred to Phase 4 | slog is sufficient; Prometheus adds complexity before it's needed |
+| MCP middleware | Custom (~100 lines) | Avoided 1-star `mcp-otel-go` dependency; full control over privacy and metric naming |

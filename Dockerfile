@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /build
 
@@ -13,6 +13,7 @@ FROM gcr.io/distroless/static-debian12
 COPY --from=builder /build/inveniam-mcp-server /inveniam-mcp-server
 
 EXPOSE 8080
+EXPOSE 9090
 
 ENTRYPOINT ["/inveniam-mcp-server"]
 CMD ["--transport", "http"]

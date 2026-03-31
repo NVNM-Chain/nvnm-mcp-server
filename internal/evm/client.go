@@ -34,6 +34,9 @@ type Client interface {
 	EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	SendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
 
+	// Ping checks that the RPC connection is alive (used by readiness probes).
+	Ping(ctx context.Context) error
+
 	Close()
 }
 
@@ -237,6 +240,14 @@ func (c *client) SendRawTransaction(ctx context.Context, signedTxHex string) (st
 	}
 
 	return tx.Hash().Hex(), nil
+}
+
+// Ping verifies the RPC connection by requesting the chain ID.
+func (c *client) Ping(ctx context.Context) error {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	_, err := c.eth.ChainID(ctx)
+	return err
 }
 
 // Close closes the underlying RPC connection.

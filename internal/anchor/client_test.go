@@ -100,6 +100,8 @@ func (m *mockEVMClient) SendRawTransaction(ctx context.Context, hex string) (str
 	return "0x0000000000000000000000000000000000000000000000000000000000000000", nil
 }
 
+func (m *mockEVMClient) Ping(context.Context) error { return nil }
+
 func (m *mockEVMClient) Close() {}
 
 func testABIPath(t *testing.T) string {

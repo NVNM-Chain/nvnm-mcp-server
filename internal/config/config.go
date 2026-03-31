@@ -32,6 +32,13 @@ type Config struct {
 	EnableWriteTools bool
 	Transport        string
 	HTTPAddr         string
+
+	// Telemetry
+	OTELEndpoint     string
+	OTELServiceName  string
+	EnablePrometheus bool
+	EnableStdoutTel  bool
+	MetricsAddr      string
 }
 
 // Load reads configuration from environment variables and returns a validated Config.
@@ -63,6 +70,12 @@ func Load() (*Config, error) {
 	cfg.RequestTimeout = timeout
 
 	cfg.EnableWriteTools = envOrDefault("ENABLE_WRITE_TOOLS", "false") == "true"
+
+	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "inveniam-mcp-server")
+	cfg.EnablePrometheus = envOrDefault("ENABLE_PROMETHEUS", "true") == "true"
+	cfg.EnableStdoutTel = envOrDefault("ENABLE_STDOUT_TELEMETRY", "false") == "true"
+	cfg.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
