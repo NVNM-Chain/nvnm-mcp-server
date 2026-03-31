@@ -27,9 +27,10 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment & credentials
 .env
 .env.*
+.chain_credentials.txt
 
 # Build
 /build/
