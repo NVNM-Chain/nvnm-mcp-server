@@ -1,0 +1,21 @@
+{
+  "registries": [
+    {
+      "id": 1,
+      "name": "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f",
+      "description": "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f",
+      "creator": "inveniam12r28dewjcpzfnrkpshvx5rh4eve08685xyya3f",
+      "created_at": "2026-02-27 13:57:03.626641324 +0000 UTC"
+    },
+    {
+      "id": 2,
+      "name": "1281d520-c91c-4d60-aa25-7f7b79fc4f80",
+      "description": "1281d520-c91c-4d60-aa25-7f7b79fc4f80",
+      "creator": "inveniam12r28dewjcpzfnrkpshvx5rh4eve08685xyya3f",
+      "created_at": "2026-02-27 18:28:54.56053554 +0000 UTC"
+    }
+  ],
+  "pagination": {
+    "total": 138
+  }
+}

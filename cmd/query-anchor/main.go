@@ -40,60 +40,59 @@ func run() error {
 	}
 	fmt.Printf("Chain ID: %d | Latest Block: %d\n", chainInfo.ChainID, chainInfo.LatestBlockNumber)
 
-	client := anchor.NewClient(evmClient, anchor.PrecompileAddress, chainInfo.ChainID, abiPath, logger)
+	anchorClient := anchor.NewClient(evmClient, anchor.PrecompileAddress, chainInfo.ChainID, abiPath, logger)
 
-	// Get all registries
-	allRegs, err := client.GetRegistries(ctx, anchor.GetRegistriesRequest{
+	allRegs, getRegsErr := anchorClient.GetRegistries(ctx, anchor.GetRegistriesRequest{
 		Pagination: &anchor.PageRequest{Limit: 200},
 	})
-	if err != nil {
-		return fmt.Errorf("get registries: %w", err)
+	if getRegsErr != nil {
+		return fmt.Errorf("get registries: %w", getRegsErr)
 	}
 	fmt.Printf("\nTotal registries: %d (fetched %d)\n", allRegs.Pagination.Total, len(allRegs.Registries))
 
 	creators := map[string]int{}
-	for _, r := range allRegs.Registries {
-		creators[r.Creator]++
+	for i := range allRegs.Registries {
+		creators[allRegs.Registries[i].Creator]++
 	}
 	fmt.Printf("\nCreators:\n")
 	for c, count := range creators {
 		fmt.Printf("  %s: %d registries\n", c, count)
 	}
 
-	// Date range
 	if len(allRegs.Registries) > 0 {
 		fmt.Printf("\nEarliest: %s (ID=%d)\n", allRegs.Registries[0].CreatedAt, allRegs.Registries[0].ID)
 		last := allRegs.Registries[len(allRegs.Registries)-1]
 		fmt.Printf("Latest:   %s (ID=%d)\n", last.CreatedAt, last.ID)
 	}
 
-	// Query records for a sample of registries to find ones with data
 	fmt.Printf("\n=== Records Survey ===\n")
-	totalRecords := 0
+	totalRecords := uint64(0)
 	registriesWithRecords := 0
 	limit := 20
 	if len(allRegs.Registries) < limit {
 		limit = len(allRegs.Registries)
 	}
 
-	for _, reg := range allRegs.Registries[:limit] {
-		records, err := client.GetRecords(ctx, anchor.GetRecordsRequest{
+	for i := range allRegs.Registries[:limit] {
+		reg := &allRegs.Registries[i]
+		records, recErr := anchorClient.GetRecords(ctx, anchor.GetRecordsRequest{
 			Registry:   &reg.Name,
 			Pagination: &anchor.PageRequest{Limit: 5},
 		})
-		if err != nil {
-			fmt.Printf("  Registry %d (%s): error: %v\n", reg.ID, reg.Name, err)
+		if recErr != nil {
+			fmt.Printf("  Registry %d (%s): error: %v\n", reg.ID, reg.Name, recErr)
 			continue
 		}
-		count := 0
+		var count uint64
 		if records.Pagination != nil {
-			count = int(records.Pagination.Total)
+			count = records.Pagination.Total
 		}
 		totalRecords += count
 		if count > 0 {
 			registriesWithRecords++
 			fmt.Printf("\n  Registry %d (%s): %d records\n", reg.ID, reg.Name, count)
-			for _, r := range records.Records {
+			for j := range records.Records {
+				r := &records.Records[j]
 				fmt.Printf("    Record %d (v%d) status=%s checksum=%s algo=%s latest=%v\n",
 					r.RecordID, r.Index, r.Status, r.Checksum, r.ChecksumAlgo, r.IsLatest)
 				fmt.Printf("      URI: %s\n", r.URI)
@@ -110,13 +109,12 @@ func run() error {
 	fmt.Printf("With records: %d\n", registriesWithRecords)
 	fmt.Printf("Total records found: %d\n", totalRecords)
 
-	// Try a broader records query with no registry filter
 	fmt.Printf("\n=== All Records (no filter, limit 20) ===\n")
-	allRecords, err := client.GetRecords(ctx, anchor.GetRecordsRequest{
+	allRecords, allRecErr := anchorClient.GetRecords(ctx, anchor.GetRecordsRequest{
 		Pagination: &anchor.PageRequest{Limit: 20},
 	})
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
+	if allRecErr != nil {
+		fmt.Printf("error: %v\n", allRecErr)
 	} else {
 		fmt.Printf("Total records on chain: %d\n", allRecords.Pagination.Total)
 		fmt.Printf("Returned: %d\n", len(allRecords.Records))

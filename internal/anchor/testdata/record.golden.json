@@ -1,0 +1,12 @@
+{
+  "registry": "test-registry-uuid",
+  "record_id": 7,
+  "index": 1,
+  "checksum": "e4d5f79f1cfaf0cecd5f0e323a25fd08c1f64d0e1f8de349d75c77f29e51407d",
+  "checksum_algo": "sha256",
+  "uri": "https://qa8-api.inveniam.io/dataroom/2/103402411912619200",
+  "status": "Active",
+  "is_latest": true,
+  "timestamp": "2026-03-01 14:30:00.000000000 +0000 UTC",
+  "metadata": "{\"taxonomyId\":\"abc-123\",\"fileId\":\"def-456\"}"
+}

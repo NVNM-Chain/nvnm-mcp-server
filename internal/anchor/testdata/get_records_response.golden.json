@@ -1,0 +1,19 @@
+{
+  "records": [
+    {
+      "registry": "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f",
+      "record_id": 1,
+      "index": 1,
+      "checksum": "0xabc",
+      "checksum_algo": "sha256",
+      "uri": "ipfs://Qm123",
+      "status": "ACTIVE",
+      "is_latest": true,
+      "timestamp": "2026-02-27 14:00:25.684724306 +0000 UTC",
+      "metadata": "{\"key\": \"value\"}"
+    }
+  ],
+  "pagination": {
+    "total": 1
+  }
+}
