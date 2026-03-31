@@ -135,3 +135,17 @@ func TestGolden_EmptyResponses(t *testing.T) {
 	}
 	assertGolden(t, "empty_records_response", resp)
 }
+
+func TestGolden_UnsignedTransaction(t *testing.T) {
+	tx := UnsignedTransaction{
+		RawTx:    "0xf86c2a8501dcd650008301d4c0940000000000000000000000000000000000000a008080",
+		To:       "0x0000000000000000000000000000000000000A00",
+		Data:     "0xcafebabe01020304",
+		Nonce:    42,
+		Gas:      120000,
+		GasPrice: "8000000000",
+		Value:    "0",
+		ChainID:  58887,
+	}
+	assertGolden(t, "unsigned_transaction", tx)
+}

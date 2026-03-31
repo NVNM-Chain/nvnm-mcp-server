@@ -18,6 +18,10 @@ import (
 // mockEVMClient implements evm.Client for testing without a live RPC.
 type mockEVMClient struct {
 	callContractFn func(ctx context.Context, msg ethereum.CallMsg, block *big.Int) ([]byte, error)
+	pendingNonceFn func(ctx context.Context, addr common.Address) (uint64, error)
+	suggestGasFn   func(ctx context.Context) (*big.Int, error)
+	estimateGasFn  func(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
+	sendRawTxFn    func(ctx context.Context, hex string) (string, error)
 }
 
 func (m *mockEVMClient) ChainID(context.Context) (*big.Int, error) {
@@ -65,6 +69,35 @@ func (m *mockEVMClient) CallContract(
 
 func (m *mockEVMClient) FilterLogs(context.Context, ethereum.FilterQuery) ([]evm.NormalizedLog, error) {
 	return nil, nil
+}
+
+func (m *mockEVMClient) PendingNonceAt(ctx context.Context, addr common.Address) (uint64, error) {
+	if m.pendingNonceFn != nil {
+		return m.pendingNonceFn(ctx, addr)
+	}
+	return 0, nil
+}
+
+func (m *mockEVMClient) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	if m.suggestGasFn != nil {
+		return m.suggestGasFn(ctx)
+	}
+	return big.NewInt(1000000000), nil
+}
+
+//nolint:gocritic // hugeParam: msg matches evm.Client interface
+func (m *mockEVMClient) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	if m.estimateGasFn != nil {
+		return m.estimateGasFn(ctx, msg)
+	}
+	return 100000, nil
+}
+
+func (m *mockEVMClient) SendRawTransaction(ctx context.Context, hex string) (string, error) {
+	if m.sendRawTxFn != nil {
+		return m.sendRawTxFn(ctx, hex)
+	}
+	return "0x0000000000000000000000000000000000000000000000000000000000000000", nil
 }
 
 func (m *mockEVMClient) Close() {}

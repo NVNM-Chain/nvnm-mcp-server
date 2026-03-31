@@ -15,6 +15,7 @@ import (
 
 // Client wraps go-ethereum's ethclient and returns normalized response types.
 type Client interface {
+	// Read methods
 	ChainID(ctx context.Context) (*big.Int, error)
 	LatestBlockNumber(ctx context.Context) (uint64, error)
 	GetChainInfo(ctx context.Context) (*ChainInfo, error)
@@ -26,6 +27,13 @@ type Client interface {
 	CodeAt(ctx context.Context, address common.Address, block *big.Int) (*CodeResult, error)
 	CallContract(ctx context.Context, msg ethereum.CallMsg, block *big.Int) ([]byte, error)
 	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]NormalizedLog, error)
+
+	// Write support methods
+	PendingNonceAt(ctx context.Context, address common.Address) (uint64, error)
+	SuggestGasPrice(ctx context.Context) (*big.Int, error)
+	EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
+	SendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
+
 	Close()
 }
 
@@ -179,6 +187,56 @@ func (c *client) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]Norm
 		result[i] = normalizeLog(&logs[i])
 	}
 	return result, nil
+}
+
+// PendingNonceAt returns the pending nonce for an address (for transaction construction).
+func (c *client) PendingNonceAt(ctx context.Context, address common.Address) (uint64, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	return c.eth.PendingNonceAt(ctx, address)
+}
+
+// SuggestGasPrice returns the current suggested gas price.
+func (c *client) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	return c.eth.SuggestGasPrice(ctx)
+}
+
+// EstimateGas estimates the gas needed for a transaction.
+//
+//nolint:gocritic // hugeParam: msg matches go-ethereum's EstimateGas signature
+func (c *client) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	return c.eth.EstimateGas(ctx, msg)
+}
+
+// SendRawTransaction broadcasts a signed transaction and returns the tx hash.
+func (c *client) SendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	raw := signedTxHex
+	if len(raw) >= 2 && raw[:2] == "0x" {
+		raw = raw[2:]
+	}
+
+	txBytes, err := hex.DecodeString(raw)
+	if err != nil {
+		return "", fmt.Errorf("decode signed tx hex: %w", err)
+	}
+
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(txBytes); err != nil {
+		return "", fmt.Errorf("unmarshal signed transaction: %w", err)
+	}
+
+	if err := c.eth.SendTransaction(ctx, tx); err != nil {
+		return "", fmt.Errorf("send transaction: %w", err)
+	}
+
+	return tx.Hash().Hex(), nil
 }
 
 // Close closes the underlying RPC connection.

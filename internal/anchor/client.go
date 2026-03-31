@@ -24,9 +24,15 @@ type Client interface {
 	Info() PrecompileInfo
 	Available() bool
 
+	// Read methods
 	GetRegistry(ctx context.Context, req GetRegistryRequest) (*Registry, error)
 	GetRegistries(ctx context.Context, req GetRegistriesRequest) (*GetRegistriesResponse, error)
 	GetRecords(ctx context.Context, req GetRecordsRequest) (*GetRecordsResponse, error)
+
+	// Write preparation (prepare-sign-submit pattern)
+	PrepareAddRegistry(ctx context.Context, req PrepareAddRegistryRequest) (*UnsignedTransaction, error)
+	PrepareAddRecord(ctx context.Context, req PrepareAddRecordRequest) (*UnsignedTransaction, error)
+	PrepareGrantRole(ctx context.Context, req PrepareGrantRoleRequest) (*UnsignedTransaction, error)
 }
 
 type client struct {

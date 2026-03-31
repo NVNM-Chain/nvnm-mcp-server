@@ -135,6 +135,7 @@ Interface:
 
 ```go
 type Client interface {
+    // Read methods
     ChainID(ctx context.Context) (*big.Int, error)
     LatestBlockNumber(ctx context.Context) (uint64, error)
     GetChainInfo(ctx context.Context) (*ChainInfo, error)
@@ -146,6 +147,13 @@ type Client interface {
     CodeAt(ctx context.Context, address common.Address, block *big.Int) (*CodeResult, error)
     CallContract(ctx context.Context, msg ethereum.CallMsg, block *big.Int) ([]byte, error)
     FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]NormalizedLog, error)
+
+    // Write support methods
+    PendingNonceAt(ctx context.Context, address common.Address) (uint64, error)
+    SuggestGasPrice(ctx context.Context) (*big.Int, error)
+    EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
+    SendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
+
     Close()
 }
 ```
@@ -167,23 +175,19 @@ The anchoring module provides a framework for creating and managing decentralize
 - **Record** -- an anchored data entry with versioning. Multiple records can share the same RecordID but differ by Index (version number). Fields: registry, recordId, index, checksum, checksumAlgo, uri, status, isLatest, timestamp, metadata.
 - **RBAC** -- hierarchical permission system: `admin` (full control) and `editor` (add/update records). Scopes: Record -> Registry -> Global.
 
-Interface (read operations -- implemented):
+Interface:
 
 ```go
 type Client interface {
     Info() PrecompileInfo
     Available() bool
+
+    // Read methods
     GetRegistry(ctx context.Context, req GetRegistryRequest) (*Registry, error)
     GetRegistries(ctx context.Context, req GetRegistriesRequest) (*GetRegistriesResponse, error)
     GetRecords(ctx context.Context, req GetRecordsRequest) (*GetRecordsResponse, error)
-}
-```
 
-Interface (write preparation -- Phase 3):
-
-```go
-type Client interface {
-    // ... read methods above ...
+    // Write preparation (prepare-sign-submit pattern)
     PrepareAddRegistry(ctx context.Context, req PrepareAddRegistryRequest) (*UnsignedTransaction, error)
     PrepareAddRecord(ctx context.Context, req PrepareAddRecordRequest) (*UnsignedTransaction, error)
     PrepareGrantRole(ctx context.Context, req PrepareGrantRoleRequest) (*UnsignedTransaction, error)

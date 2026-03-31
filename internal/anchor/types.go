@@ -84,58 +84,53 @@ type GetRecordsResponse struct {
 	Pagination *PageResponse `json:"pagination,omitempty"`
 }
 
-// --- Write request types ---
+// --- Unsigned transaction (prepare-sign-submit) ---
 
-type AddRegistryRequest struct {
-	Sender      string `json:"sender"`
+// UnsignedTransaction contains a fully constructed but unsigned EVM transaction.
+// The caller signs raw_tx with their private key, then submits via
+// evm_send_raw_transaction. The other fields are provided for transparency
+// so the caller can verify what they're signing.
+type UnsignedTransaction struct {
+	RawTx    string `json:"raw_tx"`    // RLP-encoded unsigned tx (hex, 0x-prefixed)
+	To       string `json:"to"`        // Target address (precompile)
+	Data     string `json:"data"`      // ABI-encoded calldata (hex, 0x-prefixed)
+	Nonce    uint64 `json:"nonce"`     // Sender's pending nonce
+	Gas      uint64 `json:"gas"`       // Estimated gas limit (with buffer)
+	GasPrice string `json:"gas_price"` // Current gas price (wei, decimal string)
+	Value    string `json:"value"`     // Always "0" for precompile calls
+	ChainID  int64  `json:"chain_id"`  // EIP-155 chain ID
+}
+
+// --- Prepare request types (write operations) ---
+
+// PrepareAddRegistryRequest contains the parameters for preparing an
+// addRegistry transaction. From is the sender's EVM address (0x...).
+type PrepareAddRegistryRequest struct {
+	From        string `json:"from"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Metadata    string `json:"metadata,omitempty"`
 }
 
-type AddRegistryResponse struct {
-	RegistryID uint64 `json:"registry_id"`
-	TxHash     string `json:"tx_hash"`
-}
-
-type AddRecordRequest struct {
-	Sender       string `json:"sender"`
+// PrepareAddRecordRequest contains the parameters for preparing an
+// addRecord transaction. From is the sender's EVM address (0x...).
+type PrepareAddRecordRequest struct {
+	From         string `json:"from"`
 	Registry     string `json:"registry"`
 	URI          string `json:"uri"`
 	Checksum     string `json:"checksum"`
 	ChecksumAlgo string `json:"checksum_algo"`
-	Metadata     string `json:"metadata"`
+	Metadata     string `json:"metadata,omitempty"`
 }
 
-type AddRecordResponse struct {
-	TxHash string `json:"tx_hash"`
-}
-
-type UpdateRecordStatusRequest struct {
-	Editor     string `json:"editor"`
-	RegistryID uint64 `json:"registry_id"`
-	RecordID   uint64 `json:"record_id"`
-	Index      uint64 `json:"index"`
-	Status     string `json:"status"`
-}
-
-type UpdateRecordStatusResponse struct {
-	TxHash string `json:"tx_hash"`
-}
-
-type GrantRoleRequest struct {
-	Admin      string `json:"admin"`
-	Address    string `json:"address"`
+// PrepareGrantRoleRequest contains the parameters for preparing a
+// grantRole transaction. From is the admin's EVM address (0x...).
+type PrepareGrantRoleRequest struct {
+	From       string `json:"from"`
 	RegistryID uint64 `json:"registry_id"`
 	Checksum   string `json:"checksum,omitempty"`
-	Role       string `json:"role"`
-}
-
-type RevokeRoleRequest struct {
-	Admin      string `json:"admin"`
-	Address    string `json:"address"`
-	RegistryID uint64 `json:"registry_id"`
-	Checksum   string `json:"checksum,omitempty"`
-	Role       string `json:"role"`
+	Account    string `json:"account"` // Address receiving the role (0x...)
+	Role       string `json:"role"`    // "admin" or "editor"
 }
 
 // PrecompileInfo describes the anchoring precompile configuration.

@@ -16,7 +16,7 @@ import (
 
 const (
 	serverName    = "inveniam-evm"
-	serverVersion = "0.2.0"
+	serverVersion = "0.3.0"
 )
 
 // Server wraps the MCP server with its dependencies.
@@ -26,7 +26,14 @@ type Server struct {
 }
 
 // NewServer creates a new MCP server and registers all tools.
-func NewServer(evmClient evm.Client, anchorClient anchor.Client, logger *slog.Logger) *Server {
+// When enableWriteTools is true, prepare-sign-submit tools and
+// evm_send_raw_transaction are registered.
+func NewServer(
+	evmClient evm.Client,
+	anchorClient anchor.Client,
+	enableWriteTools bool,
+	logger *slog.Logger,
+) *Server {
 	mcpSrv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    serverName,
@@ -42,6 +49,12 @@ func NewServer(evmClient evm.Client, anchorClient anchor.Client, logger *slog.Lo
 
 	registerEVMTools(mcpSrv, evmClient, logger)
 	registerAnchorTools(mcpSrv, anchorClient, logger)
+
+	if enableWriteTools {
+		registerEVMWriteTools(mcpSrv, evmClient, logger)
+		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
+		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
+	}
 
 	return s
 }

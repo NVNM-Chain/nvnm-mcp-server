@@ -6,7 +6,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phase 2 complete, Phase 3 in design.** Generic EVM tools and anchor read tools are fully operational against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json` and queries (`registries`, `records`) return decoded, normalized results. Phase 3 (write support) architecture is finalized: the server constructs unsigned transactions but never holds private keys -- see [Write Architecture](#write-architecture-phase-3).
+**Phase 3 complete.** Generic EVM tools, anchor read tools, and write support (prepare-sign-submit) are fully implemented against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). End-to-end testnet write verification is pending a funded wallet.
 
 ## Prerequisites
 
@@ -109,9 +109,9 @@ All configuration is via environment variables. No config files required.
 | `anchor_get_registries` | Paginated list of registries, with optional filters |
 | `anchor_get_records` | Flexible record query: by version, by checksum, by registry, with pagination |
 
-### Phase 3: Anchor Writes (planned)
+### Phase 3: Anchor Writes
 
-Write tools follow a **prepare-sign-submit** pattern. The MCP server constructs complete unsigned transactions but **never holds private keys**. See [Write Architecture](#write-architecture-phase-3) below.
+Write tools follow a **prepare-sign-submit** pattern. The MCP server constructs complete unsigned transactions but **never holds private keys**. Requires `ENABLE_WRITE_TOOLS=true`. See [Write Architecture](#write-architecture-phase-3) below.
 
 | Tool | Description |
 |---|---|
