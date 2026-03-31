@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -13,7 +12,7 @@ import (
 func registerAnchorWriteTools(
 	srv *mcp.Server,
 	anchorClient anchor.Client,
-	logger *slog.Logger,
+	_ *slog.Logger,
 ) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_add_registry",
@@ -21,7 +20,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned addRegistry transaction. " +
 			"Returns a complete unsigned transaction for the caller to sign " +
 			"and submit via evm_send_raw_transaction.",
-	}, makePrepareAddRegistryHandler(anchorClient, logger))
+	}, makePrepareAddRegistryHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_add_record",
@@ -29,7 +28,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned addRecord transaction to anchor " +
 			"a document checksum and URI in a registry. Returns a complete " +
 			"unsigned transaction for the caller to sign and submit.",
-	}, makePrepareAddRecordHandler(anchorClient, logger))
+	}, makePrepareAddRecordHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_grant_role",
@@ -37,7 +36,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned grantRole transaction to assign " +
 			"admin or editor permissions on a registry. Returns a complete " +
 			"unsigned transaction for the caller to sign and submit.",
-	}, makePrepareGrantRoleHandler(anchorClient, logger))
+	}, makePrepareGrantRoleHandler(anchorClient))
 }
 
 // --- Input types ---
@@ -70,17 +69,11 @@ type prepareGrantRoleInput struct {
 // --- Handlers ---
 
 func makePrepareAddRegistryHandler(
-	c anchor.Client, logger *slog.Logger,
+	c anchor.Client,
 ) mcp.ToolHandlerFor[prepareAddRegistryInput, anchor.UnsignedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRegistryInput,
 	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("anchor_prepare_add_registry",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		tx, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
 			From:        input.From,
 			Name:        input.Name,
@@ -95,17 +88,11 @@ func makePrepareAddRegistryHandler(
 }
 
 func makePrepareAddRecordHandler(
-	c anchor.Client, logger *slog.Logger,
+	c anchor.Client,
 ) mcp.ToolHandlerFor[prepareAddRecordInput, anchor.UnsignedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRecordInput,
 	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("anchor_prepare_add_record",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		tx, err := c.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
 			From:         input.From,
 			Registry:     input.Registry,
@@ -123,17 +110,11 @@ func makePrepareAddRecordHandler(
 }
 
 func makePrepareGrantRoleHandler(
-	c anchor.Client, logger *slog.Logger,
+	c anchor.Client,
 ) mcp.ToolHandlerFor[prepareGrantRoleInput, anchor.UnsignedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareGrantRoleInput,
 	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("anchor_prepare_grant_role",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		tx, err := c.PrepareGrantRole(ctx, anchor.PrepareGrantRoleRequest{
 			From:       input.From,
 			RegistryID: input.RegistryID,

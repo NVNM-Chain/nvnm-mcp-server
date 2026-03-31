@@ -241,7 +241,7 @@ func TestLoadABI_RawArray(t *testing.T) {
 
 func TestLoadABI_WrappedObject(t *testing.T) {
 	abiPath := testABIPath(t)
-	raw, err := os.ReadFile(abiPath) //nolint:gosec // test fixture, not user input
+	raw, err := os.ReadFile(abiPath)
 	if err != nil {
 		t.Fatal(err)
 	}

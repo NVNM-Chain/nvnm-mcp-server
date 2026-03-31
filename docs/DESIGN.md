@@ -79,8 +79,9 @@ cmd/inveniam-mcp-server/main.go
     ├── internal/logging     (slog wrapper, redaction helpers)
     ├── internal/telemetry   (OTel providers, MCP middleware, health server, metrics)
     ├── internal/evm         (ethclient wrapper, normalized types, tracing wrapper)
-    ├── internal/anchor      (anchor adapter, prepare-sign-submit)
-    └── internal/mcp         (MCP server, tool handlers)
+    ├── internal/anchor      (anchor adapter, prepare-sign-submit, address validation)
+    ├── internal/mcp         (MCP server, tool handlers)
+    └── internal/version     (canonical version constant)
             │
             ├── internal/evm
             ├── internal/anchor
@@ -116,13 +117,12 @@ Environment-based configuration loading and validation.
 
 #### `internal/logging`
 
-Wrapper over `log/slog` (Go stdlib) with OTel bridge and redaction.
+Wrapper over `log/slog` (Go stdlib) with redaction utilities.
 
 - `New(level string) *slog.Logger` -- creates a configured JSON logger
-- `NewWithTraceCorrelation(level, serviceName)` -- JSON logger with OTel trace/span ID injection
 - `NewText(level string)` -- text logger for local development
 - Redaction helpers: `SafeAddr` (truncate addresses), `SafeURL` (hostname only), `SafeTxData` (length only)
-- Fanout handler sends logs to both JSON output and OTel bridge
+- Fanout handler utility for duplicating log records to multiple handlers
 
 #### `internal/errors`
 
@@ -519,7 +519,7 @@ Timeout: 5 seconds for telemetry flush and health server shutdown.
 |---|---|---|
 | MCP SDK | Official `go-sdk` v1.4.1 | Maintained by Google/Anthropic, typed tool binding, both transports |
 | EVM client | `go-ethereum/ethclient` | Industry standard, well-tested, directly wraps JSON-RPC |
-| Logging | `log/slog` + OTel bridge | Structured, zero-dep base, trace correlation via otelslog bridge |
+| Logging | `log/slog` + redaction | Structured, zero-dep base, safe redaction utilities |
 | Telemetry | OpenTelemetry SDK | Vendor-agnostic; native Prometheus + OTLP export; follows OTel env var conventions |
 | Health checks | Separate `:9090` server | Decoupled from MCP transport; compatible with K8s, ALB, Azure probes |
 | RPC tracing | Decorator pattern | `TracingClient` wraps `Client` interface; no changes to core client code |

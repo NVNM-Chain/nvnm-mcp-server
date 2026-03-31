@@ -21,9 +21,14 @@ func clearEnv(t *testing.T) {
 		"MCP_TRANSPORT",
 		"MCP_HTTP_ADDR",
 		"ENABLE_WRITE_TOOLS",
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"OTEL_SERVICE_NAME",
+		"ENABLE_PROMETHEUS",
+		"ENABLE_STDOUT_TELEMETRY",
+		"METRICS_ADDR",
 	} {
 		t.Setenv(key, "")
-		os.Unsetenv(key) //nolint:errcheck // test cleanup
+		os.Unsetenv(key)
 	}
 }
 
@@ -232,7 +237,7 @@ func TestEnvOrDefault(t *testing.T) {
 			if tc.envVal != "" {
 				t.Setenv(tc.key, tc.envVal)
 			} else {
-				os.Unsetenv(tc.key) //nolint:errcheck // test cleanup
+				os.Unsetenv(tc.key)
 			}
 
 			got := envOrDefault(tc.key, tc.fallback)
@@ -241,5 +246,63 @@ func TestEnvOrDefault(t *testing.T) {
 					tc.key, tc.fallback, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoad_TelemetryDefaults(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.OTELEndpoint != "" {
+		t.Errorf("OTELEndpoint = %q, want empty (disabled by default)", cfg.OTELEndpoint)
+	}
+	if cfg.OTELServiceName != "inveniam-mcp-server" {
+		t.Errorf("OTELServiceName = %q, want %q", cfg.OTELServiceName, "inveniam-mcp-server")
+	}
+	if !cfg.EnablePrometheus {
+		t.Error("EnablePrometheus should default to true")
+	}
+	if cfg.EnableStdoutTel {
+		t.Error("EnableStdoutTel should default to false")
+	}
+	if cfg.MetricsAddr != ":9090" {
+		t.Errorf("MetricsAddr = %q, want %q", cfg.MetricsAddr, ":9090")
+	}
+}
+
+func TestLoad_TelemetryOverrides(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+	t.Setenv("OTEL_SERVICE_NAME", "custom-service")
+	t.Setenv("ENABLE_PROMETHEUS", "false")
+	t.Setenv("ENABLE_STDOUT_TELEMETRY", "true")
+	t.Setenv("METRICS_ADDR", ":7070")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.OTELEndpoint != "localhost:4317" {
+		t.Errorf("OTELEndpoint = %q, want %q", cfg.OTELEndpoint, "localhost:4317")
+	}
+	if cfg.OTELServiceName != "custom-service" {
+		t.Errorf("OTELServiceName = %q, want %q", cfg.OTELServiceName, "custom-service")
+	}
+	if cfg.EnablePrometheus {
+		t.Error("EnablePrometheus should be false when set to 'false'")
+	}
+	if !cfg.EnableStdoutTel {
+		t.Error("EnableStdoutTel should be true when set to 'true'")
+	}
+	if cfg.MetricsAddr != ":7070" {
+		t.Errorf("MetricsAddr = %q, want %q", cfg.MetricsAddr, ":7070")
 	}
 }

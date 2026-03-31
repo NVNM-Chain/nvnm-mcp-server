@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -15,7 +14,7 @@ import (
 func registerAnchorTools(
 	srv *mcp.Server,
 	anchorClient anchor.Client,
-	logger *slog.Logger,
+	_ *slog.Logger,
 ) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_info",
@@ -29,14 +28,14 @@ func registerAnchorTools(
 		Title: "Get Registry",
 		Description: "Fetch a single anchoring registry by its numeric ID or unique name. " +
 			"A registry is a logical container for anchored records.",
-	}, makeGetRegistryHandler(anchorClient, logger))
+	}, makeGetRegistryHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_get_registries",
 		Title: "List Registries",
 		Description: "Fetch a paginated list of anchoring registries. " +
 			"Optionally filter by registry_id or name.",
-	}, makeGetRegistriesHandler(anchorClient, logger))
+	}, makeGetRegistriesHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_get_records",
@@ -47,7 +46,7 @@ func registerAnchorTools(
 			"(3) content hash via registry_id + checksum, " +
 			"(4) all latest records in a registry via registry_id, " +
 			"(5) all records matching a checksum across all registries.",
-	}, makeGetRecordsHandler(anchorClient, logger))
+	}, makeGetRecordsHandler(anchorClient))
 }
 
 // --- Input types ---
@@ -89,17 +88,11 @@ func makeAnchorInfoHandler(
 }
 
 func makeGetRegistryHandler(
-	c anchor.Client, logger *slog.Logger,
+	c anchor.Client,
 ) mcp.ToolHandlerFor[getRegistryInput, anchor.Registry] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRegistryInput,
 	) (*mcp.CallToolResult, anchor.Registry, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("anchor_get_registry",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		if input.ID == nil && input.Name == nil {
 			return nil, anchor.Registry{},
 				fmt.Errorf("provide id or name: %w", apperrors.ErrMissingRequired)
@@ -117,17 +110,11 @@ func makeGetRegistryHandler(
 }
 
 func makeGetRegistriesHandler(
-	c anchor.Client, logger *slog.Logger,
+	c anchor.Client,
 ) mcp.ToolHandlerFor[getRegistriesInput, anchor.GetRegistriesResponse] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRegistriesInput,
 	) (*mcp.CallToolResult, anchor.GetRegistriesResponse, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("anchor_get_registries",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		r := anchor.GetRegistriesRequest{
 			RegistryID: input.RegistryID,
 			Name:       input.Name,
@@ -151,17 +138,11 @@ func makeGetRegistriesHandler(
 }
 
 func makeGetRecordsHandler(
-	c anchor.Client, logger *slog.Logger,
+	c anchor.Client,
 ) mcp.ToolHandlerFor[getRecordsInput, anchor.GetRecordsResponse] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRecordsInput,
 	) (*mcp.CallToolResult, anchor.GetRecordsResponse, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("anchor_get_records",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		r := anchor.GetRecordsRequest{
 			RegistryID: input.RegistryID,
 			RecordID:   input.RecordID,

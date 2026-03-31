@@ -19,8 +19,10 @@ const evmTracerName = "inveniam-mcp-server/evm"
 
 // TracingMetrics holds the metric instruments used by the tracing wrapper.
 type TracingMetrics struct {
+	// RPCDuration records the latency of each upstream EVM RPC call.
 	RPCDuration metric.Float64Histogram
-	RPCErrors   metric.Int64Counter
+	// RPCErrors counts upstream EVM RPC calls that returned an error.
+	RPCErrors metric.Int64Counter
 }
 
 // NewTracingClient wraps an existing Client with OpenTelemetry spans and

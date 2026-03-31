@@ -33,6 +33,9 @@ linters:
     # Performance
     - prealloc
 
+    # Nolint directives
+    - nolintlint
+
   settings:
     errcheck:
       check-type-assertions: true

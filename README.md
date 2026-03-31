@@ -19,11 +19,11 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Observability phase complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), and full observability instrumentation are implemented and tested against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+**Code review complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), and full observability instrumentation are implemented and tested against the live Inveniam L2 testnet. A comprehensive 13-point code review has been applied -- see the implementation plan for details. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.26+
 - Access to the Inveniam EVM RPC endpoint
 - (Optional) `golangci-lint` for linting
 - (Optional) `pre-commit` for git hooks
@@ -246,9 +246,10 @@ internal/
   logging/                   slog-based structured logging + redaction
   errors/                    Shared sentinel errors
   evm/                       Generic EVM RPC client layer + tracing wrapper
-  anchor/                    Inveniam anchor adapter
+  anchor/                    Inveniam anchor adapter (with address validation)
   mcp/                       MCP tool registration and handlers
   telemetry/                 OTel providers, MCP middleware, health server, metrics
+  version/                   Canonical version constant (single source of truth)
 abi/
   anchoring.json             Anchor precompile ABI
 docs/

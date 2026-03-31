@@ -116,6 +116,9 @@ func (c *client) PrepareGrantRole(
 		return nil, fmt.Errorf("role is required: %w", apperrors.ErrMissingRequired)
 	}
 
+	if !common.IsHexAddress(req.Account) {
+		return nil, fmt.Errorf("account %q: %w", req.Account, apperrors.ErrInvalidAddress)
+	}
 	account := common.HexToAddress(req.Account)
 	calldata, err := c.parsedABI.Pack(
 		"grantRole", req.RegistryID, req.Checksum, account, req.Role,
@@ -134,6 +137,9 @@ func (c *client) buildUnsignedTx(
 	fromHex string,
 	calldata []byte,
 ) (*UnsignedTransaction, error) {
+	if !common.IsHexAddress(fromHex) {
+		return nil, fmt.Errorf("from %q: %w", fromHex, apperrors.ErrInvalidAddress)
+	}
 	from := common.HexToAddress(fromHex)
 
 	nonce, err := c.evmClient.PendingNonceAt(ctx, from)
@@ -158,7 +164,6 @@ func (c *client) buildUnsignedTx(
 
 	gasLimit := applyGasBuffer(gasEstimate)
 
-	chainID := big.NewInt(c.chainID)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    nonce,
 		To:       &c.address,
@@ -167,10 +172,6 @@ func (c *client) buildUnsignedTx(
 		GasPrice: gasPrice,
 		Data:     calldata,
 	})
-
-	signer := types.NewEIP155Signer(chainID)
-	rawBytes := signer.Hash(tx).Bytes()
-	_ = rawBytes // signer hash is for signing; we serialize the full tx for the caller
 
 	txBytes, err := tx.MarshalBinary()
 	if err != nil {

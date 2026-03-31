@@ -46,7 +46,7 @@ repos:
         args: [-d, relaxed]
 
 default_language_version:
-  golang: "1.24.1"
+  golang: "1.26.1"
 
 exclude: |
   (?x)^(

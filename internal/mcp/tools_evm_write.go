@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -12,14 +11,14 @@ import (
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
 
-func registerEVMWriteTools(srv *mcp.Server, evmClient evm.Client, logger *slog.Logger) {
+func registerEVMWriteTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_send_raw_transaction",
 		Title: "Send Raw Transaction",
 		Description: "Broadcast a signed transaction to the network. " +
 			"Input is the signed transaction as a hex string (0x-prefixed). " +
 			"Returns the transaction hash.",
-	}, makeSendRawTxHandler(evmClient, logger))
+	}, makeSendRawTxHandler(evmClient))
 }
 
 // --- Input/output types ---
@@ -35,17 +34,11 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input sendRawTxInput,
 	) (*mcp.CallToolResult, sendRawTxOutput, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_send_raw_transaction",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		if input.SignedTxHex == "" {
 			return nil, sendRawTxOutput{},
 				fmt.Errorf(

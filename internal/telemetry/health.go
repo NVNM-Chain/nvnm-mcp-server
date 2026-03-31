@@ -8,12 +8,11 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/inveniam/nvnm-mcp-server/internal/version"
 )
 
-const (
-	serverVersion          = "0.4.0"
-	readinessCheckInterval = 30 * time.Second
-)
+const readinessCheckInterval = 30 * time.Second
 
 // ReadinessChecker tests whether a downstream dependency is reachable.
 type ReadinessChecker interface {
@@ -101,25 +100,30 @@ func (h *HealthServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{
 		"status":  "ok",
-		"version": serverVersion,
+		"version": version.Version,
 	})
+}
+
+type readinessResponse struct {
+	Status string            `json:"status"`
+	Checks map[string]string `json:"checks"`
 }
 
 func (h *HealthServer) handleReady(w http.ResponseWriter, _ *http.Request) {
 	h.check.mu.RLock()
 	ready := h.check.ready
-	status := make(map[string]string, len(h.check.status))
+	checks := make(map[string]string, len(h.check.status))
 	for k, v := range h.check.status {
-		status[k] = v
+		checks[k] = v
 	}
 	h.check.mu.RUnlock()
 
-	resp := map[string]interface{}{
-		"status": "ready",
-		"checks": status,
+	resp := readinessResponse{
+		Status: "ready",
+		Checks: checks,
 	}
 	if !ready {
-		resp["status"] = "not_ready"
+		resp.Status = "not_ready"
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 

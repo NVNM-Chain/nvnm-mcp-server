@@ -37,6 +37,7 @@ type Client interface {
 	// Ping checks that the RPC connection is alive (used by readiness probes).
 	Ping(ctx context.Context) error
 
+	// Close releases the underlying ethclient connection.
 	Close()
 }
 

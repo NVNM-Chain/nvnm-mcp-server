@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -17,13 +16,13 @@ import (
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
 
-func registerEVMTools(srv *mcp.Server, evmClient evm.Client, logger *slog.Logger) {
+func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_chain_id",
 		Title: "Get Chain ID",
 		Description: "Returns the chain ID and latest block number " +
 			"for the connected EVM network.",
-	}, makeChainIDHandler(evmClient, logger))
+	}, makeChainIDHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_block",
@@ -31,42 +30,42 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, logger *slog.Logger
 		Description: "Returns a block by number or hash. " +
 			"Use block_number for numeric lookup, block_hash for hash lookup. " +
 			"Set full_transactions to true to include transaction details.",
-	}, makeGetBlockHandler(evmClient, logger))
+	}, makeGetBlockHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_transaction",
 		Title: "Get Transaction",
 		Description: "Returns transaction details by hash, " +
 			"including block inclusion info if mined.",
-	}, makeGetTransactionHandler(evmClient, logger))
+	}, makeGetTransactionHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_transaction_receipt",
 		Title: "Get Transaction Receipt",
 		Description: "Returns the receipt for a mined transaction, " +
 			"including status, gas used, logs, and created contract address.",
-	}, makeGetReceiptHandler(evmClient, logger))
+	}, makeGetReceiptHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_balance",
 		Title: "Get Balance",
 		Description: "Returns the balance of an address in both wei and ether. " +
 			"Optionally specify a block number.",
-	}, makeGetBalanceHandler(evmClient, logger))
+	}, makeGetBalanceHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_code",
 		Title: "Get Code",
 		Description: "Returns the contract bytecode at an address, " +
 			"and whether a contract is deployed there.",
-	}, makeGetCodeHandler(evmClient, logger))
+	}, makeGetCodeHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_logs",
 		Title: "Get Logs",
 		Description: "Returns event logs matching a filter. " +
 			"Specify address(es), block range, and/or topics.",
-	}, makeGetLogsHandler(evmClient, logger))
+	}, makeGetLogsHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_call_contract",
@@ -74,7 +73,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, logger *slog.Logger
 		Description: "Execute a read-only contract call. " +
 			"Provide the contract address and hex-encoded calldata. " +
 			"Returns raw hex output.",
-	}, makeCallContractHandler(evmClient, logger))
+	}, makeCallContractHandler(evmClient))
 }
 
 // --- Input types ---
@@ -117,15 +116,12 @@ type callContractInput struct {
 // --- Handlers ---
 
 func makeChainIDHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[chainIDInput, evm.ChainInfo] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, _ chainIDInput,
 	) (*mcp.CallToolResult, evm.ChainInfo, error) {
-		start := time.Now()
 		info, err := c.GetChainInfo(ctx)
-		logger.Debug("evm_get_chain_id",
-			slog.Duration("duration", time.Since(start)))
 		if err != nil {
 			return nil, evm.ChainInfo{},
 				fmt.Errorf("failed to get chain info: %w", err)
@@ -135,17 +131,11 @@ func makeChainIDHandler(
 }
 
 func makeGetBlockHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[getBlockInput, evm.NormalizedBlock] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBlockInput,
 	) (*mcp.CallToolResult, evm.NormalizedBlock, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_get_block",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		if input.BlockHash != nil {
 			hash, err := parseHash(*input.BlockHash)
 			if err != nil {
@@ -174,17 +164,11 @@ func makeGetBlockHandler(
 }
 
 func makeGetTransactionHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[txHashInput, evm.NormalizedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input txHashInput,
 	) (*mcp.CallToolResult, evm.NormalizedTransaction, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_get_transaction",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		hash, err := parseHash(input.TxHash)
 		if err != nil {
 			return nil, evm.NormalizedTransaction{},
@@ -200,17 +184,11 @@ func makeGetTransactionHandler(
 }
 
 func makeGetReceiptHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[txHashInput, evm.NormalizedReceipt] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input txHashInput,
 	) (*mcp.CallToolResult, evm.NormalizedReceipt, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_get_transaction_receipt",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		hash, err := parseHash(input.TxHash)
 		if err != nil {
 			return nil, evm.NormalizedReceipt{},
@@ -226,17 +204,11 @@ func makeGetReceiptHandler(
 }
 
 func makeGetBalanceHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[getBalanceInput, evm.NormalizedBalance] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBalanceInput,
 	) (*mcp.CallToolResult, evm.NormalizedBalance, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_get_balance",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		addr, err := parseAddress(input.Address)
 		if err != nil {
 			return nil, evm.NormalizedBalance{}, err
@@ -255,17 +227,11 @@ func makeGetBalanceHandler(
 }
 
 func makeGetCodeHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[getCodeInput, evm.CodeResult] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getCodeInput,
 	) (*mcp.CallToolResult, evm.CodeResult, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_get_code",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		addr, err := parseAddress(input.Address)
 		if err != nil {
 			return nil, evm.CodeResult{}, err
@@ -284,17 +250,11 @@ func makeGetCodeHandler(
 }
 
 func makeGetLogsHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[getLogsInput, []evm.NormalizedLog] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getLogsInput,
 	) (*mcp.CallToolResult, []evm.NormalizedLog, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_get_logs",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		q := ethereum.FilterQuery{}
 		if input.Address != nil {
 			addr, err := parseAddress(*input.Address)
@@ -335,17 +295,11 @@ type callContractOutput struct {
 }
 
 func makeCallContractHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client,
 ) mcp.ToolHandlerFor[callContractInput, callContractOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input callContractInput,
 	) (*mcp.CallToolResult, callContractOutput, error) {
-		start := time.Now()
-		defer func() {
-			logger.Debug("evm_call_contract",
-				slog.Duration("duration", time.Since(start)))
-		}()
-
 		toAddr, err := parseAddress(input.To)
 		if err != nil {
 			return nil, callContractOutput{}, err

@@ -24,11 +24,16 @@ import (
 
 // Config holds telemetry configuration loaded from environment variables.
 type Config struct {
-	ServiceName      string
-	ServiceVersion   string
-	OTLPEndpoint     string
+	// ServiceName identifies the service in spans, metrics, and resource labels.
+	ServiceName string
+	// ServiceVersion is the semantic version reported to the OTel resource.
+	ServiceVersion string
+	// OTLPEndpoint is the gRPC endpoint for the OTLP collector (empty = disabled).
+	OTLPEndpoint string
+	// EnablePrometheus enables the /metrics scrape endpoint.
 	EnablePrometheus bool
-	EnableStdout     bool
+	// EnableStdout writes spans and metrics to stdout (useful for local debugging).
+	EnableStdout bool
 }
 
 // Telemetry manages the OpenTelemetry TracerProvider, MeterProvider,
@@ -37,8 +42,10 @@ type Telemetry struct {
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  *sdkmetric.MeterProvider
 	promHandler    http.Handler
-	Metrics        *Metrics
-	logger         *slog.Logger
+	// Metrics exposes the application-level metric instruments for use by
+	// middleware and tracing wrappers.
+	Metrics *Metrics
+	logger  *slog.Logger
 }
 
 // New initializes OpenTelemetry providers and exporters.

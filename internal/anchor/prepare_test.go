@@ -181,7 +181,6 @@ func TestPrepareAddRegistry_BuildsUnsignedTx(t *testing.T) {
 		suggestGasFn: func(_ context.Context) (*big.Int, error) {
 			return big.NewInt(5000000000), nil
 		},
-		//nolint:gocritic // hugeParam: msg matches evm.Client interface
 		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
 			return 100000, nil
 		},

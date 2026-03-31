@@ -12,12 +12,10 @@ import (
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/inveniam/nvnm-mcp-server/internal/version"
 )
 
-const (
-	serverName    = "inveniam-evm"
-	serverVersion = "0.4.0"
-)
+const serverName = "inveniam-evm"
 
 // Server wraps the MCP server with its dependencies.
 type Server struct {
@@ -39,7 +37,7 @@ func NewServer(
 	mcpSrv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    serverName,
-			Version: serverVersion,
+			Version: version.Version,
 		},
 		nil,
 	)
@@ -99,7 +97,9 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	select {
 	case <-ctx.Done():
 		s.logger.Info("shutting down HTTP server")
-		return srv.Close()
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer drainCancel()
+		return srv.Shutdown(drainCtx)
 	case err := <-errCh:
 		return err
 	}

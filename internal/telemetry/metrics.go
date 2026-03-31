@@ -11,12 +11,18 @@ const meterName = "inveniam-mcp-server"
 
 // Metrics holds all application-level metric instruments.
 type Metrics struct {
+	// ToolCallDuration records the latency of each MCP tool call in seconds.
 	ToolCallDuration metric.Float64Histogram
-	ToolCallCount    metric.Int64Counter
-	ToolErrorCount   metric.Int64Counter
-	ActiveRequests   metric.Int64UpDownCounter
-	RPCDuration      metric.Float64Histogram
-	RPCErrorCount    metric.Int64Counter
+	// ToolCallCount counts total MCP tool calls, keyed by name and status.
+	ToolCallCount metric.Int64Counter
+	// ToolErrorCount counts MCP tool calls that returned an error.
+	ToolErrorCount metric.Int64Counter
+	// ActiveRequests tracks the number of in-flight MCP requests.
+	ActiveRequests metric.Int64UpDownCounter
+	// RPCDuration records the latency of upstream EVM RPC calls in seconds.
+	RPCDuration metric.Float64Histogram
+	// RPCErrorCount counts upstream EVM RPC calls that returned an error.
+	RPCErrorCount metric.Int64Counter
 }
 
 // NewMetrics creates and registers all metric instruments with the provider.

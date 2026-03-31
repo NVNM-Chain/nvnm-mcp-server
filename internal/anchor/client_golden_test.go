@@ -34,7 +34,7 @@ func assertGolden(t *testing.T, name string, v interface{}) {
 		return
 	}
 
-	want, err := os.ReadFile(path) //nolint:gosec // test fixture path
+	want, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read golden %s: %v (run with -update to create)", path, err)
 	}

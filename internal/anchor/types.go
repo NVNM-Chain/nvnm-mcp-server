@@ -42,23 +42,27 @@ type PageRequest struct {
 	Limit  uint64 `json:"limit,omitempty"`
 }
 
+// PageResponse holds the total count returned from paginated precompile queries.
 type PageResponse struct {
 	Total uint64 `json:"total"`
 }
 
 // --- Query request/response types ---
 
+// GetRegistryRequest specifies filters for fetching a single registry.
 type GetRegistryRequest struct {
 	ID   *uint64 `json:"id,omitempty"`
 	Name *string `json:"name,omitempty"`
 }
 
+// GetRegistriesRequest specifies filters and pagination for listing registries.
 type GetRegistriesRequest struct {
 	RegistryID *uint64      `json:"registry_id,omitempty"`
 	Name       *string      `json:"name,omitempty"`
 	Pagination *PageRequest `json:"pagination,omitempty"`
 }
 
+// GetRegistriesResponse contains the registries and pagination info.
 type GetRegistriesResponse struct {
 	Registries []Registry    `json:"registries"`
 	Pagination *PageResponse `json:"pagination,omitempty"`
@@ -70,6 +74,7 @@ type GetRegistriesResponse struct {
 //   - Latest by content hash: (RegistryID, Checksum)
 //   - All latest in a registry: (RegistryID) with pagination
 //   - All matching a checksum across registries: (Checksum)
+//   - Filter by registry name: (Registry)
 type GetRecordsRequest struct {
 	RegistryID *uint64      `json:"registry_id,omitempty"`
 	RecordID   *uint64      `json:"record_id,omitempty"`
@@ -79,6 +84,7 @@ type GetRecordsRequest struct {
 	Pagination *PageRequest `json:"pagination,omitempty"`
 }
 
+// GetRecordsResponse contains the matched records and pagination info.
 type GetRecordsResponse struct {
 	Records    []Record      `json:"records"`
 	Pagination *PageResponse `json:"pagination,omitempty"`
