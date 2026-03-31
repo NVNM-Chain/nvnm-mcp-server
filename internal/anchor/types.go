@@ -120,6 +120,7 @@ type PrepareAddRecordRequest struct {
 	URI          string `json:"uri"`
 	Checksum     string `json:"checksum"`
 	ChecksumAlgo string `json:"checksum_algo"`
+	Status       string `json:"status,omitempty"`
 	Metadata     string `json:"metadata,omitempty"`
 }
 

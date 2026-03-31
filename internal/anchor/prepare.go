@@ -72,6 +72,11 @@ func (c *client) PrepareAddRecord(
 		IsLatest     bool
 	}
 
+	status := req.Status
+	if status == "" {
+		status = "Active"
+	}
+
 	record := recordTuple{
 		Registry:     req.Registry,
 		Uri:          req.URI,
@@ -79,7 +84,7 @@ func (c *client) PrepareAddRecord(
 		ChecksumAlgo: req.ChecksumAlgo,
 		Metadata:     req.Metadata,
 		Timestamp:    "",
-		Status:       "",
+		Status:       status,
 		RecordId:     0,
 		Index:        0,
 		IsLatest:     false,

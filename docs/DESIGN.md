@@ -2,9 +2,24 @@
 
 ## 1. System Context
 
-The Inveniam EVM MCP Server sits between MCP-capable clients (LLMs, developer tools, agents) and the Inveniam EVM chain. It translates high-level tool calls into EVM JSON-RPC requests, normalizes the responses, and returns structured, typed JSON.
+The Inveniam EVM MCP Server sits between MCP-capable clients (LLMs, developer tools, agents) and the Inveniam EVM chain (NVNM). It translates high-level tool calls into EVM JSON-RPC requests, normalizes the responses, and returns structured, typed JSON.
 
 For write operations, the server constructs unsigned transactions but never holds private keys. Signing is the caller's responsibility.
+
+### Target Chain
+
+NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set through Interchain Security (ICS). It is purpose-built for document anchoring and provenance verification.
+
+| Property | Value |
+|---|---|
+| Network | NVNM Chain (Inveniam L2) |
+| Chain ID | `58887` (`0xe607`) |
+| Cosmos chain ID | `manveniam-1` |
+| Native currency | mUSD (MANTRA US Dollars) -- pays gas fees |
+| EVM RPC | `https://evm.inveniam.mantrachain.io` |
+| Cosmos RPC | `https://rpc.inveniam.mantrachain.io` |
+| Explorer | `https://explorer.inveniam.mantrachain.io/` |
+| Anchor precompile | `0x0000000000000000000000000000000000000A00` |
 
 ```
                                           ┌─────────────────────┐

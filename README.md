@@ -1,12 +1,25 @@
 # Inveniam EVM MCP Server
 
-A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the Inveniam EVM chain through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
+A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the Inveniam EVM chain (NVNM) through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
 
 This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-value MCP tools with normalized responses designed for both human and LLM consumers.
 
+## Target Chain
+
+| Property | Value |
+|---|---|
+| **Network** | NVNM Chain -- Inveniam L2 (MANTRA-secured consumer chain) |
+| **Chain ID** | `58887` (`0xe607`) |
+| **Cosmos chain ID** | `manveniam-1` |
+| **Native currency** | mUSD (MANTRA US Dollars) -- used for gas fees |
+| **EVM RPC** | `https://evm.inveniam.mantrachain.io` |
+| **Cosmos RPC** | `https://rpc.inveniam.mantrachain.io` |
+| **Explorer** | `https://explorer.inveniam.mantrachain.io/` |
+| **Anchor precompile** | `0x0000000000000000000000000000000000000A00` |
+
 ## Status
 
-**Phase 3 complete.** Generic EVM tools, anchor read tools, and write support (prepare-sign-submit) are fully implemented against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). End-to-end testnet write verification is pending a funded wallet.
+**Phase 3 complete.** Generic EVM tools, anchor read tools, and write support (prepare-sign-submit) are fully implemented and end-to-end tested against the live Inveniam L2 testnet. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3).
 
 ## Prerequisites
 
@@ -70,7 +83,7 @@ All configuration is via environment variables. No config files required.
 | Variable | Description |
 |---|---|
 | `INVENIAM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `INVENIAM_CHAIN_ID` | Expected chain ID (e.g. `58887`) |
+| `INVENIAM_CHAIN_ID` | Expected chain ID (`58887` for NVNM testnet) |
 
 ### Optional
 

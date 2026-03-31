@@ -55,6 +55,7 @@ type prepareAddRecordInput struct {
 	URI          string `json:"uri" jsonschema:"Document URI"`
 	Checksum     string `json:"checksum" jsonschema:"Document checksum hash"`
 	ChecksumAlgo string `json:"checksum_algo,omitempty" jsonschema:"Hash algorithm (e.g. sha256)"`
+	Status       string `json:"status,omitempty" jsonschema:"Record status (default: Active)"`
 	Metadata     string `json:"metadata,omitempty" jsonschema:"Optional JSON metadata"`
 }
 
@@ -111,6 +112,7 @@ func makePrepareAddRecordHandler(
 			URI:          input.URI,
 			Checksum:     input.Checksum,
 			ChecksumAlgo: input.ChecksumAlgo,
+			Status:       input.Status,
 			Metadata:     input.Metadata,
 		})
 		if err != nil {
