@@ -1,0 +1,108 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Error detection
+    - errcheck
+    - errname
+    - errorlint
+    - err113
+
+    # Code quality
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+    - unused
+
+    # Style
+    - lll
+    - misspell
+    - nakedret
+    - unconvert
+    - unparam
+
+    # Performance
+    - prealloc
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    goconst:
+      min-len: 3
+      min-occurrences: 2
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - dupImport
+        - ifElseChain
+
+    gocyclo:
+      min-complexity: 15
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    lll:
+      line-length: 120
+
+    misspell:
+      locale: US
+
+    nolintlint:
+      allow-unused: false
+      require-explanation: false
+      require-specific: false
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go$
+        linters:
+          - lll
+          - errcheck
+          - err113
+          - gocyclo
+          - gosec
+
+      - path: _gen\.go$
+        linters:
+          - errcheck
+          - gosec
+          - govet
+          - staticcheck
+
+    paths:
+      - build
+      - dist
+      - third_party
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/inveniam/nvnm-mcp-server
