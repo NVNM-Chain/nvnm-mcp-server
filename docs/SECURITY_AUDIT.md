@@ -626,7 +626,7 @@ The following items from the "Longer-Term Hardening" tier have been triaged with
 
 | Item | Disposition | Notes |
 |---|---|---|
-| Human-in-the-loop approval for write ops | **Backlog (High)** | Configurable per-client: agent can be allowed autonomous writes, or require approval. Design TBD. See `docs/IMPLEMENTATION_PLAN.md` backlog. |
+| Human-in-the-loop approval for write ops | **Completed** | Implemented via MCP elicitation in `internal/mcp/approval.go`. Configurable per-client (`write_approval` in key store) and globally (`WRITE_APPROVAL_DEFAULT`). E2E tested in `server_e2e_test.go`. |
 | Reverse proxy requirements | **Done** | Operational guide with nginx example added to `docs/DESIGN.md` section 10. |
 | SBOM generation in CI | **Backlog (Medium)** | Single `syft` command in CI; zero risk. Track in implementation plan. |
 | MCP-level rate limiting per client | **Backlog (Medium)** | Auth significantly reduces attack surface; upstream RPC limits exist. Add when multi-tenant load patterns emerge. |
@@ -641,7 +641,7 @@ The following items from the "Longer-Term Hardening" tier have been triaged with
 |---|---|---|---|---|
 | Immediate Fixes | 5 | 5 | 0 | 0 |
 | Before Red Team | 5 | 5 | 0 | 0 |
-| Longer-Term | 8 | 1 | 7 | 0 |
-| **Total** | **18** | **11** | **7** | **0** |
+| Longer-Term | 8 | 2 | 6 | 0 |
+| **Total** | **18** | **12** | **6** | **0** |
 
-All findings rated High or Critical have been remediated. Reverse proxy documentation has been added. Remaining items are triaged and tracked in `docs/IMPLEMENTATION_PLAN.md` backlog section with priority levels.
+All findings rated High or Critical have been remediated, including human-in-the-loop write approval. Reverse proxy documentation has been added. Remaining items are triaged and tracked in `docs/IMPLEMENTATION_PLAN.md` backlog section with priority levels.

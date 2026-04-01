@@ -19,7 +19,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phase 5 (Security Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, and pre-red-team security hardening are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results. HTTP transport now requires API key authentication with per-client identity. The precompile ABI is loaded from `abi/anchoring.json`. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+**Phase 5 (Security Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, and pre-red-team security hardening are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results. HTTP transport now requires API key authentication with per-client identity. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`). The precompile ABI is loaded from `abi/anchoring.json`. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
@@ -254,6 +254,7 @@ make help           # Show all available commands (also the default)
 make build          # Build binary
 make run            # Run with stdio transport
 make run-http       # Run with HTTP transport
+make run-local      # Build and run locally with HTTP + testnet config
 make test           # Run all tests
 make test-unit      # Unit tests only (-short)
 make test-coverage  # Tests with -race + coverage report

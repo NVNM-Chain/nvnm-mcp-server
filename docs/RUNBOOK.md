@@ -53,10 +53,12 @@ When either key variable is set, all HTTP requests must include `Authorization: 
 Manage keys via Makefile targets:
 
 ```bash
-make key-create CLIENT=my-agent   # Create key, prints key to stdout
-make key-list                     # List all keys (ID, enabled, created)
-make key-disable ID=my-agent      # Disable a key
-make key-enable ID=my-agent       # Re-enable a key
+make key-create NAME=my-agent                       # Create key, prints key to stdout
+make key-create NAME=pipeline APPROVAL=auto          # Create key with auto write approval
+make key-list                                        # List all keys (ID, enabled, approval, created)
+make key-disable NAME=my-agent                       # Disable a key
+make key-enable NAME=my-agent                        # Re-enable a key
+make key-set-approval NAME=my-agent APPROVAL=auto    # Set write approval policy for a client
 ```
 
 ### Write approval (human-in-the-loop)

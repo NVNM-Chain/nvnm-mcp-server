@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -44,7 +43,6 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 	httpServer := httptest.NewServer(mcpHandler)
 	t.Cleanup(httpServer.Close)
 
-	ctx := context.Background()
 	client := mcp.NewClient(
 		&mcp.Implementation{Name: "test-client", Version: "1.0.0"},
 		nil,

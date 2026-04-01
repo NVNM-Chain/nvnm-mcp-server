@@ -567,10 +567,12 @@ The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to us
 **Key management** is provided by the `cmd/key-mgmt/` CLI and Makefile targets:
 
 ```bash
-make key-create CLIENT=my-agent   # Create key
-make key-list                     # List keys
-make key-disable ID=my-agent      # Disable key
-make key-enable ID=my-agent       # Re-enable key
+make key-create NAME=my-agent                       # Create key
+make key-create NAME=pipeline APPROVAL=auto          # Create key with auto write approval
+make key-list                                        # List keys (ID, enabled, approval, created)
+make key-disable NAME=my-agent                       # Disable key
+make key-enable NAME=my-agent                        # Re-enable key
+make key-set-approval NAME=my-agent APPROVAL=auto    # Set write approval policy for a client
 ```
 
 ### Human-in-the-Loop Write Approval

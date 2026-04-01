@@ -10,9 +10,9 @@ The project uses a layered testing approach: unit tests with mocks for fast feed
 
 | Metric | Count |
 |--------|-------|
-| Test files | 23 |
-| Test functions | 159 |
-| Lines of test code | 4,378 |
+| Test files | 25 |
+| Test functions | 248 |
+| Lines of test code | 5,112 |
 | Golden fixture files | 13 |
 | Integration test files (build tag) | 6 |
 | Packages with tests | 8 of 10 |
@@ -61,7 +61,9 @@ Fast, deterministic tests using mocks and stubs. Run with `make test`.
 |---------|-------------|-------|----------------|
 | `internal/mcp` | `tools_test.go` | 46 | All 16 MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`) |
 | `internal/mcp` | `server_test.go` | 6 | HTTP E2E via `httptest.NewServer`: `ListTools` (all 16 tools), `CallTool` (success + error propagation) |
-| `internal/config` | `config_test.go` | 10 | Environment variable loading, defaults, validation errors, resilience config |
+| `internal/mcp` | `server_e2e_test.go` | 20 | Write approval E2E (auto/required/declined/canceled/no-elicitation/prompt-details/RPC-error), API key auth E2E (valid/invalid/missing/disabled/no-keys), per-client approval overrides (auto-overrides-required/required-overrides-auto/auth+elicitation), tx decoding, approval message formatting, sentinel error tests |
+| `internal/mcp` | `approval_test.go` | 9 | `ResolveWriteApproval` policy resolution (7 sub-cases), `CheckWriteApproval` auto-bypass, per-client override |
+| `internal/config` | `config_test.go` | 13 | Environment variable loading, defaults, validation errors, resilience config, `WriteApprovalDefault` (default/override/invalid) |
 | `internal/errors` | `errors_test.go` | 5 | Sentinel error distinctness, `IsInputError`, `IsTransientError`, `IsNotFound` |
 | `internal/evm` | `tracing_test.go` | 4 | `TracingClient` delegation and error propagation |
 | `internal/evm` | `resilient_test.go` | 8 | Retry with backoff, circuit breaker tripping, rate limiting, `SendRawTransaction` non-retry |
@@ -79,6 +81,7 @@ Fast, deterministic tests using mocks and stubs. Run with `make test`.
 - `failingClient` (`internal/evm/resilient_test.go`) -- `evm.Client` that fails N times then succeeds
 - `mockEVMClient` (`internal/anchor/client_test.go`) -- `evm.Client` for anchor-layer tests
 - `mockChecker` (`internal/telemetry/health_test.go`) -- readiness probe mock
+- `bearerTransport` (`internal/mcp/server_e2e_test.go`) -- `http.RoundTripper` that injects `Authorization: Bearer` headers for API key auth E2E tests
 
 ### 2. Golden Tests (response shape stability)
 
@@ -128,7 +131,9 @@ Write integration tests require `.chain_credentials.txt` and skip if the file is
 
 ### 4. MCP End-to-End HTTP Tests
 
-These tests (`internal/mcp/server_test.go`) spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`).
+These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write approval, API key auth, per-client overrides).
+
+**Basic E2E** (`server_test.go`):
 
 | Test | What's verified |
 |------|-----------------|
@@ -139,7 +144,37 @@ These tests (`internal/mcp/server_test.go`) spin up a real MCP HTTP server using
 | `TestE2E_CallTool_InvalidAddress` | `evm_get_balance` with bad address returns `IsError=true` |
 | `TestE2E_CallTool_MissingRegistryIDAndName` | `anchor_get_registry` with no args returns `IsError=true` |
 
-This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, and error propagation through the full stack.
+**Write approval E2E** (`server_e2e_test.go`):
+
+| Test | What's verified |
+|------|-----------------|
+| `TestE2E_SendRawTx_AutoApproval_Succeeds` | Auto policy bypasses elicitation; tx broadcasts successfully |
+| `TestE2E_SendRawTx_RequiredApproval_Accepted` | Human accepts elicitation prompt; tx broadcasts successfully |
+| `TestE2E_SendRawTx_RequiredApproval_Declined` | Human declines; `ErrWriteDeclined` returned |
+| `TestE2E_SendRawTx_RequiredApproval_Canceled` | Human cancels; error returned |
+| `TestE2E_SendRawTx_NoElicitation_RequiredFails` | Client without elicitation handler gets `ErrElicitationUnsupported` |
+| `TestE2E_SendRawTx_ElicitationPromptContainsTxDetails` | Prompt includes To, Value, Gas, Nonce, Chain ID, Data, irreversibility warning |
+| `TestE2E_SendRawTx_AutoApproval_RPCError` | RPC failure propagates correctly after auto-approval |
+
+**API key authentication E2E** (`server_e2e_test.go`):
+
+| Test | What's verified |
+|------|-----------------|
+| `TestE2E_Auth_ValidKey_ToolCallSucceeds` | Valid Bearer token grants access |
+| `TestE2E_Auth_InvalidKey_ConnectionFails` | Wrong Bearer token rejected |
+| `TestE2E_Auth_MissingKey_ConnectionFails` | Missing Authorization header rejected |
+| `TestE2E_Auth_DisabledKey_ConnectionFails` | Disabled key rejected (while active keys exist) |
+| `TestE2E_Auth_NoKeysConfigured_NoAuthRequired` | No keys configured = auth bypassed |
+
+**Per-client write approval override E2E** (`server_e2e_test.go`):
+
+| Test | What's verified |
+|------|-----------------|
+| `TestE2E_PerClientApproval_AutoOverridesGlobalRequired` | Key with `write_approval: "auto"` bypasses elicitation despite global `required` |
+| `TestE2E_PerClientApproval_RequiredOverridesGlobalAuto` | Key with `write_approval: "required"` forces elicitation despite global `auto` |
+| `TestE2E_Auth_ValidKey_SendTx_WithElicitation` | Full auth + approval flow; client ID appears in elicitation prompt |
+
+This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, error propagation, Bearer token authentication with `APIKeyAuth` middleware, write approval with MCP elicitation, per-client policy override via key store, and client identity propagation.
 
 ### 5. k6 Load Tests
 
@@ -186,16 +221,16 @@ This provides a known dataset for integration tests and manual testing.
 
 ```
 $ make test
-ok  internal/anchor    0.372s
-ok  internal/config    0.696s
-ok  internal/errors    0.526s
-ok  internal/evm       0.753s
-ok  internal/logging   1.434s
-ok  internal/mcp       1.062s
-ok  internal/telemetry 1.275s
+ok  internal/anchor    0.313s
+ok  internal/config    0.560s
+ok  internal/errors    0.766s
+ok  internal/evm       1.061s
+ok  internal/logging   1.226s
+ok  internal/mcp       1.555s
+ok  internal/telemetry 1.736s
 ```
 
-All 134 unit tests pass. Zero failures.
+All 248 tests pass (159 unit + 89 in `internal/mcp` including 21 E2E). Zero failures.
 
 ### Integration Tests
 
@@ -259,27 +294,29 @@ $ make docker-smoke
 ## Test Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Test Layers                          │
-├─────────────┬───────────────┬───────────────────────────┤
-│  Unit Tests │ Golden Tests  │  MCP E2E HTTP Tests       │
-│  (mocks)    │ (JSON shapes) │  (httptest + SDK client)  │
-│  134 tests  │ 13 fixtures   │  6 tests                  │
-├─────────────┴───────────────┴───────────────────────────┤
-│              Integration Tests (live testnet)           │
-│              25 tests, build tag: integration           │
-├─────────────────────────────────────────────────────────┤
-│              k6 Load Tests (HTTP transport)             │
-│              3 scenarios, 75 VUs, 3 min                 │
-├─────────────────────────────────────────────────────────┤
-│              Docker Smoke Test (container lifecycle)    │
-│              build → start → healthz → readyz → stop   │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Test Layers                                  │
+├─────────────┬───────────────┬───────────────────────────────────┤
+│  Unit Tests │ Golden Tests  │  MCP E2E HTTP Tests               │
+│  (mocks)    │ (JSON shapes) │  (httptest + SDK client)          │
+│  159 tests  │ 13 fixtures   │  21 tests (basic, approval, auth) │
+├─────────────┴───────────────┴───────────────────────────────────┤
+│              Integration Tests (live testnet)                   │
+│              25 tests, build tag: integration                   │
+├─────────────────────────────────────────────────────────────────┤
+│              k6 Load Tests (HTTP transport)                     │
+│              3 scenarios, 75 VUs, 3 min                         │
+├─────────────────────────────────────────────────────────────────┤
+│              Docker Smoke Test (container lifecycle)            │
+│              build → start → healthz → readyz → stop           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Adding New Tests
 
 **For a new MCP tool**: Add handler tests to `internal/mcp/tools_test.go` using the existing `mockEVM`/`mockAnchor` types. Add the tool name to `TestE2E_ListTools_ContainsExpectedNames` in `server_test.go`.
+
+**For write approval or auth features**: Add E2E tests to `internal/mcp/server_e2e_test.go`. Use `startTestServerWithConfig` for approval-only tests (configurable `approvalDefault` and `ClientOptions` with `ElicitationHandler`). Use `startAuthTestServer` for auth tests (configurable `KeyEntry` list and Bearer token via `bearerTransport`). Use `buildSignedTxHex` to generate real signed transactions for write approval tests.
 
 **For a new EVM client method**: Add a method to `stubClient` in `tracing_test.go` and `failingClient` in `resilient_test.go`. Add a golden fixture if the method returns a new type. Add integration test in a `_integration_test.go` file with `//go:build integration`.
 
