@@ -13,6 +13,7 @@ var (
 	ErrInvalidRegistryID = errors.New("invalid registry ID")
 	ErrInvalidRecordID   = errors.New("invalid record ID")
 	ErrInvalidChecksum   = errors.New("invalid checksum")
+	ErrInputTooLarge     = errors.New("input exceeds maximum allowed size")
 )
 
 // Not-found errors.
@@ -39,6 +40,13 @@ var (
 	ErrUnexpectedType     = errors.New("unexpected result type")
 )
 
+// Client-safe sentinel errors returned by SafeForClient to avoid dynamic error construction.
+var (
+	errSafeCircuitOpen  = errors.New("service temporarily unavailable (circuit open)")
+	errSafeRateLimited  = errors.New("service temporarily unavailable (rate limited)")
+	errSafeUpstreamFail = errors.New("upstream operation failed")
+)
+
 // IsInputError returns true if the error is an input validation error.
 func IsInputError(err error) bool {
 	return errors.Is(err, ErrInvalidAddress) ||
@@ -49,7 +57,8 @@ func IsInputError(err error) bool {
 		errors.Is(err, ErrMissingRequired) ||
 		errors.Is(err, ErrInvalidRegistryID) ||
 		errors.Is(err, ErrInvalidRecordID) ||
-		errors.Is(err, ErrInvalidChecksum)
+		errors.Is(err, ErrInvalidChecksum) ||
+		errors.Is(err, ErrInputTooLarge)
 }
 
 // IsTransientError returns true if the error is a transient upstream error that may be retried.
@@ -64,4 +73,27 @@ func IsNotFound(err error) bool {
 		errors.Is(err, ErrTxNotFound) ||
 		errors.Is(err, ErrRegistryNotFound) ||
 		errors.Is(err, ErrRecordNotFound)
+}
+
+// SafeForClient returns a sanitized error message suitable for returning to
+// external MCP clients. Input validation errors pass through unchanged.
+// Upstream and internal errors are replaced with a generic message to
+// prevent information leakage (URLs, hostnames, stack details).
+func SafeForClient(err error) error {
+	if err == nil {
+		return nil
+	}
+	if IsInputError(err) || IsNotFound(err) {
+		return err
+	}
+	if errors.Is(err, ErrAnchorABIMissing) || errors.Is(err, ErrWriteDisabled) {
+		return err
+	}
+	if errors.Is(err, ErrCircuitOpen) {
+		return errSafeCircuitOpen
+	}
+	if errors.Is(err, ErrRateLimited) {
+		return errSafeRateLimited
+	}
+	return errSafeUpstreamFail
 }

@@ -7,12 +7,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/inveniam/nvnm-mcp-server/internal/logging"
 )
 
 func registerAnchorWriteTools(
 	srv *mcp.Server,
 	anchorClient anchor.Client,
-	_ *slog.Logger,
+	logger *slog.Logger,
 ) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_add_registry",
@@ -20,7 +22,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned addRegistry transaction. " +
 			"Returns a complete unsigned transaction for the caller to sign " +
 			"and submit via evm_send_raw_transaction.",
-	}, makePrepareAddRegistryHandler(anchorClient))
+	}, makePrepareAddRegistryHandler(anchorClient, logger))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_add_record",
@@ -28,7 +30,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned addRecord transaction to anchor " +
 			"a document checksum and URI in a registry. Returns a complete " +
 			"unsigned transaction for the caller to sign and submit.",
-	}, makePrepareAddRecordHandler(anchorClient))
+	}, makePrepareAddRecordHandler(anchorClient, logger))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_grant_role",
@@ -36,7 +38,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned grantRole transaction to assign " +
 			"admin or editor permissions on a registry. Returns a complete " +
 			"unsigned transaction for the caller to sign and submit.",
-	}, makePrepareGrantRoleHandler(anchorClient))
+	}, makePrepareGrantRoleHandler(anchorClient, logger))
 }
 
 // --- Input types ---
@@ -69,7 +71,7 @@ type prepareGrantRoleInput struct {
 // --- Handlers ---
 
 func makePrepareAddRegistryHandler(
-	c anchor.Client,
+	c anchor.Client, logger *slog.Logger,
 ) mcp.ToolHandlerFor[prepareAddRegistryInput, anchor.UnsignedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRegistryInput,
@@ -83,12 +85,17 @@ func makePrepareAddRegistryHandler(
 		if err != nil {
 			return nil, anchor.UnsignedTransaction{}, err
 		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_add_registry",
+			slog.String("client_id", auth.ClientIDFromContext(ctx)),
+			logging.SafeAddr("from", input.From),
+			slog.String("registry_name", input.Name),
+		)
 		return nil, *tx, nil
 	}
 }
 
 func makePrepareAddRecordHandler(
-	c anchor.Client,
+	c anchor.Client, logger *slog.Logger,
 ) mcp.ToolHandlerFor[prepareAddRecordInput, anchor.UnsignedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRecordInput,
@@ -105,12 +112,18 @@ func makePrepareAddRecordHandler(
 		if err != nil {
 			return nil, anchor.UnsignedTransaction{}, err
 		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_add_record",
+			slog.String("client_id", auth.ClientIDFromContext(ctx)),
+			logging.SafeAddr("from", input.From),
+			slog.String("registry", input.Registry),
+			slog.String("uri", input.URI),
+		)
 		return nil, *tx, nil
 	}
 }
 
 func makePrepareGrantRoleHandler(
-	c anchor.Client,
+	c anchor.Client, logger *slog.Logger,
 ) mcp.ToolHandlerFor[prepareGrantRoleInput, anchor.UnsignedTransaction] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareGrantRoleInput,
@@ -125,6 +138,13 @@ func makePrepareGrantRoleHandler(
 		if err != nil {
 			return nil, anchor.UnsignedTransaction{}, err
 		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_grant_role",
+			slog.String("client_id", auth.ClientIDFromContext(ctx)),
+			logging.SafeAddr("from", input.From),
+			slog.Uint64("registry_id", input.RegistryID),
+			logging.SafeAddr("account", input.Account),
+			slog.String("role", input.Role),
+		)
 		return nil, *tx, nil
 	}
 }

@@ -33,6 +33,7 @@ Thumbs.db
 .env
 .env.*
 .chain_credentials.txt
+.mcp-keys.json
 
 # Lint cache
 .golangci-lint-cache/

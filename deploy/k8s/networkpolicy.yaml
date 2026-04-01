@@ -1,0 +1,49 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inveniam-mcp-server
+  labels:
+    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: inveniam
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: inveniam-mcp-server
+      app.kubernetes.io/component: mcp-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # MCP HTTP -- restrict to pods with the "mcp-client" label.
+    # Adjust the namespaceSelector / podSelector to match your cluster.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: mcp-client
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Health/metrics -- allow Prometheus scraper and kubelet probes.
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Outbound to EVM RPC (HTTPS)
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
+    # Outbound to OTLP collector (gRPC, typically 4317)
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 4317
+    # DNS resolution
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

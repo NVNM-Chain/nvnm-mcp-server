@@ -7,18 +7,19 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
 
-func registerEVMWriteTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
+func registerEVMWriteTools(srv *mcp.Server, evmClient evm.Client, logger *slog.Logger) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_send_raw_transaction",
 		Title: "Send Raw Transaction",
 		Description: "Broadcast a signed transaction to the network. " +
 			"Input is the signed transaction as a hex string (0x-prefixed). " +
 			"Returns the transaction hash.",
-	}, makeSendRawTxHandler(evmClient))
+	}, makeSendRawTxHandler(evmClient, logger))
 }
 
 // --- Input/output types ---
@@ -34,7 +35,7 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client,
+	c evm.Client, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input sendRawTxInput,
@@ -49,9 +50,18 @@ func makeSendRawTxHandler(
 
 		txHash, err := c.SendRawTransaction(ctx, input.SignedTxHex)
 		if err != nil {
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit: send_raw_transaction failed",
+				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+				slog.Int("signed_tx_len", len(input.SignedTxHex)),
+				slog.String("error", err.Error()),
+			)
 			return nil, sendRawTxOutput{}, err
 		}
 
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit: send_raw_transaction",
+			slog.String("client_id", auth.ClientIDFromContext(ctx)),
+			slog.String("tx_hash", txHash),
+		)
 		return nil, sendRawTxOutput{TxHash: txHash}, nil
 	}
 }

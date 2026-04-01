@@ -357,7 +357,14 @@ func parseHash(s string) (common.Hash, error) {
 	return common.BytesToHash(b), nil
 }
 
+// maxHexDataLen caps hex input strings at 2 MB (1 MB decoded).
+const maxHexDataLen = 2 * 1024 * 1024
+
 func parseHexData(s string) ([]byte, error) {
 	s = strings.TrimPrefix(s, "0x")
+	if len(s) > maxHexDataLen {
+		return nil, fmt.Errorf("hex data too large (%d chars, max %d): %w",
+			len(s), maxHexDataLen, apperrors.ErrInvalidABI)
+	}
 	return hex.DecodeString(s)
 }

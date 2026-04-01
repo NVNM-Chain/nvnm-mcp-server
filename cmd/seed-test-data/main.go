@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -23,9 +24,15 @@ const (
 	rpcURL       = "https://evm.inveniam.mantrachain.io"
 	abiPath      = "abi/anchoring.json"
 	chainID      = 58887
-	credsPath    = ".chain_credentials.txt"
+	credsPath    = ".chain_credentials.txt" //nolint:gosec // not credentials, just a file path constant
 	registryName = "mcp-test-data"
 	registryDesc = "Test registry seeded by cmd/seed-test-data for MCP server validation"
+)
+
+var (
+	errTxReverted       = errors.New("transaction reverted")
+	errMissingCredField = errors.New("file missing Address or PrivateKey fields")
+	errReceiptTimeout   = errors.New("timed out waiting for transaction receipt")
 )
 
 type testRecord struct {
@@ -69,14 +76,12 @@ func run() error {
 
 	logger := logging.NewText("warn")
 
-	// Load credentials
 	creds, err := loadCredentials(credsPath)
 	if err != nil {
 		return fmt.Errorf("load credentials: %w", err)
 	}
 	fmt.Printf("Sender: %s\n\n", creds.address)
 
-	// Connect to EVM
 	evmClient, err := evm.NewClient(ctx, rpcURL, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("connect to RPC: %w", err)
@@ -91,91 +96,102 @@ func run() error {
 
 	anchorClient := anchor.NewClient(evmClient, anchor.PrecompileAddress, chainID, abiPath, logger)
 
-	// Step 1: Create registry (skip if it already exists)
+	if err := ensureRegistry(ctx, anchorClient, evmClient, creds); err != nil {
+		return err
+	}
+
+	if err := seedRecords(ctx, anchorClient, evmClient, creds); err != nil {
+		return err
+	}
+
+	return verifySeededData(ctx, anchorClient)
+}
+
+func ensureRegistry(ctx context.Context, ac anchor.Client, ec evm.Client, creds *credentials) error {
 	fmt.Printf("=== Creating registry %q ===\n", registryName)
-	existing, lookupErr := anchorClient.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
+	existing, lookupErr := ac.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
 	if lookupErr == nil && existing != nil {
 		fmt.Printf("  already exists: id=%d creator=%s (skipping)\n\n", existing.ID, existing.Creator)
-	} else {
-		regUTX, prepErr := anchorClient.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
+		return nil
+	}
+
+	return submitPreparedTx(ctx, ec, func() (*anchor.UnsignedTransaction, error) {
+		return ac.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
 			From:        creds.address,
 			Name:        registryName,
 			Description: registryDesc,
 			Metadata:    `{"seeded_by":"cmd/seed-test-data"}`,
 		})
-		if prepErr != nil {
-			return fmt.Errorf("prepare addRegistry: %w", prepErr)
-		}
-		fmt.Printf("  nonce=%d gas=%d gasPrice=%s\n", regUTX.Nonce, regUTX.Gas, regUTX.GasPrice)
+	}, creds, "addRegistry")
+}
 
-		regSigned, signErr := signTx(regUTX, creds.privateKey)
-		if signErr != nil {
-			return fmt.Errorf("sign addRegistry: %w", signErr)
-		}
-
-		regTxHash, submitErr := evmClient.SendRawTransaction(ctx, regSigned)
-		if submitErr != nil {
-			return fmt.Errorf("submit addRegistry: %w", submitErr)
-		}
-		fmt.Printf("  tx: %s\n", regTxHash)
-
-		regReceipt, waitErr := waitForReceipt(ctx, evmClient, regTxHash, 30*time.Second)
-		if waitErr != nil {
-			return fmt.Errorf("addRegistry receipt: %w", waitErr)
-		}
-		if regReceipt.Status != "success" {
-			return fmt.Errorf("addRegistry reverted: status=%s", regReceipt.Status)
-		}
-		fmt.Printf("  mined in block %d (gas used: %d)\n\n", regReceipt.BlockNumber, regReceipt.GasUsed)
-	}
-
-	// Step 2: Add records
+func seedRecords(ctx context.Context, ac anchor.Client, ec evm.Client, creds *credentials) error {
 	for i, rec := range records {
 		fmt.Printf("=== Adding record %d/%d ===\n", i+1, len(records))
 		fmt.Printf("  URI: %s\n", rec.URI)
 
-		recUTX, prepErr := anchorClient.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
-			From:         creds.address,
-			Registry:     registryName,
-			URI:          rec.URI,
-			Checksum:     rec.Checksum,
-			ChecksumAlgo: rec.ChecksumAlgo,
-			Metadata:     rec.Metadata,
-		})
-		if prepErr != nil {
-			return fmt.Errorf("prepare addRecord[%d]: %w", i, prepErr)
+		label := fmt.Sprintf("addRecord[%d]", i)
+		err := submitPreparedTx(ctx, ec, func() (*anchor.UnsignedTransaction, error) {
+			return ac.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
+				From:         creds.address,
+				Registry:     registryName,
+				URI:          rec.URI,
+				Checksum:     rec.Checksum,
+				ChecksumAlgo: rec.ChecksumAlgo,
+				Metadata:     rec.Metadata,
+			})
+		}, creds, label)
+		if err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		recSigned, signErr := signTx(recUTX, creds.privateKey)
-		if signErr != nil {
-			return fmt.Errorf("sign addRecord[%d]: %w", i, signErr)
-		}
+func submitPreparedTx(
+	ctx context.Context,
+	ec evm.Client,
+	prepare func() (*anchor.UnsignedTransaction, error),
+	creds *credentials,
+	label string,
+) error {
+	utx, err := prepare()
+	if err != nil {
+		return fmt.Errorf("prepare %s: %w", label, err)
+	}
+	fmt.Printf("  nonce=%d gas=%d gasPrice=%s\n", utx.Nonce, utx.Gas, utx.GasPrice)
 
-		recTxHash, submitErr := evmClient.SendRawTransaction(ctx, recSigned)
-		if submitErr != nil {
-			return fmt.Errorf("submit addRecord[%d]: %w", i, submitErr)
-		}
-		fmt.Printf("  tx: %s\n", recTxHash)
-
-		recReceipt, waitErr := waitForReceipt(ctx, evmClient, recTxHash, 30*time.Second)
-		if waitErr != nil {
-			return fmt.Errorf("addRecord[%d] receipt: %w", i, waitErr)
-		}
-		if recReceipt.Status != "success" {
-			return fmt.Errorf("addRecord[%d] reverted: status=%s", i, recReceipt.Status)
-		}
-		fmt.Printf("  mined in block %d (gas used: %d)\n\n", recReceipt.BlockNumber, recReceipt.GasUsed)
+	signed, err := signTx(utx, creds.privateKey)
+	if err != nil {
+		return fmt.Errorf("sign %s: %w", label, err)
 	}
 
-	// Step 3: Verify
+	txHash, err := ec.SendRawTransaction(ctx, signed)
+	if err != nil {
+		return fmt.Errorf("submit %s: %w", label, err)
+	}
+	fmt.Printf("  tx: %s\n", txHash)
+
+	receipt, err := waitForReceipt(ctx, ec, txHash, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("%s receipt: %w", label, err)
+	}
+	if receipt.Status != "success" {
+		return fmt.Errorf("%s status=%s: %w", label, receipt.Status, errTxReverted)
+	}
+	fmt.Printf("  mined in block %d (gas used: %d)\n\n", receipt.BlockNumber, receipt.GasUsed)
+	return nil
+}
+
+func verifySeededData(ctx context.Context, ac anchor.Client) error {
 	fmt.Println("=== Verifying ===")
-	reg, err := anchorClient.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
+	reg, err := ac.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
 	if err != nil {
 		return fmt.Errorf("verify registry: %w", err)
 	}
 	fmt.Printf("  Registry: id=%d name=%q creator=%s\n", reg.ID, reg.Name, reg.Creator)
 
-	recs, err := anchorClient.GetRecords(ctx, anchor.GetRecordsRequest{
+	recs, err := ac.GetRecords(ctx, anchor.GetRecordsRequest{
 		Registry:   strPtr(registryName),
 		Pagination: &anchor.PageRequest{Limit: 10},
 	})
@@ -183,7 +199,8 @@ func run() error {
 		return fmt.Errorf("verify records: %w", err)
 	}
 	fmt.Printf("  Records: %d found\n", len(recs.Records))
-	for _, r := range recs.Records {
+	for i := range recs.Records {
+		r := &recs.Records[i]
 		fmt.Printf("    recordID=%d checksum=%s uri=%s\n", r.RecordID, r.Checksum, r.URI)
 	}
 
@@ -213,7 +230,7 @@ func loadCredentials(path string) (*credentials, error) {
 		}
 	}
 	if address == "" || keyHex == "" {
-		return nil, fmt.Errorf("file missing Address or PrivateKey fields")
+		return nil, errMissingCredField
 	}
 
 	keyHex = strings.TrimPrefix(keyHex, "0x")
@@ -233,8 +250,8 @@ func signTx(utx *anchor.UnsignedTransaction, key *ecdsa.PrivateKey) (string, err
 	}
 
 	tx := new(types.Transaction)
-	if err := tx.UnmarshalBinary(txBytes); err != nil {
-		return "", fmt.Errorf("unmarshal unsigned tx: %w", err)
+	if unmarshalErr := tx.UnmarshalBinary(txBytes); unmarshalErr != nil {
+		return "", fmt.Errorf("unmarshal unsigned tx: %w", unmarshalErr)
 	}
 
 	signer := types.NewEIP155Signer(big.NewInt(utx.ChainID))
@@ -270,7 +287,7 @@ func waitForReceipt(
 		}
 		return receipt, nil
 	}
-	return nil, fmt.Errorf("timed out after %s waiting for receipt of %s", timeout, txHash)
+	return nil, fmt.Errorf("after %s for %s: %w", timeout, txHash, errReceiptTimeout)
 }
 
 func strPtr(s string) *string { return &s }

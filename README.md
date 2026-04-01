@@ -19,7 +19,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phase 4 (Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, and production hardening are implemented and tested against the live Inveniam L2 testnet. A comprehensive 13-point code review has been applied -- see the implementation plan for details. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+**Phase 5 (Security Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, and pre-red-team security hardening are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results. HTTP transport now requires API key authentication with per-client identity. The precompile ABI is loaded from `abi/anchoring.json`. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
@@ -37,6 +37,9 @@ cd NVNM_mcp_server
 
 # Install dev tools and pre-commit hooks
 make setup-dev
+
+# See all available commands
+make help
 
 # Build
 make build
@@ -74,6 +77,36 @@ export MCP_HTTP_ADDR=:8080
 ./inveniam-mcp-server --transport http
 ```
 
+### API Key Authentication (HTTP transport)
+
+When using HTTP transport, API key authentication is strongly recommended. Requests must include `Authorization: Bearer <key>`.
+
+```bash
+# Create an API key for a client
+make key-create CLIENT=my-agent
+
+# List all keys
+make key-list
+
+# Disable a key
+make key-disable ID=my-agent
+
+# Enable a disabled key
+make key-enable ID=my-agent
+```
+
+Configure the server to use keys:
+
+```bash
+# Option A: Multi-key file (recommended)
+export MCP_API_KEYS_FILE=.mcp-keys.json
+
+# Option B: Single key (dev/test only)
+export MCP_API_KEY=your-secret-key
+```
+
+The authenticated client ID flows into all audit logs and OTel spans, enabling per-client observability.
+
 ## Configuration
 
 All configuration is via environment variables. No config files required.
@@ -84,6 +117,15 @@ All configuration is via environment variables. No config files required.
 |---|---|
 | `INVENIAM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
 | `INVENIAM_CHAIN_ID` | Expected chain ID (`58887` for NVNM testnet) |
+
+### Authentication (HTTP transport)
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP_API_KEYS_FILE` | _(none)_ | Path to JSON key store file (see `make key-create`). Takes precedence over `MCP_API_KEY`. |
+| `MCP_API_KEY` | _(none)_ | Single API key for dev/test. Use `MCP_API_KEYS_FILE` in production for multi-key + client identity. |
+
+When either is set, HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.
 
 ### Optional
 
@@ -97,6 +139,7 @@ All configuration is via environment variables. No config files required.
 | `ENABLE_WRITE_TOOLS` | `false` | Enable write (prepare) tools |
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
+| `OTLP_INSECURE` | `true` | Use insecure (plaintext) connection to OTLP endpoint. Set `false` for TLS. |
 
 ### Observability
 
@@ -203,7 +246,10 @@ The health and metrics server runs on a separate port (default `:9090`), indepen
 
 ## Development
 
+Running `make` with no arguments displays the full help menu.
+
 ```bash
+make help           # Show all available commands (also the default)
 make build          # Build binary
 make run            # Run with stdio transport
 make run-http       # Run with HTTP transport
@@ -231,6 +277,17 @@ make test-integration # Integration tests against live testnet
 make seed-test-data # Create test registry with phoney records on-chain
 make clean          # Remove build artifacts
 ```
+
+### API Key Management
+
+```bash
+make key-create CLIENT=my-agent   # Create a new API key for a client
+make key-list                     # List all keys (shows ID, enabled, created)
+make key-disable ID=my-agent      # Disable a key (rejected at auth)
+make key-enable ID=my-agent       # Re-enable a disabled key
+```
+
+Keys are stored in `.mcp-keys.json` (gitignored). Set `MCP_API_KEYS_FILE=.mcp-keys.json` to use them.
 
 For comprehensive testing documentation, including test architecture, framework details, and latest results, see [docs/TESTING.md](docs/TESTING.md).
 
@@ -283,20 +340,23 @@ The server can run directly on MANTRA validator nodes, connecting to `localhost`
 ## Project Structure
 
 ```
-cmd/inveniam-mcp-server/     Entrypoint
+cmd/
+  inveniam-mcp-server/       Entrypoint
+  key-mgmt/                  API key management CLI
 internal/
+  auth/                      Client identity context propagation
   config/                    Environment-based configuration
   logging/                   slog-based structured logging + redaction
-  errors/                    Shared sentinel errors
+  errors/                    Shared sentinel errors + error sanitization
   evm/                       Generic EVM RPC client layer + tracing wrapper
   anchor/                    Inveniam anchor adapter (with address validation)
-  mcp/                       MCP tool registration and handlers
+  mcp/                       MCP tool registration, handlers, auth middleware, key store
   telemetry/                 OTel providers, MCP middleware, health server, metrics
   version/                   Canonical version constant (single source of truth)
 abi/
   anchoring.json             Anchor precompile ABI
 deploy/
-  k8s/                       Kubernetes manifests (Deployment, Service, HPA, ServiceMonitor)
+  k8s/                       Kubernetes manifests (Deployment, Service, HPA, ServiceMonitor, NetworkPolicy)
   helm/inveniam-mcp-server/  Helm chart
   grafana/                   Grafana dashboard JSON
   prometheus/                Prometheus alerting rules
@@ -305,10 +365,13 @@ tests/
 docs/
   DESIGN.md                  Architecture and design decisions
   IMPLEMENTATION_PLAN.md     Phased implementation plan
+  SECURITY_AUDIT.md          Security assessment and remediation results
   TESTING.md                 Test framework, strategy, and results
   TOOL_REFERENCE.md          MCP tool schema reference
   RUNBOOK.md                 Operational runbook
-.github/workflows/ci.yml    CI pipeline
+.github/
+  workflows/ci.yml           CI pipeline
+  dependabot.yml             Automated dependency updates
 .pre-commit-config.yaml     Pre-commit hooks
 .golangci.yml               Linter configuration
 ```

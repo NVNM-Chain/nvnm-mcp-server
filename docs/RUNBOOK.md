@@ -40,10 +40,30 @@ Set to `/app/abi/anchoring.json` when that file is baked into the image (see bel
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | OTLP gRPC endpoint (e.g. `otel-collector:4317`); enables trace and metric export to a collector. |
 | `OTEL_SERVICE_NAME` | `inveniam-mcp-server` | Service name in OTel resource. |
 
+### Authentication (HTTP transport)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MCP_API_KEYS_FILE` | _(empty)_ | Path to JSON key store file (preferred). Contains multiple keys with client IDs. |
+| `MCP_API_KEY` | _(empty)_ | Single API key (dev/test fallback). No client identity tracking. |
+| `OTLP_INSECURE` | `true` | Use plaintext connection to OTLP endpoint. Set `false` for TLS. |
+
+When either key variable is set, all HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.
+
+Manage keys via Makefile targets:
+
+```bash
+make key-create CLIENT=my-agent   # Create key, prints key to stdout
+make key-list                     # List all keys (ID, enabled, created)
+make key-disable ID=my-agent      # Disable a key
+make key-enable ID=my-agent       # Re-enable a key
+```
+
 ### Secrets management
 
 - Store `INVENIAM_EVM_RPC_URL` in Kubernetes Secrets, AWS Secrets Manager/SSM, or equivalent when it contains API keys or signed tokens.
-- Prefer injecting secrets via environment from the platform secret store; avoid committing URLs with credentials to Git.
+- Store `MCP_API_KEYS_FILE` contents or `MCP_API_KEY` value in the platform secret store. The key store file (`.mcp-keys.json`) is gitignored.
+- Prefer injecting secrets via environment from the platform secret store; avoid committing URLs or API keys to Git.
 - Logs redact full RPC URLs to host-only where configured; still treat the env value as sensitive.
 
 ### ABI file in the container
@@ -126,7 +146,7 @@ curl -sS "http://<pod-ip>:9090/metrics" | grep -E 'mcp|evm_rpc|tool|active'
 
 ### Resilience metrics
 
-The application **does not** currently emit dedicated counters or gauges for retries, rate-limit hits, or circuit breaker state. Those would appear only if added in a future release or if inferred indirectly from `evm.rpc.errors` and latency histograms. Sample Kubernetes manifests may list env vars for future resilience features; see section 5.
+The resilient EVM client wrapper records retry attempts, circuit breaker state transitions, and rate-limit rejections via OTel metrics and structured log entries. These can be observed in `evm.rpc.errors` counters (which include retried attempts) and `evm.rpc.duration` histograms (which include retry latency). Circuit breaker state changes are logged at WARN level.
 
 ---
 
@@ -153,43 +173,42 @@ Define Prometheus alert rules in **`deploy/prometheus/alerts.yaml`** (add this f
 
 ### `InveniamMCPCircuitBreakerOpen`
 
-- **Today:** No in-process circuit breaker; alert is forward-looking or infrastructure-level. If used with a sidecar/service mesh breaker, inspect that component and RPC provider health.
+- **Actions:** The circuit breaker (`sony/gobreaker`) is implemented in `internal/evm/resilient.go`. When triggered, all RPC calls fail fast with `ErrCircuitOpen`. State transitions are logged at WARN level. Check upstream RPC provider health. The breaker auto-recovers after `CIRCUIT_BREAKER_TIMEOUT` (default 30s) via a half-open probe.
 
 ### `InveniamMCPHighRetryRate`
 
-- **Today:** No automatic RPC retries in the Go client; tune or add this alert when retry middleware exists, or map it to client-level retry metrics from a future version.
+- **Actions:** Retries are implemented with exponential backoff and jitter on idempotent read RPCs. High retry rates indicate upstream instability. Check `evm.rpc.errors` by method; verify RPC provider status. Consider increasing `RPC_INITIAL_BACKOFF` or reducing `RPC_MAX_RETRIES` if retries are amplifying load.
 
 ### `InveniamMCPRateLimiting`
 
-- **Actions:** If hitting provider rate limits (HTTP 429 or RPC errors), reduce client concurrency, add replicas with fair routing, or negotiate higher quotas. In-process rate limiting is not implemented in the current server.
+- **Actions:** The in-process token-bucket rate limiter (`golang.org/x/time/rate`) caps upstream RPC calls at `RPC_RATE_LIMIT` req/s with `RPC_RATE_BURST` burst. If clients are being throttled, increase the rate limit, add replicas with fair routing, or negotiate higher quotas with the RPC provider.
 
 ---
 
 ## 5. Resilience configuration
 
-### Implemented today
+### Implemented
 
-- **Timeouts:** Each upstream call uses `REQUEST_TIMEOUT` (default `15s`) via a per-call context deadline on the `ethclient`.
-- **No application-level retry loop:** A failed RPC returns to the caller without exponential backoff in this codebase.
-- **No token-bucket rate limiter** and **no circuit breaker** in the Go EVM client.
+The EVM client stack includes a resilience wrapper (`internal/evm/resilient.go`) that decorates the tracing client:
 
-### Placeholder / planned (see `docs/IMPLEMENTATION_PLAN.md`)
+```
+raw ethclient → TracingClient → ResilientClient → (used by anchor + MCP handlers)
+```
 
-The following keys appear in **`deploy/k8s/configmap.yaml`** but are **not read** by `internal/config` in the current binary. Do not rely on them for behavior until implemented:
-
-- `RPC_MAX_RETRIES`
-- `RPC_RATE_LIMIT`
-- `CIRCUIT_BREAKER_THRESHOLD`
-
-When implemented, expected semantics would typically be:
-
-- **Retries:** `RPC_MAX_RETRIES`, `RPC_INITIAL_BACKOFF`, `RPC_MAX_BACKOFF` with exponential backoff and jitter on **idempotent** read RPCs only.
-- **Rate limiting:** `RPC_RATE_LIMIT`, `RPC_RATE_BURST` as a token bucket limiting concurrent or per-second calls to the upstream.
-- **Circuit breaker:** `CIRCUIT_BREAKER_THRESHOLD`, `CIRCUIT_BREAKER_TIMEOUT` with **closed** / **open** / **half-open** states; open state fails fast until a timeout elapses, then trial calls in half-open.
+| Feature | Config variable | Default | Description |
+|---------|----------------|---------|-------------|
+| Timeouts | `REQUEST_TIMEOUT` | `15s` | Per-call context deadline on the ethclient |
+| Retry with exponential backoff | `RPC_MAX_RETRIES` | `3` | Maximum retry attempts for transient RPC errors |
+| | `RPC_INITIAL_BACKOFF` | `500ms` | Initial wait between retries |
+| | `RPC_MAX_BACKOFF` | `10s` | Maximum wait between retries |
+| Rate limiting | `RPC_RATE_LIMIT` | `100` | Upstream RPC rate limit (requests per second) |
+| | `RPC_RATE_BURST` | `20` | Burst capacity for token-bucket rate limiter |
+| Circuit breaker | `CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to trip the breaker |
+| | `CIRCUIT_BREAKER_TIMEOUT` | `30s` | Time in open state before half-open probe |
 
 ### `eth_sendRawTransaction` and retries
 
-`evm_send_raw_transaction` ultimately calls `eth_sendRawTransaction`. Retrying blindly is unsafe: a submission may succeed on the wire but the client can still see a timeout or connection error, and a retry can double-submit. **Do not** configure automatic retries for submit methods without idempotency keys or explicit application policy. The current code performs a single attempt per call.
+`evm_send_raw_transaction` ultimately calls `eth_sendRawTransaction`. This method is explicitly excluded from retries due to idempotency risk: a submission may succeed on the wire but the client can still see a timeout, and a retry can double-submit. The current code performs a single attempt per call.
 
 ---
 
@@ -291,9 +310,9 @@ Consider custom metrics (e.g. from Prometheus) on `mcp.server.active_requests` o
 
 ### Trace sampling
 
-The server’s `TracerProvider` is built without an explicit head sampler in code; sampling behavior defaults to **AlwaysOn** unless you configure it via OTel SDK env resources (e.g. `OTEL_TRACES_SAMPLER` and related variables supported by the OpenTelemetry Go SDK) or a collector tail-sampling policy.
+The server supports configurable trace sampling via `OTEL_TRACE_SAMPLE_RATIO` (default `1.0`, meaning sample all traces). Uses `ParentBased(TraceIDRatioBased)` to respect upstream sampling decisions while controlling cost for high-volume deployments.
 
-**`OTEL_TRACE_SAMPLE_RATIO`** is not a custom variable read by this application; use standard OTel sampler environment variables or collector-side sampling for high-volume deployments.
+Set `OTEL_TRACE_SAMPLE_RATIO=0.1` to sample 10% of root traces, or use collector-side tail sampling for more advanced policies.
 
 ---
 
@@ -329,7 +348,11 @@ Then run an MCP client against `http://<host>:8080` for a minimal tool call (e.g
 ## References in this repository
 
 - Configuration: `internal/config/config.go`, `README.md`
+- Authentication: `internal/mcp/auth.go`, `internal/mcp/keys.go`, `internal/auth/context.go`
+- Key management CLI: `cmd/key-mgmt/main.go`
 - Health server: `internal/telemetry/health.go`
 - Metrics instruments: `internal/telemetry/metrics.go`, `internal/telemetry/middleware.go`, `internal/evm/tracing.go`
-- Kubernetes samples: `deploy/k8s/`
+- Resilience: `internal/evm/resilient.go`
+- Kubernetes samples: `deploy/k8s/` (including `networkpolicy.yaml`)
 - Design / roadmap: `docs/DESIGN.md`, `docs/IMPLEMENTATION_PLAN.md`
+- Security: `docs/SECURITY_AUDIT.md`

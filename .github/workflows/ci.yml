@@ -32,6 +32,11 @@ jobs:
           version: v2.11.4
           args: --timeout=5m
 
+      - name: Vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
 

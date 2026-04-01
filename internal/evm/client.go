@@ -11,6 +11,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
 )
 
 // Client wraps go-ethereum's ethclient and returns normalized response types.
@@ -53,7 +55,7 @@ func NewClient(ctx context.Context, rpcURL string, timeout time.Duration) (Clien
 
 	eth, err := ethclient.DialContext(dialCtx, rpcURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to EVM RPC at %s: %w", rpcURL, err)
+		return nil, fmt.Errorf("failed to connect to EVM RPC: %w", err)
 	}
 	return &client{eth: eth, timeout: timeout}, nil
 }
@@ -216,6 +218,9 @@ func (c *client) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64,
 	return c.eth.EstimateGas(ctx, msg)
 }
 
+// maxSignedTxHexLen caps signed transaction hex at 2 MB (1 MB decoded).
+const maxSignedTxHexLen = 2 * 1024 * 1024
+
 // SendRawTransaction broadcasts a signed transaction and returns the tx hash.
 func (c *client) SendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
 	ctx, cancel := c.withTimeout(ctx)
@@ -224,6 +229,13 @@ func (c *client) SendRawTransaction(ctx context.Context, signedTxHex string) (st
 	raw := signedTxHex
 	if len(raw) >= 2 && raw[:2] == "0x" {
 		raw = raw[2:]
+	}
+
+	if len(raw) > maxSignedTxHexLen {
+		return "", fmt.Errorf(
+			"signed tx hex too large (%d chars, max %d): %w",
+			len(raw), maxSignedTxHexLen, apperrors.ErrInputTooLarge,
+		)
 	}
 
 	txBytes, err := hex.DecodeString(raw)

@@ -7,13 +7,16 @@ GO := go
 GOFLAGS := -v
 LDFLAGS := -s -w
 
+.DEFAULT_GOAL := help
+
 .PHONY: all build run run-http run-local healthz readyz metrics mcp-init mcp-chain-id \
         mcp-registries mcp-anchor-info seed-test-data \
         test test-unit test-integration test-coverage test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
-        deps-update deps-verify info help
+        deps-update deps-verify info help \
+        key-create key-disable key-enable key-list
 
 all: check-all test build
 
@@ -201,6 +204,32 @@ docker-buildx:
 docker-push:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE) --push .
 
+## API Key Management
+
+MCP_API_KEYS_FILE ?= .mcp-keys.json
+export MCP_API_KEYS_FILE
+
+key-create:
+ifndef NAME
+	$(error NAME is required. Usage: make key-create NAME=my-client)
+endif
+	$(GO) run ./cmd/key-mgmt create $(NAME)
+
+key-disable:
+ifndef NAME
+	$(error NAME is required. Usage: make key-disable NAME=my-client)
+endif
+	$(GO) run ./cmd/key-mgmt disable $(NAME)
+
+key-enable:
+ifndef NAME
+	$(error NAME is required. Usage: make key-enable NAME=my-client)
+endif
+	$(GO) run ./cmd/key-mgmt enable $(NAME)
+
+key-list:
+	$(GO) run ./cmd/key-mgmt list
+
 ## Cleanup
 
 clean:
@@ -218,43 +247,64 @@ info:
 ## Help
 
 help:
-	@echo "Targets:"
-	@echo "  build          Build the server binary"
-	@echo "  run            Run with stdio transport"
-	@echo "  run-http       Run with HTTP transport"
+	@echo "Inveniam EVM MCP Server"
 	@echo ""
-	@echo "Local dev:"
-	@echo "  run-local      Build and run locally with HTTP transport + testnet config"
-	@echo "  healthz        Check liveness endpoint"
-	@echo "  readyz         Check readiness endpoint"
-	@echo "  metrics        Show first 50 lines of Prometheus metrics"
-	@echo "  mcp-init       Send MCP initialize handshake"
-	@echo "  mcp-chain-id   Call evm_get_chain_id tool"
-	@echo "  mcp-registries Call anchor_get_registries tool"
-	@echo "  mcp-anchor-info Call anchor_info tool"
-	@echo "  seed-test-data Create a test registry with 3 phoney records on-chain"
-	@echo "  test           Run all tests"
-	@echo "  test-unit      Unit tests only (-short)"
+	@echo "Build & Run:"
+	@echo "  all              check-all + test + build"
+	@echo "  build            Build the server binary"
+	@echo "  run              Run with stdio transport"
+	@echo "  run-http         Run with HTTP transport"
+	@echo "  run-local        Build and run locally with HTTP + testnet config"
+	@echo ""
+	@echo "API Key Management:"
+	@echo "  key-create NAME=x  Generate a new API key for client x"
+	@echo "  key-disable NAME=x Disable the key for client x"
+	@echo "  key-enable NAME=x  Re-enable a disabled key for client x"
+	@echo "  key-list           List all API keys and their status"
+	@echo ""
+	@echo "Local Dev:"
+	@echo "  healthz          Check liveness endpoint"
+	@echo "  readyz           Check readiness endpoint"
+	@echo "  metrics          Show first 50 lines of Prometheus metrics"
+	@echo "  mcp-init         Send MCP initialize handshake"
+	@echo "  mcp-chain-id     Call evm_get_chain_id tool"
+	@echo "  mcp-registries   Call anchor_get_registries tool"
+	@echo "  mcp-anchor-info  Call anchor_info tool"
+	@echo "  seed-test-data   Create a test registry with 3 phoney records on-chain"
+	@echo ""
+	@echo "Test:"
+	@echo "  test             Run all tests"
+	@echo "  test-unit        Unit tests only (-short)"
 	@echo "  test-integration Integration tests (-tags integration)"
-	@echo "  test-coverage  Tests with -race + coverage report"
-	@echo "  test-verbose   Verbose test output"
-	@echo "  test-load      Run k6 load tests (requires k6)"
-	@echo "  format         gofmt + goimports"
-	@echo "  vet            go vet"
-	@echo "  lint           golangci-lint"
-	@echo "  staticcheck    staticcheck (also run by golangci-lint)"
-	@echo "  check-all      format + vet + lint"
-	@echo "  pre-commit     Run pre-commit hooks on all files"
-	@echo "  install-hooks  Install pre-commit git hooks"
-	@echo "  setup-dev      Install dev deps + hooks"
-	@echo "  ci             install-dev + check-all + test-coverage"
-	@echo "  release-check  clean + ci + build"
-	@echo "  deps-update    Update all dependencies"
-	@echo "  deps-verify    Verify dependency checksums"
-	@echo "  docker-build   Build Docker image"
-	@echo "  docker-smoke   Build, run, verify healthz + MCP init, tear down"
-	@echo "  docker-run     Run in Docker"
-	@echo "  docker-buildx  Multi-arch Docker build (amd64 + arm64)"
-	@echo "  docker-push    Multi-arch build and push to registry"
-	@echo "  clean          Remove build artifacts"
-	@echo "  info           Show project info"
+	@echo "  test-coverage    Tests with -race + coverage report"
+	@echo "  test-verbose     Verbose test output"
+	@echo "  test-load        Run k6 load tests (requires k6)"
+	@echo ""
+	@echo "Quality:"
+	@echo "  format           gofmt + goimports"
+	@echo "  vet              go vet"
+	@echo "  lint             golangci-lint"
+	@echo "  staticcheck      staticcheck (also run by golangci-lint)"
+	@echo "  check-all        format + vet + lint"
+	@echo "  pre-commit       Run pre-commit hooks on all files"
+	@echo ""
+	@echo "Dev Setup:"
+	@echo "  install-hooks    Install pre-commit git hooks"
+	@echo "  setup-dev        Install dev deps + hooks"
+	@echo "  ci               install-dev + check-all + test-coverage"
+	@echo "  release-check    clean + ci + build"
+	@echo ""
+	@echo "Dependencies:"
+	@echo "  deps-update      Update all dependencies"
+	@echo "  deps-verify      Verify dependency checksums"
+	@echo ""
+	@echo "Docker:"
+	@echo "  docker-build     Build Docker image"
+	@echo "  docker-smoke     Build, run, verify healthz + MCP init, tear down"
+	@echo "  docker-run       Run in Docker"
+	@echo "  docker-buildx    Multi-arch Docker build (amd64 + arm64)"
+	@echo "  docker-push      Multi-arch build and push to registry"
+	@echo ""
+	@echo "Other:"
+	@echo "  clean            Remove build artifacts"
+	@echo "  info             Show project info"

@@ -67,9 +67,17 @@ hpa:
   maxReplicas: 10
   targetCPUUtilization: 70
 
-securityContext:
+podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 nodeSelector: {}
 tolerations: []

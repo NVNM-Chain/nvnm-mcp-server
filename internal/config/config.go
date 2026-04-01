@@ -38,12 +38,15 @@ type Config struct {
 	EnableWriteTools bool
 	Transport        string
 	HTTPAddr         string
+	APIKey           string
+	APIKeysFile      string
 
 	// Telemetry
 	OTELEndpoint     string
 	OTELServiceName  string
 	EnablePrometheus bool
 	EnableStdoutTel  bool
+	OTLPInsecure     bool
 	MetricsAddr      string
 
 	// Resilience
@@ -88,11 +91,14 @@ func Load() (*Config, error) {
 	cfg.RequestTimeout = timeout
 
 	cfg.EnableWriteTools = envOrDefault("ENABLE_WRITE_TOOLS", "false") == "true"
+	cfg.APIKey = os.Getenv("MCP_API_KEY")
+	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 
 	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "inveniam-mcp-server")
 	cfg.EnablePrometheus = envOrDefault("ENABLE_PROMETHEUS", "true") == "true"
 	cfg.EnableStdoutTel = envOrDefault("ENABLE_STDOUT_TELEMETRY", "false") == "true"
+	cfg.OTLPInsecure = envOrDefault("OTLP_INSECURE", "true") == "true"
 	cfg.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
 
 	retryStr := envOrDefault("RPC_MAX_RETRIES", "3")

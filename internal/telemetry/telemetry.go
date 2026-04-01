@@ -37,6 +37,10 @@ type Config struct {
 	// TraceSampleRatio controls the fraction of traces sampled (0.0 to 1.0).
 	// Default 1.0 samples all traces. Use lower values in high-volume production.
 	TraceSampleRatio float64
+	// OTLPInsecure controls whether the OTLP gRPC connection uses TLS.
+	// Default true for backward compatibility. Set to false in production
+	// when the OTLP collector supports TLS.
+	OTLPInsecure bool
 }
 
 // Telemetry manages the OpenTelemetry TracerProvider, MeterProvider,
@@ -136,15 +140,21 @@ func buildTracerProvider(
 	}
 
 	if cfg.OTLPEndpoint != "" {
-		exp, err := otlptracegrpc.New(ctx,
+		grpcOpts := []otlptracegrpc.Option{
 			otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
-			otlptracegrpc.WithInsecure(),
-		)
+		}
+		if cfg.OTLPInsecure {
+			grpcOpts = append(grpcOpts, otlptracegrpc.WithInsecure())
+		}
+		exp, err := otlptracegrpc.New(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("otlp trace exporter: %w", err)
 		}
 		opts = append(opts, sdktrace.WithBatcher(exp))
-		logger.Debug("otlp trace exporter enabled", slog.String("endpoint", cfg.OTLPEndpoint))
+		logger.Debug("otlp trace exporter enabled",
+			slog.String("endpoint", cfg.OTLPEndpoint),
+			slog.Bool("insecure", cfg.OTLPInsecure),
+		)
 	}
 
 	if cfg.EnableStdout {
@@ -182,17 +192,23 @@ func buildMeterProvider(
 	}
 
 	if cfg.OTLPEndpoint != "" {
-		exp, err := otlpmetricgrpc.New(ctx,
+		metricGRPCOpts := []otlpmetricgrpc.Option{
 			otlpmetricgrpc.WithEndpoint(cfg.OTLPEndpoint),
-			otlpmetricgrpc.WithInsecure(),
-		)
+		}
+		if cfg.OTLPInsecure {
+			metricGRPCOpts = append(metricGRPCOpts, otlpmetricgrpc.WithInsecure())
+		}
+		exp, err := otlpmetricgrpc.New(ctx, metricGRPCOpts...)
 		if err != nil {
 			return nil, nil, fmt.Errorf("otlp metric exporter: %w", err)
 		}
 		opts = append(opts, sdkmetric.WithReader(
 			sdkmetric.NewPeriodicReader(exp),
 		))
-		logger.Debug("otlp metric exporter enabled", slog.String("endpoint", cfg.OTLPEndpoint))
+		logger.Debug("otlp metric exporter enabled",
+			slog.String("endpoint", cfg.OTLPEndpoint),
+			slog.Bool("insecure", cfg.OTLPInsecure),
+		)
 	}
 
 	if cfg.EnableStdout {

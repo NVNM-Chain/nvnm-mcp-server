@@ -33,8 +33,8 @@ type mockEVM struct {
 	lastHash    common.Hash
 }
 
-func (m *mockEVM) ChainID(_ context.Context) (*big.Int, error)          { return big.NewInt(58887), m.returnErr }
-func (m *mockEVM) LatestBlockNumber(_ context.Context) (uint64, error)  { return 100, m.returnErr }
+func (m *mockEVM) ChainID(_ context.Context) (*big.Int, error)         { return big.NewInt(58887), m.returnErr }
+func (m *mockEVM) LatestBlockNumber(_ context.Context) (uint64, error) { return 100, m.returnErr }
 func (m *mockEVM) GetChainInfo(_ context.Context) (*evm.ChainInfo, error) {
 	return m.chainInfo, m.returnErr
 }
@@ -99,8 +99,8 @@ type mockAnchor struct {
 	returnErr  error
 }
 
-func (m *mockAnchor) Info() anchor.PrecompileInfo  { return m.info }
-func (m *mockAnchor) Available() bool              { return m.info.ABILoaded }
+func (m *mockAnchor) Info() anchor.PrecompileInfo { return m.info }
+func (m *mockAnchor) Available() bool             { return m.info.ABILoaded }
 func (m *mockAnchor) GetRegistry(_ context.Context, _ anchor.GetRegistryRequest) (*anchor.Registry, error) {
 	return m.registry, m.returnErr
 }
@@ -113,7 +113,7 @@ func (m *mockAnchor) GetRecords(_ context.Context, _ anchor.GetRecordsRequest) (
 func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRegistryRequest) (*anchor.UnsignedTransaction, error) {
 	return m.unsignedTx, m.returnErr
 }
-func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddRecordRequest) (*anchor.UnsignedTransaction, error) {
+func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddRecordRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
 	return m.unsignedTx, m.returnErr
 }
 func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) {
@@ -435,7 +435,7 @@ func TestHandler_CallContract_WithBlock(t *testing.T) {
 
 func TestHandler_SendRawTx_Happy(t *testing.T) {
 	m := &mockEVM{sendTxHash: "0xdeadbeef"}
-	handler := makeSendRawTxHandler(m)
+	handler := makeSendRawTxHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, sendRawTxInput{SignedTxHex: "0xf86c..."})
 	if err != nil {
@@ -447,7 +447,7 @@ func TestHandler_SendRawTx_Happy(t *testing.T) {
 }
 
 func TestHandler_SendRawTx_Empty(t *testing.T) {
-	handler := makeSendRawTxHandler(&mockEVM{})
+	handler := makeSendRawTxHandler(&mockEVM{}, testLogger())
 
 	_, _, err := handler(ctx, nil, sendRawTxInput{SignedTxHex: ""})
 	if err == nil {
@@ -609,7 +609,7 @@ var sampleUnsignedTx = &anchor.UnsignedTransaction{
 
 func TestHandler_PrepareAddRegistry_Happy(t *testing.T) {
 	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
-	handler := makePrepareAddRegistryHandler(m)
+	handler := makePrepareAddRegistryHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, prepareAddRegistryInput{
 		From:        testAddr,
@@ -629,7 +629,7 @@ func TestHandler_PrepareAddRegistry_Happy(t *testing.T) {
 
 func TestHandler_PrepareAddRegistry_Error(t *testing.T) {
 	m := &mockAnchor{returnErr: errors.New("missing from")}
-	handler := makePrepareAddRegistryHandler(m)
+	handler := makePrepareAddRegistryHandler(m, testLogger())
 
 	_, _, err := handler(ctx, nil, prepareAddRegistryInput{})
 	if err == nil {
@@ -639,7 +639,7 @@ func TestHandler_PrepareAddRegistry_Error(t *testing.T) {
 
 func TestHandler_PrepareAddRecord_Happy(t *testing.T) {
 	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
-	handler := makePrepareAddRecordHandler(m)
+	handler := makePrepareAddRecordHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, prepareAddRecordInput{
 		From:     testAddr,
@@ -657,7 +657,7 @@ func TestHandler_PrepareAddRecord_Happy(t *testing.T) {
 
 func TestHandler_PrepareAddRecord_Error(t *testing.T) {
 	m := &mockAnchor{returnErr: errors.New("checksum required")}
-	handler := makePrepareAddRecordHandler(m)
+	handler := makePrepareAddRecordHandler(m, testLogger())
 
 	_, _, err := handler(ctx, nil, prepareAddRecordInput{})
 	if err == nil {
@@ -667,7 +667,7 @@ func TestHandler_PrepareAddRecord_Error(t *testing.T) {
 
 func TestHandler_PrepareGrantRole_Happy(t *testing.T) {
 	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
-	handler := makePrepareGrantRoleHandler(m)
+	handler := makePrepareGrantRoleHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, prepareGrantRoleInput{
 		From:       testAddr,
@@ -685,7 +685,7 @@ func TestHandler_PrepareGrantRole_Happy(t *testing.T) {
 
 func TestHandler_PrepareGrantRole_Error(t *testing.T) {
 	m := &mockAnchor{returnErr: errors.New("role required")}
-	handler := makePrepareGrantRoleHandler(m)
+	handler := makePrepareGrantRoleHandler(m, testLogger())
 
 	_, _, err := handler(ctx, nil, prepareGrantRoleInput{})
 	if err == nil {

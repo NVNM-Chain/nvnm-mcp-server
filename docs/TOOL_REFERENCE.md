@@ -7,6 +7,12 @@ Complete schema reference for all 16 tools exposed by the Inveniam EVM MCP Serve
 > anchor\_prepare\_grant\_role, evm\_send\_raw\_transaction) are only registered
 > when the `ENABLE_WRITE_TOOLS` environment variable is set to `true`.
 > Without it the server exposes 12 read-only tools.
+>
+> **HTTP authentication:** When using HTTP transport with API keys configured
+> (`MCP_API_KEYS_FILE` or `MCP_API_KEY`), all requests must include an
+> `Authorization: Bearer <key>` header. The authenticated client ID is logged
+> with all write operations for audit purposes. See `README.md` for key
+> management commands.
 
 ---
 

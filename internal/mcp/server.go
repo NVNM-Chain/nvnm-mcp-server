@@ -69,21 +69,34 @@ func (s *Server) RunStdio(ctx context.Context) error {
 	return s.mcpServer.Run(ctx, &mcp.StdioTransport{})
 }
 
+// MaxRequestBodyBytes limits the size of incoming HTTP request bodies (10 MB).
+const MaxRequestBodyBytes = 10 * 1024 * 1024
+
 // RunHTTP runs the MCP server over Streamable HTTP on the given address.
-func (s *Server) RunHTTP(ctx context.Context, addr string) error {
+// When keys is non-nil and non-empty, requests must include a valid
+// "Authorization: Bearer <key>" header matching an enabled key.
+func (s *Server) RunHTTP(ctx context.Context, addr string, keys *KeyStore) error {
+	authRequired := keys != nil && !keys.Empty()
 	s.logger.Info("starting MCP server",
 		slog.String("transport", "http"),
 		slog.String("addr", addr),
+		slog.Bool("api_key_required", authRequired),
 	)
 
-	handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return s.mcpServer
 	}, nil)
+
+	handler := limitRequestBody(APIKeyAuth(mcpHandler, keys, s.logger))
 
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
 	}
 
 	errCh := make(chan error, 1)
@@ -103,4 +116,11 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
+		next.ServeHTTP(w, r)
+	})
 }

@@ -80,15 +80,21 @@ cmd/inveniam-mcp-server/main.go
     ├── internal/telemetry   (OTel providers, MCP middleware, health server, metrics)
     ├── internal/evm         (ethclient wrapper, normalized types, tracing wrapper)
     ├── internal/anchor      (anchor adapter, prepare-sign-submit, address validation)
-    ├── internal/mcp         (MCP server, tool handlers)
+    ├── internal/auth         (client identity context propagation)
+    ├── internal/mcp         (MCP server, tool handlers, auth middleware, key store)
     └── internal/version     (canonical version constant)
             │
             ├── internal/evm
             ├── internal/anchor
+            ├── internal/auth
             └── internal/errors
+
+cmd/key-mgmt/main.go
+    │
+    └── internal/mcp         (KeyStore, key file I/O)
 ```
 
-Key constraint: `internal/evm` knows nothing about anchors. `internal/anchor` knows nothing about MCP. `internal/mcp` orchestrates both.
+Key constraint: `internal/evm` knows nothing about anchors. `internal/anchor` knows nothing about MCP. `internal/mcp` orchestrates both. `internal/auth` is a minimal package depended on by `internal/mcp` and `internal/telemetry` for client identity propagation without import cycles.
 
 ### Package Responsibilities
 
@@ -385,9 +391,14 @@ type Config struct {
     Transport        string        // default "stdio"
     HTTPAddr         string        // default ":8080"
 
+    // Authentication
+    APIKey           string        // MCP_API_KEY; single key for simple deployments
+    APIKeysFile      string        // MCP_API_KEYS_FILE; path to JSON key store (preferred)
+
     // Telemetry
     OTELEndpoint     string        // OTEL_EXPORTER_OTLP_ENDPOINT; enables OTLP export
     OTELServiceName  string        // default "inveniam-mcp-server"
+    OTLPInsecure     bool          // OTLP_INSECURE; default true; set false for TLS
     EnablePrometheus bool          // default true; exposes /metrics
     EnableStdoutTel  bool          // default false; for dev debugging
     MetricsAddr      string        // default ":9090"; health + metrics server
@@ -505,13 +516,102 @@ Timeout: 5 seconds for telemetry flush and health server shutdown.
 ## 10. Security Considerations
 
 - **No raw RPC passthrough**: Callers cannot send arbitrary JSON-RPC. Only curated tools are exposed.
-- **Input validation**: All inputs validated at tool boundary.
+- **Input validation**: All inputs validated at tool boundary. Hex data and signed transaction inputs are capped at 2 MB to prevent memory exhaustion.
 - **No private keys**: The server never holds, receives, or logs private keys. All transaction signing is external to the server. This eliminates an entire class of key-management vulnerabilities.
 - **Write protection**: Write (prepare) tools disabled by default; require explicit opt-in via `ENABLE_WRITE_TOOLS=true`.
-- **RPC isolation**: Upstream RPC errors are mapped to safe error types; raw error details stay in logs.
+- **RPC isolation**: Upstream RPC errors are mapped to safe error types; raw error details stay in logs. `errors.SafeForClient()` sanitizes all errors at the MCP boundary before returning to callers.
 - **Unsigned tx transparency**: Prepare tools return the full transaction breakdown (to, data, nonce, gas, chain ID) so callers can verify exactly what they're signing.
 - **HTTPS**: Production RPC endpoints should use HTTPS.
 - **Rate limiting**: Token-bucket rate limiter on upstream RPC calls. See [Resilience](#11-resilience).
+- **HTTP request limits**: Request bodies are capped at 10 MB via `http.MaxBytesReader`. HTTP server enforces `ReadTimeout`, `WriteTimeout`, `IdleTimeout`, and `MaxHeaderBytes`.
+
+### Authentication (HTTP transport)
+
+When using HTTP transport, the server supports Bearer token authentication.
+
+**Configuration (choose one):**
+
+| Variable | Description |
+|---|---|
+| `MCP_API_KEYS_FILE` | Path to a JSON key store file with multiple keys and client IDs (recommended for production) |
+| `MCP_API_KEY` | Single API key for simple deployments (no client identity tracking) |
+
+**Key store format** (`.mcp-keys.json`):
+
+```json
+[
+  {
+    "id": "my-agent",
+    "key": "mcp_...",
+    "enabled": true,
+    "created_at": "2026-04-01T12:00:00Z"
+  }
+]
+```
+
+**Behaviour:**
+- When keys are configured, all HTTP requests must include `Authorization: Bearer <key>`.
+- Each key maps to a client ID that flows through to structured logs and OTel spans (`client_id` attribute), enabling per-client audit trails.
+- Disabled keys are rejected.
+- The server warns at startup if HTTP transport runs with no keys configured.
+- Stdio transport is unaffected (local-only, trusted).
+
+**Key management** is provided by the `cmd/key-mgmt/` CLI and Makefile targets:
+
+```bash
+make key-create CLIENT=my-agent   # Create key
+make key-list                     # List keys
+make key-disable ID=my-agent      # Disable key
+make key-enable ID=my-agent       # Re-enable key
+```
+
+### Error Sanitization
+
+Errors returned to MCP clients are sanitized via `errors.SafeForClient()`:
+- Known application errors (input validation, not-found, write-disabled) are passed through with their original message.
+- Unknown/internal errors (RPC failures, ABI decode errors, etc.) are replaced with a generic "internal error" message.
+- The original error is always logged server-side with full context.
+- RPC URLs are never included in error messages to prevent information leakage.
+
+### Reverse Proxy Requirements (Production)
+
+In production, the MCP HTTP server (`:8080`) should sit behind a reverse proxy (nginx, HAProxy, AWS ALB, etc.) that handles:
+
+1. **TLS termination** -- the MCP server itself does not terminate TLS. The reverse proxy should present a valid TLS certificate and forward plaintext HTTP to `:8080`.
+2. **Rate limiting** -- while the server has auth and upstream RPC rate limiting, a reverse proxy can provide connection-level rate limiting, IP-based throttling, and DDoS protection.
+3. **Request size limits** -- the server enforces a 10 MB body limit, but the proxy should also cap body size to prevent network-level abuse.
+4. **Access logging** -- the proxy should log source IPs, request sizes, and TLS versions for forensic purposes.
+
+**Example nginx configuration:**
+
+```nginx
+upstream mcp_backend {
+    server 127.0.0.1:8080;
+}
+
+server {
+    listen 443 ssl;
+    server_name mcp.example.com;
+
+    ssl_certificate     /etc/ssl/certs/mcp.crt;
+    ssl_certificate_key /etc/ssl/private/mcp.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://mcp_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+}
+```
+
+**Note:** The health/metrics port (`:9090`) should NOT be exposed externally. It should only be accessible within the cluster for Kubernetes probes and Prometheus scraping.
 
 ## 11. Resilience
 

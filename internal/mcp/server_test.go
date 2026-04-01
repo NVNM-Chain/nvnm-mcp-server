@@ -89,7 +89,7 @@ func TestE2E_ListTools_ContainsExpectedNames(t *testing.T) {
 		"evm_get_chain_id":            false,
 		"evm_get_block":               false,
 		"evm_get_transaction":         false,
-		"evm_get_transaction_receipt":  false,
+		"evm_get_transaction_receipt": false,
 		"evm_get_balance":             false,
 		"evm_get_code":                false,
 		"evm_get_logs":                false,

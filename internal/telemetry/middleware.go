@@ -8,6 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -40,6 +43,7 @@ func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 			ctx = context.WithValue(ctx, requestIDKey{}, reqID)
 
 			toolName := extractToolName(method, req)
+			clientID := auth.ClientIDFromContext(ctx)
 
 			ctx, span := tracer.Start(ctx, method,
 				trace.WithSpanKind(trace.SpanKindServer),
@@ -47,6 +51,7 @@ func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 					attribute.String("mcp.method", method),
 					attribute.String("mcp.tool.name", toolName),
 					attribute.String("mcp.request.id", reqID),
+					attribute.String("mcp.client.id", clientID),
 				),
 			)
 			defer span.End()
@@ -85,11 +90,12 @@ func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 				slog.String("method", method),
 				slog.String("tool", toolName),
 				slog.String("request_id", reqID),
+				slog.String("client_id", clientID),
 				slog.Duration("duration", elapsed),
 				slog.String("status", status),
 			)
 
-			return result, err
+			return result, apperrors.SafeForClient(err)
 		}
 	}
 }
