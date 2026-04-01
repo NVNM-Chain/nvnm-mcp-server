@@ -225,9 +225,14 @@ make docker-build   # Build Docker image
 make docker-buildx  # Multi-arch Docker build (amd64 + arm64)
 make docker-push    # Multi-arch build and push to registry
 make docker-run     # Run in Docker
+make docker-smoke   # Build, run, verify healthz + MCP, tear down
 make test-load      # Run k6 load tests (requires k6)
+make test-integration # Integration tests against live testnet
+make seed-test-data # Create test registry with phoney records on-chain
 make clean          # Remove build artifacts
 ```
+
+For comprehensive testing documentation, including test architecture, framework details, and latest results, see [docs/TESTING.md](docs/TESTING.md).
 
 ## Deployment
 
@@ -300,6 +305,9 @@ tests/
 docs/
   DESIGN.md                  Architecture and design decisions
   IMPLEMENTATION_PLAN.md     Phased implementation plan
+  TESTING.md                 Test framework, strategy, and results
+  TOOL_REFERENCE.md          MCP tool schema reference
+  RUNBOOK.md                 Operational runbook
 .github/workflows/ci.yml    CI pipeline
 .pre-commit-config.yaml     Pre-commit hooks
 .golangci.yml               Linter configuration

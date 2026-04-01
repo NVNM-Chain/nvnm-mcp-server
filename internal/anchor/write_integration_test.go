@@ -297,3 +297,66 @@ func TestIntegration_PrepareSignSubmit_AddRecord(t *testing.T) {
 		t.Errorf("record with checksum %q not found in registry %q", testChecksum, registryName)
 	}
 }
+
+func TestIntegration_PrepareSignSubmit_GrantRole(t *testing.T) {
+	creds := loadCredentials(t)
+	c := integrationClient(t)
+	evmC := integrationEVMClient(t)
+	ctx := context.Background()
+
+	registryName := fmt.Sprintf("mcp-grant-test-%d", time.Now().UnixNano())
+	t.Logf("creating registry %q for grantRole test...", registryName)
+
+	regUTX, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
+		From:        creds.Address,
+		Name:        registryName,
+		Description: "Registry for grantRole e2e test",
+	})
+	if err != nil {
+		t.Fatalf("PrepareAddRegistry: %v", err)
+	}
+
+	regSigned := signUnsignedTx(t, regUTX, creds.PrivateKey)
+	regTxHash, err := evmC.SendRawTransaction(ctx, regSigned)
+	if err != nil {
+		t.Fatalf("SendRawTransaction (addRegistry): %v", err)
+	}
+	regReceipt := waitForReceipt(t, evmC, regTxHash, 30*time.Second)
+	if regReceipt.Status != "success" {
+		t.Fatalf("addRegistry reverted: status=%s", regReceipt.Status)
+	}
+	t.Logf("  registry created in block %d", regReceipt.BlockNumber)
+
+	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{Name: &registryName})
+	if err != nil {
+		t.Fatalf("GetRegistry: %v", err)
+	}
+
+	granteeAddr := "0x0000000000000000000000000000000000000001"
+
+	t.Log("preparing grantRole transaction...")
+	grantUTX, err := c.PrepareGrantRole(ctx, anchor.PrepareGrantRoleRequest{
+		From:       creds.Address,
+		RegistryID: reg.ID,
+		Account:    granteeAddr,
+		Role:       "editor",
+	})
+	if err != nil {
+		t.Fatalf("PrepareGrantRole: %v", err)
+	}
+	t.Logf("  nonce=%d gas=%d", grantUTX.Nonce, grantUTX.Gas)
+
+	grantSigned := signUnsignedTx(t, grantUTX, creds.PrivateKey)
+	grantTxHash, err := evmC.SendRawTransaction(ctx, grantSigned)
+	if err != nil {
+		t.Fatalf("SendRawTransaction (grantRole): %v", err)
+	}
+	t.Logf("  grant tx hash: %s", grantTxHash)
+
+	grantReceipt := waitForReceipt(t, evmC, grantTxHash, 30*time.Second)
+	if grantReceipt.Status != "success" {
+		t.Fatalf("grantRole reverted: status=%s", grantReceipt.Status)
+	}
+	t.Logf("  grantRole mined in block %d (gas used: %d)",
+		grantReceipt.BlockNumber, grantReceipt.GasUsed)
+}

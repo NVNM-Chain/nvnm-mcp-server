@@ -1,5 +1,7 @@
 # Binaries
 inveniam-mcp-server
+/seed-test-data
+/query-anchor
 *.exe
 *.exe~
 *.dll

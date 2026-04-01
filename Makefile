@@ -8,9 +8,10 @@ GOFLAGS := -v
 LDFLAGS := -s -w
 
 .PHONY: all build run run-http run-local healthz readyz metrics mcp-init mcp-chain-id \
-        mcp-registries mcp-anchor-info test test-unit test-integration test-coverage test-verbose \
+        mcp-registries mcp-anchor-info seed-test-data \
+        test test-unit test-integration test-coverage test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
-        docker-run \
+        docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
         deps-update deps-verify info help
 
@@ -74,6 +75,9 @@ mcp-anchor-info:
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"anchor_info","arguments":{}}}' | python3 -m json.tool
+
+seed-test-data:
+	$(GO) run ./cmd/seed-test-data
 
 ## Test
 
@@ -166,6 +170,31 @@ docker-run:
 		-p 8080:8080 \
 		$(DOCKER_IMAGE)
 
+docker-smoke: docker-build
+	@echo "Starting container..."
+	@CONTAINER_ID=$$(docker run -d --rm \
+		-e INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+		-e INVENIAM_CHAIN_ID=58887 \
+		-e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
+		-e ENABLE_WRITE_TOOLS=true \
+		-e MCP_TRANSPORT=http \
+		-p 18080:8080 -p 19090:9090 \
+		$(DOCKER_IMAGE)) && \
+	echo "  container: $$CONTAINER_ID" && \
+	sleep 3 && \
+	echo "Checking /healthz..." && \
+	curl -sf http://localhost:19090/healthz | python3 -m json.tool && \
+	echo "Checking /readyz..." && \
+	curl -sf http://localhost:19090/readyz | python3 -m json.tool && \
+	echo "Checking tools/list..." && \
+	curl -sf -X POST http://localhost:18080/ \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"docker-smoke","version":"1.0.0"}}}' > /dev/null && \
+	echo "  initialize OK" && \
+	docker stop $$CONTAINER_ID > /dev/null && \
+	echo "Docker smoke test PASSED"
+
 docker-buildx:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE) .
 
@@ -203,6 +232,7 @@ help:
 	@echo "  mcp-chain-id   Call evm_get_chain_id tool"
 	@echo "  mcp-registries Call anchor_get_registries tool"
 	@echo "  mcp-anchor-info Call anchor_info tool"
+	@echo "  seed-test-data Create a test registry with 3 phoney records on-chain"
 	@echo "  test           Run all tests"
 	@echo "  test-unit      Unit tests only (-short)"
 	@echo "  test-integration Integration tests (-tags integration)"
@@ -222,6 +252,7 @@ help:
 	@echo "  deps-update    Update all dependencies"
 	@echo "  deps-verify    Verify dependency checksums"
 	@echo "  docker-build   Build Docker image"
+	@echo "  docker-smoke   Build, run, verify healthz + MCP init, tear down"
 	@echo "  docker-run     Run in Docker"
 	@echo "  docker-buildx  Multi-arch Docker build (amd64 + arm64)"
 	@echo "  docker-push    Multi-arch build and push to registry"

@@ -1,0 +1,276 @@
+package main
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+
+	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
+	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/inveniam/nvnm-mcp-server/internal/logging"
+)
+
+const (
+	rpcURL       = "https://evm.inveniam.mantrachain.io"
+	abiPath      = "abi/anchoring.json"
+	chainID      = 58887
+	credsPath    = ".chain_credentials.txt"
+	registryName = "mcp-test-data"
+	registryDesc = "Test registry seeded by cmd/seed-test-data for MCP server validation"
+)
+
+type testRecord struct {
+	URI          string
+	Checksum     string
+	ChecksumAlgo string
+	Metadata     string
+}
+
+var records = []testRecord{
+	{
+		URI:          "https://docs.example.com/reports/q1-2026.pdf",
+		Checksum:     "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+		ChecksumAlgo: "sha256",
+		Metadata:     `{"type":"quarterly_report","quarter":"Q1-2026"}`,
+	},
+	{
+		URI:          "ipfs://QmFakeHash123456789abcdef0123456789abcdef",
+		Checksum:     "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5",
+		ChecksumAlgo: "sha256",
+		Metadata:     `{"type":"audit_certificate","auditor":"TestAudit LLC"}`,
+	},
+	{
+		URI:          "https://docs.example.com/contracts/nda-001.pdf",
+		Checksum:     "789abcde0123456789abcdef0123456789abcdef0123456789abcdef01234567",
+		ChecksumAlgo: "sha256",
+		Metadata:     `{"type":"legal_contract","classification":"confidential"}`,
+	},
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	logger := logging.NewText("warn")
+
+	// Load credentials
+	creds, err := loadCredentials(credsPath)
+	if err != nil {
+		return fmt.Errorf("load credentials: %w", err)
+	}
+	fmt.Printf("Sender: %s\n\n", creds.address)
+
+	// Connect to EVM
+	evmClient, err := evm.NewClient(ctx, rpcURL, 15*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect to RPC: %w", err)
+	}
+	defer evmClient.Close()
+
+	chainInfo, err := evmClient.GetChainInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("chain info: %w", err)
+	}
+	fmt.Printf("Chain ID: %d | Latest block: %d\n\n", chainInfo.ChainID, chainInfo.LatestBlockNumber)
+
+	anchorClient := anchor.NewClient(evmClient, anchor.PrecompileAddress, chainID, abiPath, logger)
+
+	// Step 1: Create registry (skip if it already exists)
+	fmt.Printf("=== Creating registry %q ===\n", registryName)
+	existing, lookupErr := anchorClient.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
+	if lookupErr == nil && existing != nil {
+		fmt.Printf("  already exists: id=%d creator=%s (skipping)\n\n", existing.ID, existing.Creator)
+	} else {
+		regUTX, prepErr := anchorClient.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
+			From:        creds.address,
+			Name:        registryName,
+			Description: registryDesc,
+			Metadata:    `{"seeded_by":"cmd/seed-test-data"}`,
+		})
+		if prepErr != nil {
+			return fmt.Errorf("prepare addRegistry: %w", prepErr)
+		}
+		fmt.Printf("  nonce=%d gas=%d gasPrice=%s\n", regUTX.Nonce, regUTX.Gas, regUTX.GasPrice)
+
+		regSigned, signErr := signTx(regUTX, creds.privateKey)
+		if signErr != nil {
+			return fmt.Errorf("sign addRegistry: %w", signErr)
+		}
+
+		regTxHash, submitErr := evmClient.SendRawTransaction(ctx, regSigned)
+		if submitErr != nil {
+			return fmt.Errorf("submit addRegistry: %w", submitErr)
+		}
+		fmt.Printf("  tx: %s\n", regTxHash)
+
+		regReceipt, waitErr := waitForReceipt(ctx, evmClient, regTxHash, 30*time.Second)
+		if waitErr != nil {
+			return fmt.Errorf("addRegistry receipt: %w", waitErr)
+		}
+		if regReceipt.Status != "success" {
+			return fmt.Errorf("addRegistry reverted: status=%s", regReceipt.Status)
+		}
+		fmt.Printf("  mined in block %d (gas used: %d)\n\n", regReceipt.BlockNumber, regReceipt.GasUsed)
+	}
+
+	// Step 2: Add records
+	for i, rec := range records {
+		fmt.Printf("=== Adding record %d/%d ===\n", i+1, len(records))
+		fmt.Printf("  URI: %s\n", rec.URI)
+
+		recUTX, prepErr := anchorClient.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
+			From:         creds.address,
+			Registry:     registryName,
+			URI:          rec.URI,
+			Checksum:     rec.Checksum,
+			ChecksumAlgo: rec.ChecksumAlgo,
+			Metadata:     rec.Metadata,
+		})
+		if prepErr != nil {
+			return fmt.Errorf("prepare addRecord[%d]: %w", i, prepErr)
+		}
+
+		recSigned, signErr := signTx(recUTX, creds.privateKey)
+		if signErr != nil {
+			return fmt.Errorf("sign addRecord[%d]: %w", i, signErr)
+		}
+
+		recTxHash, submitErr := evmClient.SendRawTransaction(ctx, recSigned)
+		if submitErr != nil {
+			return fmt.Errorf("submit addRecord[%d]: %w", i, submitErr)
+		}
+		fmt.Printf("  tx: %s\n", recTxHash)
+
+		recReceipt, waitErr := waitForReceipt(ctx, evmClient, recTxHash, 30*time.Second)
+		if waitErr != nil {
+			return fmt.Errorf("addRecord[%d] receipt: %w", i, waitErr)
+		}
+		if recReceipt.Status != "success" {
+			return fmt.Errorf("addRecord[%d] reverted: status=%s", i, recReceipt.Status)
+		}
+		fmt.Printf("  mined in block %d (gas used: %d)\n\n", recReceipt.BlockNumber, recReceipt.GasUsed)
+	}
+
+	// Step 3: Verify
+	fmt.Println("=== Verifying ===")
+	reg, err := anchorClient.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
+	if err != nil {
+		return fmt.Errorf("verify registry: %w", err)
+	}
+	fmt.Printf("  Registry: id=%d name=%q creator=%s\n", reg.ID, reg.Name, reg.Creator)
+
+	recs, err := anchorClient.GetRecords(ctx, anchor.GetRecordsRequest{
+		Registry:   strPtr(registryName),
+		Pagination: &anchor.PageRequest{Limit: 10},
+	})
+	if err != nil {
+		return fmt.Errorf("verify records: %w", err)
+	}
+	fmt.Printf("  Records: %d found\n", len(recs.Records))
+	for _, r := range recs.Records {
+		fmt.Printf("    recordID=%d checksum=%s uri=%s\n", r.RecordID, r.Checksum, r.URI)
+	}
+
+	fmt.Println("\nDone. Registry and records are on-chain.")
+	return nil
+}
+
+type credentials struct {
+	address    string
+	privateKey *ecdsa.PrivateKey
+}
+
+func loadCredentials(path string) (*credentials, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // operator-controlled path
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	var address, keyHex string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "Address:"); ok {
+			address = strings.TrimSpace(after)
+		}
+		if after, ok := strings.CutPrefix(line, "PrivateKey:"); ok {
+			keyHex = strings.TrimSpace(after)
+		}
+	}
+	if address == "" || keyHex == "" {
+		return nil, fmt.Errorf("file missing Address or PrivateKey fields")
+	}
+
+	keyHex = strings.TrimPrefix(keyHex, "0x")
+	privKey, err := crypto.HexToECDSA(keyHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid private key: %w", err)
+	}
+
+	return &credentials{address: address, privateKey: privKey}, nil
+}
+
+func signTx(utx *anchor.UnsignedTransaction, key *ecdsa.PrivateKey) (string, error) {
+	rawHex := strings.TrimPrefix(utx.RawTx, "0x")
+	txBytes, err := hex.DecodeString(rawHex)
+	if err != nil {
+		return "", fmt.Errorf("decode raw tx hex: %w", err)
+	}
+
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(txBytes); err != nil {
+		return "", fmt.Errorf("unmarshal unsigned tx: %w", err)
+	}
+
+	signer := types.NewEIP155Signer(big.NewInt(utx.ChainID))
+	signedTx, err := types.SignTx(tx, signer, key)
+	if err != nil {
+		return "", fmt.Errorf("sign tx: %w", err)
+	}
+
+	signedBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("marshal signed tx: %w", err)
+	}
+
+	return "0x" + hex.EncodeToString(signedBytes), nil
+}
+
+func waitForReceipt(
+	ctx context.Context,
+	client evm.Client,
+	txHash string,
+	timeout time.Duration,
+) (*evm.NormalizedReceipt, error) {
+	hash := common.HexToHash(txHash)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+
+		receipt, err := client.TransactionReceipt(ctx, hash)
+		if err != nil {
+			fmt.Printf("  waiting for receipt...\n")
+			continue
+		}
+		return receipt, nil
+	}
+	return nil, fmt.Errorf("timed out after %s waiting for receipt of %s", timeout, txHash)
+}
+
+func strPtr(s string) *string { return &s }
