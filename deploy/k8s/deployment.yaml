@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inveniam-mcp-server
+  labels:
+    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: inveniam
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inveniam-mcp-server
+      app.kubernetes.io/component: mcp-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inveniam-mcp-server
+        app.kubernetes.io/component: mcp-server
+        app.kubernetes.io/part-of: inveniam
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: inveniam-mcp-server
+          image: ghcr.io/inveniamcapital/inveniam-mcp-server:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--transport"
+            - "http"
+          ports:
+            - name: mcp
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: inveniam-mcp-server-config
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

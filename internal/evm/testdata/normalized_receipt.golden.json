@@ -1,0 +1,24 @@
+{
+  "tx_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "block_number": 1000,
+  "block_hash": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  "transaction_index": 0,
+  "status": "success",
+  "gas_used": 21000,
+  "cumulative_gas_used": 21000,
+  "contract_address": "0x9876543210abcdef9876543210abcdef98765432",
+  "logs": [
+    {
+      "address": "0x0000000000000000000000000000000000000A00",
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+      ],
+      "data": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "block_number": 1000,
+      "tx_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "tx_index": 0,
+      "log_index": 0,
+      "removed": false
+    }
+  ]
+}

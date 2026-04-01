@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: inveniam-mcp-server
+  labels:
+    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: inveniam
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inveniam-mcp-server
+      app.kubernetes.io/component: mcp-server
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scheme: http

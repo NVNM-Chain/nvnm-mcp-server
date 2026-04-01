@@ -1,0 +1,76 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/inveniamcapital/inveniam-mcp-server
+  tag: "0.5.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  ports:
+    mcp: 8080
+    metrics: 9090
+
+resources:
+  requests:
+    memory: 64Mi
+    cpu: 100m
+  limits:
+    memory: 256Mi
+    cpu: 500m
+
+# Non-secret configuration; injected via ConfigMap.
+env:
+  INVENIAM_EVM_RPC_URL: ""
+  INVENIAM_CHAIN_ID: "58887"
+  ANCHOR_ABI_PATH: ""
+  MCP_TRANSPORT: "http"
+  LOG_LEVEL: "info"
+  REQUEST_TIMEOUT: "15s"
+  ENABLE_WRITE_TOOLS: "false"
+  ENABLE_PROMETHEUS: "true"
+  METRICS_ADDR: ":9090"
+  MCP_HTTP_ADDR: ":8080"
+  RPC_MAX_RETRIES: ""
+  RPC_RATE_LIMIT: ""
+  CIRCUIT_BREAKER_THRESHOLD: ""
+
+probes:
+  liveness:
+    httpGet:
+      path: /healthz
+      port: metrics
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    httpGet:
+      path: /readyz
+      port: metrics
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+
+securityContext:
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

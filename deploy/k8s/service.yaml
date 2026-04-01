@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: inveniam-mcp-server
+  labels:
+    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: inveniam
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/component: mcp-server
+  ports:
+    - name: mcp
+      port: 8080
+      targetPort: mcp
+    - name: metrics
+      port: 9090
+      targetPort: metrics

@@ -1,0 +1,11 @@
+# Optional: apply this manifest only if you want a dedicated namespace.
+# You can omit it and deploy into another namespace by changing
+# `namespace` in kustomization.yaml (or `kubectl apply -n ...`).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inveniam-mcp
+  labels:
+    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/component: mcp-server
+    app.kubernetes.io/part-of: inveniam

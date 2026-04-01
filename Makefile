@@ -8,7 +8,8 @@ GOFLAGS := -v
 LDFLAGS := -s -w
 
 .PHONY: all build run run-http test test-unit test-integration test-coverage test-verbose \
-        format vet lint staticcheck check-all clean docker-build docker-run \
+        test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
+        docker-run \
         pre-commit install-hooks setup-dev install-dev ci release-check \
         deps-update deps-verify info help
 
@@ -46,6 +47,10 @@ test-coverage:
 
 test-verbose:
 	$(GO) test -v -count=1 ./...
+
+test-load:
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 is required: brew install k6"; exit 1; }
+	k6 run tests/load/k6_mcp_http.js
 
 ## Quality
 
@@ -114,6 +119,12 @@ docker-run:
 		-p 8080:8080 \
 		$(DOCKER_IMAGE)
 
+docker-buildx:
+	docker buildx build --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE) .
+
+docker-push:
+	docker buildx build --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE) --push .
+
 ## Cleanup
 
 clean:
@@ -140,6 +151,7 @@ help:
 	@echo "  test-integration Integration tests (-tags integration)"
 	@echo "  test-coverage  Tests with -race + coverage report"
 	@echo "  test-verbose   Verbose test output"
+	@echo "  test-load      Run k6 load tests (requires k6)"
 	@echo "  format         gofmt + goimports"
 	@echo "  vet            go vet"
 	@echo "  lint           golangci-lint"
@@ -154,5 +166,7 @@ help:
 	@echo "  deps-verify    Verify dependency checksums"
 	@echo "  docker-build   Build Docker image"
 	@echo "  docker-run     Run in Docker"
+	@echo "  docker-buildx  Multi-arch Docker build (amd64 + arm64)"
+	@echo "  docker-push    Multi-arch build and push to registry"
 	@echo "  clean          Remove build artifacts"
 	@echo "  info           Show project info"

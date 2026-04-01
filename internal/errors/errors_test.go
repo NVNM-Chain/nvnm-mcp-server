@@ -24,6 +24,8 @@ func TestIsInputError(t *testing.T) {
 		{"wrapped input error", fmt.Errorf("context: %w", ErrInvalidAddress), true},
 		{"ErrBlockNotFound is not input error", ErrBlockNotFound, false},
 		{"ErrUpstreamRPC is not input error", ErrUpstreamRPC, false},
+		{"ErrCircuitOpen is not input error", ErrCircuitOpen, false},
+		{"ErrRateLimited is not input error", ErrRateLimited, false},
 		{"unrelated error", errors.New("something else"), false},
 		{"nil error", nil, false},
 	}
@@ -33,6 +35,31 @@ func TestIsInputError(t *testing.T) {
 			got := IsInputError(tc.err)
 			if got != tc.want {
 				t.Errorf("IsInputError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsTransientError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"ErrUpstreamRPC", ErrUpstreamRPC, true},
+		{"ErrContractCallFailed", ErrContractCallFailed, true},
+		{"wrapped upstream", fmt.Errorf("context: %w", ErrUpstreamRPC), true},
+		{"ErrCircuitOpen is not transient", ErrCircuitOpen, false},
+		{"ErrRateLimited is not transient", ErrRateLimited, false},
+		{"ErrInvalidAddress is not transient", ErrInvalidAddress, false},
+		{"nil error", nil, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsTransientError(tc.err)
+			if got != tc.want {
+				t.Errorf("IsTransientError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -72,6 +99,7 @@ func TestSentinelErrors_AreDistinct(t *testing.T) {
 		ErrInvalidChecksum, ErrBlockNotFound, ErrTxNotFound, ErrRegistryNotFound,
 		ErrRecordNotFound, ErrAnchorABIMissing, ErrWriteDisabled,
 		ErrUpstreamRPC, ErrContractCallFailed, ErrPrecompileCall,
+		ErrCircuitOpen, ErrRateLimited,
 	}
 
 	for i, a := range allErrors {
@@ -90,6 +118,7 @@ func TestSentinelErrors_HaveMessages(t *testing.T) {
 		ErrInvalidChecksum, ErrBlockNotFound, ErrTxNotFound, ErrRegistryNotFound,
 		ErrRecordNotFound, ErrAnchorABIMissing, ErrWriteDisabled,
 		ErrUpstreamRPC, ErrContractCallFailed, ErrPrecompileCall,
+		ErrCircuitOpen, ErrRateLimited,
 	}
 
 	for _, err := range allErrors {

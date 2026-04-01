@@ -23,6 +23,12 @@ type Metrics struct {
 	RPCDuration metric.Float64Histogram
 	// RPCErrorCount counts upstream EVM RPC calls that returned an error.
 	RPCErrorCount metric.Int64Counter
+	// RPCRetryCount counts retry attempts for upstream EVM RPC calls.
+	RPCRetryCount metric.Int64Counter
+	// CircuitBreakerState reports the current circuit breaker state (0=closed, 1=half-open, 2=open).
+	CircuitBreakerState metric.Int64Gauge
+	// RPCRateLimited counts rate-limit rejections for upstream RPC calls.
+	RPCRateLimited metric.Int64Counter
 }
 
 // NewMetrics creates and registers all metric instruments with the provider.
@@ -79,12 +85,39 @@ func NewMetrics(provider *sdkmetric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("rpc error counter: %w", err)
 	}
 
+	rpcRetries, err := meter.Int64Counter(
+		"evm.rpc.retries",
+		metric.WithDescription("Total retry attempts for upstream EVM RPC calls"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("rpc retry counter: %w", err)
+	}
+
+	cbState, err := meter.Int64Gauge(
+		"evm.rpc.circuit_breaker.state",
+		metric.WithDescription("Circuit breaker state: 0=closed, 1=half-open, 2=open"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("circuit breaker state gauge: %w", err)
+	}
+
+	rateLimited, err := meter.Int64Counter(
+		"evm.rpc.rate_limited",
+		metric.WithDescription("Total rate-limit rejections for upstream RPC calls"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("rate limited counter: %w", err)
+	}
+
 	return &Metrics{
-		ToolCallDuration: toolDur,
-		ToolCallCount:    toolCount,
-		ToolErrorCount:   toolErrors,
-		ActiveRequests:   active,
-		RPCDuration:      rpcDur,
-		RPCErrorCount:    rpcErrors,
+		ToolCallDuration:    toolDur,
+		ToolCallCount:       toolCount,
+		ToolErrorCount:      toolErrors,
+		ActiveRequests:      active,
+		RPCDuration:         rpcDur,
+		RPCErrorCount:       rpcErrors,
+		RPCRetryCount:       rpcRetries,
+		CircuitBreakerState: cbState,
+		RPCRateLimited:      rateLimited,
 	}, nil
 }

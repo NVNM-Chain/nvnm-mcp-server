@@ -511,9 +511,58 @@ Timeout: 5 seconds for telemetry flush and health server shutdown.
 - **RPC isolation**: Upstream RPC errors are mapped to safe error types; raw error details stay in logs.
 - **Unsigned tx transparency**: Prepare tools return the full transaction breakdown (to, data, nonce, gas, chain ID) so callers can verify exactly what they're signing.
 - **HTTPS**: Production RPC endpoints should use HTTPS.
-- **Rate limiting**: Future consideration for HTTP transport (Phase 4).
+- **Rate limiting**: Token-bucket rate limiter on upstream RPC calls. See [Resilience](#11-resilience).
 
-## 11. Key Design Decisions
+## 11. Resilience
+
+The EVM client stack includes a resilience wrapper (`internal/evm/resilient.go`) that decorates the tracing client with three production-hardening mechanisms.
+
+### Composition
+
+```
+raw ethclient → TracingClient → ResilientClient → (used by anchor + MCP handlers)
+```
+
+Each retry attempt passes through the tracing layer, producing its own OTel span. The resilient wrapper adds metrics for retry count, circuit breaker state, and rate-limit rejections.
+
+### Retry with Exponential Backoff
+
+Transient RPC errors (timeouts, network errors, connection resets) are retried using exponential backoff with jitter. Configuration:
+
+- `RPC_MAX_RETRIES` (default 3) -- maximum retry attempts
+- `RPC_INITIAL_BACKOFF` (default 500ms) -- initial wait between retries
+- `RPC_MAX_BACKOFF` (default 10s) -- maximum wait between retries
+
+`SendRawTransaction` is explicitly excluded from retries due to idempotency risk.
+
+### Rate Limiting
+
+A token-bucket rate limiter controls the rate of upstream RPC calls. Configuration:
+
+- `RPC_RATE_LIMIT` (default 100 req/s) -- sustained request rate
+- `RPC_RATE_BURST` (default 20) -- burst capacity
+
+When the rate limit is exceeded and the context expires waiting for a token, the call returns `ErrRateLimited`.
+
+### Circuit Breaker
+
+A circuit breaker (sony/gobreaker) protects against cascading failures from a degraded upstream RPC. Configuration:
+
+- `CIRCUIT_BREAKER_THRESHOLD` (default 5) -- consecutive failures to trip the breaker
+- `CIRCUIT_BREAKER_TIMEOUT` (default 30s) -- time in open state before half-open probe
+
+States:
+- **Closed** -- normal operation, all calls pass through
+- **Open** -- upstream is failing, all calls rejected immediately with `ErrCircuitOpen`
+- **Half-Open** -- one probe call allowed; success closes the breaker, failure reopens it
+
+State transitions are logged at WARN level and recorded in the `evm.rpc.circuit_breaker.state` metric.
+
+### Trace Sampling
+
+`OTEL_TRACE_SAMPLE_RATIO` (default 1.0) configures the fraction of root traces sampled. Uses `ParentBased(TraceIDRatioBased)` to respect upstream sampling decisions while controlling cost for high-volume deployments.
+
+## 12. Key Design Decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
@@ -530,3 +579,7 @@ Timeout: 5 seconds for telemetry flush and health server shutdown.
 | Nonce management | Fetch-at-prepare-time | Correct for serial writes; sufficient for document anchoring volumes; avoids statefulness in the server |
 | No `normalize/` package | Merged into `evm/` and `anchor/` | Original plan had too much indirection for the value |
 | MCP middleware | Custom (~100 lines) | Avoided 1-star `mcp-otel-go` dependency; full control over privacy and metric naming |
+| Retry logic | cenkalti/backoff v5 | Exponential backoff with jitter; transitive dep promoted to direct |
+| Rate limiting | golang.org/x/time/rate | Stdlib-adjacent token bucket; no external dependency complexity |
+| Circuit breaker | sony/gobreaker v2 | Well-maintained (5k+ stars), simple API, generic type support |
+| Trace sampling | OTel SDK ParentBased | Respects upstream decisions, configurable ratio for cost control |

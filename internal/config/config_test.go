@@ -26,6 +26,14 @@ func clearEnv(t *testing.T) {
 		"ENABLE_PROMETHEUS",
 		"ENABLE_STDOUT_TELEMETRY",
 		"METRICS_ADDR",
+		"RPC_MAX_RETRIES",
+		"RPC_INITIAL_BACKOFF",
+		"RPC_MAX_BACKOFF",
+		"RPC_RATE_LIMIT",
+		"RPC_RATE_BURST",
+		"CIRCUIT_BREAKER_THRESHOLD",
+		"CIRCUIT_BREAKER_TIMEOUT",
+		"OTEL_TRACE_SAMPLE_RATIO",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -160,6 +168,33 @@ func TestLoad_ValidationErrors(t *testing.T) {
 				t.Setenv("MCP_TRANSPORT", "grpc")
 			},
 			wantErr: ErrInvalidTransport,
+		},
+		{
+			name: "invalid sample ratio too high",
+			setup: func(t *testing.T) {
+				t.Helper()
+				setMinimalEnv(t)
+				t.Setenv("OTEL_TRACE_SAMPLE_RATIO", "1.5")
+			},
+			wantErr: ErrInvalidSampleRatio,
+		},
+		{
+			name: "invalid rate limit",
+			setup: func(t *testing.T) {
+				t.Helper()
+				setMinimalEnv(t)
+				t.Setenv("RPC_RATE_LIMIT", "0")
+			},
+			wantErr: ErrInvalidRateLimit,
+		},
+		{
+			name: "invalid circuit breaker threshold",
+			setup: func(t *testing.T) {
+				t.Helper()
+				setMinimalEnv(t)
+				t.Setenv("CIRCUIT_BREAKER_THRESHOLD", "0")
+			},
+			wantErr: ErrInvalidBreakerSettings,
 		},
 	}
 
@@ -304,5 +339,84 @@ func TestLoad_TelemetryOverrides(t *testing.T) {
 	}
 	if cfg.MetricsAddr != ":7070" {
 		t.Errorf("MetricsAddr = %q, want %q", cfg.MetricsAddr, ":7070")
+	}
+}
+
+func TestLoad_ResilienceDefaults(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.RPCMaxRetries != 3 {
+		t.Errorf("RPCMaxRetries = %d, want 3", cfg.RPCMaxRetries)
+	}
+	if cfg.RPCInitialBackoff != 500*time.Millisecond {
+		t.Errorf("RPCInitialBackoff = %v, want 500ms", cfg.RPCInitialBackoff)
+	}
+	if cfg.RPCMaxBackoff != 10*time.Second {
+		t.Errorf("RPCMaxBackoff = %v, want 10s", cfg.RPCMaxBackoff)
+	}
+	if cfg.RPCRateLimit != 100 {
+		t.Errorf("RPCRateLimit = %f, want 100", cfg.RPCRateLimit)
+	}
+	if cfg.RPCRateBurst != 20 {
+		t.Errorf("RPCRateBurst = %d, want 20", cfg.RPCRateBurst)
+	}
+	if cfg.CircuitBreakerThreshold != 5 {
+		t.Errorf("CircuitBreakerThreshold = %d, want 5", cfg.CircuitBreakerThreshold)
+	}
+	if cfg.CircuitBreakerTimeout != 30*time.Second {
+		t.Errorf("CircuitBreakerTimeout = %v, want 30s", cfg.CircuitBreakerTimeout)
+	}
+	if cfg.OTELTraceSampleRatio != 1.0 {
+		t.Errorf("OTELTraceSampleRatio = %f, want 1.0", cfg.OTELTraceSampleRatio)
+	}
+}
+
+func TestLoad_ResilienceOverrides(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	t.Setenv("RPC_MAX_RETRIES", "5")
+	t.Setenv("RPC_INITIAL_BACKOFF", "1s")
+	t.Setenv("RPC_MAX_BACKOFF", "30s")
+	t.Setenv("RPC_RATE_LIMIT", "50")
+	t.Setenv("RPC_RATE_BURST", "10")
+	t.Setenv("CIRCUIT_BREAKER_THRESHOLD", "10")
+	t.Setenv("CIRCUIT_BREAKER_TIMEOUT", "1m")
+	t.Setenv("OTEL_TRACE_SAMPLE_RATIO", "0.1")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.RPCMaxRetries != 5 {
+		t.Errorf("RPCMaxRetries = %d, want 5", cfg.RPCMaxRetries)
+	}
+	if cfg.RPCInitialBackoff != 1*time.Second {
+		t.Errorf("RPCInitialBackoff = %v, want 1s", cfg.RPCInitialBackoff)
+	}
+	if cfg.RPCMaxBackoff != 30*time.Second {
+		t.Errorf("RPCMaxBackoff = %v, want 30s", cfg.RPCMaxBackoff)
+	}
+	if cfg.RPCRateLimit != 50 {
+		t.Errorf("RPCRateLimit = %f, want 50", cfg.RPCRateLimit)
+	}
+	if cfg.RPCRateBurst != 10 {
+		t.Errorf("RPCRateBurst = %d, want 10", cfg.RPCRateBurst)
+	}
+	if cfg.CircuitBreakerThreshold != 10 {
+		t.Errorf("CircuitBreakerThreshold = %d, want 10", cfg.CircuitBreakerThreshold)
+	}
+	if cfg.CircuitBreakerTimeout != 1*time.Minute {
+		t.Errorf("CircuitBreakerTimeout = %v, want 1m", cfg.CircuitBreakerTimeout)
+	}
+	if cfg.OTELTraceSampleRatio != 0.1 {
+		t.Errorf("OTELTraceSampleRatio = %f, want 0.1", cfg.OTELTraceSampleRatio)
 	}
 }

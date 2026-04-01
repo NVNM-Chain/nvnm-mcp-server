@@ -19,7 +19,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Code review complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), and full observability instrumentation are implemented and tested against the live Inveniam L2 testnet. A comprehensive 13-point code review has been applied -- see the implementation plan for details. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+**Phase 4 (Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, and production hardening are implemented and tested against the live Inveniam L2 testnet. A comprehensive 13-point code review has been applied -- see the implementation plan for details. The precompile ABI is loaded from `abi/anchoring.json`. Read queries (`registries`, `records`) return decoded, normalized results. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
@@ -107,6 +107,19 @@ All configuration is via environment variables. No config files required.
 | `ENABLE_PROMETHEUS` | `true` | Expose `/metrics` endpoint on metrics port |
 | `ENABLE_STDOUT_TELEMETRY` | `false` | Dump spans/metrics to stderr (dev only) |
 | `METRICS_ADDR` | `:9090` | Listen address for health + metrics endpoints |
+
+### Resilience
+
+| Variable | Default | Description |
+|---|---|---|
+| `RPC_MAX_RETRIES` | `3` | Maximum retry attempts for transient RPC errors |
+| `RPC_INITIAL_BACKOFF` | `500ms` | Initial backoff duration between retries |
+| `RPC_MAX_BACKOFF` | `10s` | Maximum backoff duration between retries |
+| `RPC_RATE_LIMIT` | `100` | Upstream RPC rate limit (requests per second) |
+| `RPC_RATE_BURST` | `20` | Burst capacity for rate limiter |
+| `CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to trip circuit breaker |
+| `CIRCUIT_BREAKER_TIMEOUT` | `30s` | Time in open state before half-open probe |
+| `OTEL_TRACE_SAMPLE_RATIO` | `1.0` | Fraction of traces sampled (0.0-1.0) |
 
 ## MCP Tools
 
@@ -209,7 +222,10 @@ make ci             # install-dev + check-all + test-coverage
 make release-check  # clean + ci + build
 make info           # Show project info
 make docker-build   # Build Docker image
+make docker-buildx  # Multi-arch Docker build (amd64 + arm64)
+make docker-push    # Multi-arch build and push to registry
 make docker-run     # Run in Docker
+make test-load      # Run k6 load tests (requires k6)
 make clean          # Remove build artifacts
 ```
 
@@ -228,6 +244,28 @@ docker run --rm \
   -p 9090:9090 \
   inveniam-mcp-server
 ```
+
+### Kubernetes
+
+Plain YAML manifests are available in `deploy/k8s/`:
+
+```bash
+# Apply with default namespace (inveniam-mcp)
+kubectl apply -k deploy/k8s/
+
+# Apply to a specific namespace
+kubectl apply -k deploy/k8s/ -n your-namespace
+```
+
+A Helm chart is available in `deploy/helm/inveniam-mcp-server/`:
+
+```bash
+helm install inveniam-mcp deploy/helm/inveniam-mcp-server/ \
+  --set env.INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+  --set env.INVENIAM_CHAIN_ID=58887
+```
+
+Prometheus alerting rules are in `deploy/prometheus/alerts.yaml` and a Grafana dashboard in `deploy/grafana/dashboard.json`.
 
 ### AWS (ECS/Fargate)
 
@@ -252,6 +290,13 @@ internal/
   version/                   Canonical version constant (single source of truth)
 abi/
   anchoring.json             Anchor precompile ABI
+deploy/
+  k8s/                       Kubernetes manifests (Deployment, Service, HPA, ServiceMonitor)
+  helm/inveniam-mcp-server/  Helm chart
+  grafana/                   Grafana dashboard JSON
+  prometheus/                Prometheus alerting rules
+tests/
+  load/                      k6 load test scripts
 docs/
   DESIGN.md                  Architecture and design decisions
   IMPLEMENTATION_PLAN.md     Phased implementation plan

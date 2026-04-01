@@ -1,0 +1,25 @@
+{
+  "number": 1000,
+  "hash": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  "parent_hash": "0xdef456abc123def456abc123def456abc123def456abc123def456abc123def4",
+  "timestamp_unix": 1709300000,
+  "gas_limit": 30000000,
+  "gas_used": 15000000,
+  "base_fee_per_gas": "1000000000",
+  "miner": "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD00",
+  "transaction_count": 2,
+  "transactions": [
+    {
+      "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "index": 0,
+      "to": "0x0000000000000000000000000000000000000A00",
+      "value": "0"
+    },
+    {
+      "hash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "index": 1,
+      "to": "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD00",
+      "value": "1000000000000000000"
+    }
+  ]
+}

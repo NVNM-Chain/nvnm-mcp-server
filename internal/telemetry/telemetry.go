@@ -34,6 +34,9 @@ type Config struct {
 	EnablePrometheus bool
 	// EnableStdout writes spans and metrics to stdout (useful for local debugging).
 	EnableStdout bool
+	// TraceSampleRatio controls the fraction of traces sampled (0.0 to 1.0).
+	// Default 1.0 samples all traces. Use lower values in high-volume production.
+	TraceSampleRatio float64
 }
 
 // Telemetry manages the OpenTelemetry TracerProvider, MeterProvider,
@@ -126,6 +129,11 @@ func buildTracerProvider(
 ) (*sdktrace.TracerProvider, error) {
 	var opts []sdktrace.TracerProviderOption
 	opts = append(opts, sdktrace.WithResource(res))
+	if cfg.TraceSampleRatio < 1.0 {
+		opts = append(opts, sdktrace.WithSampler(
+			sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.TraceSampleRatio)),
+		))
+	}
 
 	if cfg.OTLPEndpoint != "" {
 		exp, err := otlptracegrpc.New(ctx,

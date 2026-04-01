@@ -1,0 +1,13 @@
+# Kustomize entrypoint. Change `namespace` to deploy into a different namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: inveniam-mcp
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml
+  - hpa.yaml
