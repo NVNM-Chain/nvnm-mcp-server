@@ -83,16 +83,16 @@ When using HTTP transport, API key authentication is strongly recommended. Reque
 
 ```bash
 # Create an API key for a client
-make key-create CLIENT=my-agent
+make key-create NAME=my-agent
 
 # List all keys
 make key-list
 
 # Disable a key
-make key-disable ID=my-agent
+make key-disable NAME=my-agent
 
 # Enable a disabled key
-make key-enable ID=my-agent
+make key-enable NAME=my-agent
 ```
 
 Configure the server to use keys:
@@ -140,6 +140,7 @@ When either is set, HTTP requests must include `Authorization: Bearer <key>`. Th
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
 | `OTLP_INSECURE` | `true` | Use insecure (plaintext) connection to OTLP endpoint. Set `false` for TLS. |
+| `WRITE_APPROVAL_DEFAULT` | `required` | Global default for human-in-the-loop write approval. `required` prompts user via MCP elicitation before broadcasting; `auto` skips approval. Per-client overrides via key store. |
 
 ### Observability
 
@@ -281,10 +282,12 @@ make clean          # Remove build artifacts
 ### API Key Management
 
 ```bash
-make key-create CLIENT=my-agent   # Create a new API key for a client
-make key-list                     # List all keys (shows ID, enabled, created)
-make key-disable ID=my-agent      # Disable a key (rejected at auth)
-make key-enable ID=my-agent       # Re-enable a disabled key
+make key-create NAME=my-agent                            # Create a new API key
+make key-create NAME=pipeline APPROVAL=auto              # Create key with auto write approval
+make key-list                                            # List all keys (ID, enabled, approval, created)
+make key-disable NAME=my-agent                           # Disable a key (rejected at auth)
+make key-enable NAME=my-agent                            # Re-enable a disabled key
+make key-set-approval NAME=my-agent APPROVAL=auto        # Set write approval policy for a client
 ```
 
 Keys are stored in `.mcp-keys.json` (gitignored). Set `MCP_API_KEYS_FILE=.mcp-keys.json` to use them.

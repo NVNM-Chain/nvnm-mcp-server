@@ -22,6 +22,7 @@ var (
 	ErrInvalidRateBurst       = errors.New("RPC_RATE_BURST must be positive")
 	ErrInvalidBreakerSettings = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
 	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
+	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -60,6 +61,9 @@ type Config struct {
 
 	// Trace sampling
 	OTELTraceSampleRatio float64
+
+	// Write approval: "required" (default) or "auto"
+	WriteApprovalDefault string
 }
 
 // Load reads configuration from environment variables and returns a validated Config.
@@ -157,6 +161,8 @@ func Load() (*Config, error) {
 	}
 	cfg.OTELTraceSampleRatio = sampleRatio
 
+	cfg.WriteApprovalDefault = envOrDefault("WRITE_APPROVAL_DEFAULT", "required")
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -180,6 +186,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Transport != "stdio" && c.Transport != "http" {
 		return fmt.Errorf("%w: got %q", ErrInvalidTransport, c.Transport)
+	}
+	if c.WriteApprovalDefault != "required" && c.WriteApprovalDefault != "auto" {
+		return fmt.Errorf("%w: got %q", ErrInvalidWriteApproval, c.WriteApprovalDefault)
 	}
 	return c.validateResilience()
 }

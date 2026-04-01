@@ -145,6 +145,8 @@ Sentinel errors:
 - `ErrRecordNotFound` -- anchor record not found
 - `ErrAnchorABIMissing` -- anchor precompile ABI not loaded
 - `ErrWriteDisabled` -- write tools not enabled
+- `ErrWriteDeclined` -- transaction broadcast declined by user
+- `ErrElicitationUnsupported` -- write approval required but client lacks elicitation
 - `ErrUpstreamRPC` -- upstream RPC error (timeout, rate limit, etc.)
 
 Error taxonomy (for MCP responses):
@@ -402,6 +404,9 @@ type Config struct {
     EnablePrometheus bool          // default true; exposes /metrics
     EnableStdoutTel  bool          // default false; for dev debugging
     MetricsAddr      string        // default ":9090"; health + metrics server
+
+    // Write approval
+    WriteApprovalDefault string   // WRITE_APPROVAL_DEFAULT; "required" (default) or "auto"
 }
 ```
 
@@ -544,10 +549,13 @@ When using HTTP transport, the server supports Bearer token authentication.
     "id": "my-agent",
     "key": "mcp_...",
     "enabled": true,
-    "created_at": "2026-04-01T12:00:00Z"
+    "created_at": "2026-04-01T12:00:00Z",
+    "write_approval": "required"
   }
 ]
 ```
+
+The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to use the global default).
 
 **Behaviour:**
 - When keys are configured, all HTTP requests must include `Authorization: Bearer <key>`.
@@ -564,6 +572,29 @@ make key-list                     # List keys
 make key-disable ID=my-agent      # Disable key
 make key-enable ID=my-agent       # Re-enable key
 ```
+
+### Human-in-the-Loop Write Approval
+
+The `evm_send_raw_transaction` tool supports configurable human approval before broadcasting. This uses MCP **elicitation** (`ServerSession.Elicit()`) to prompt the user with decoded transaction details (to, value, gas, nonce, chain ID, data length) and request explicit accept/decline.
+
+**Configuration:**
+
+| Level | Setting | Values |
+|---|---|---|
+| Global default | `WRITE_APPROVAL_DEFAULT` env var | `required` (default) or `auto` |
+| Per-client | `write_approval` field in key store entry | `required`, `auto`, or empty (use global) |
+
+**Resolution order:** Per-client `write_approval` > `WRITE_APPROVAL_DEFAULT` > `"required"` (safe default).
+
+**Behaviour:**
+- `required` -- server decodes the signed transaction and sends an elicitation prompt. User must accept to broadcast; decline/cancel returns `ErrWriteDeclined`.
+- `auto` -- transaction is broadcast without prompting (for trusted automation pipelines).
+- If approval is required but the MCP client doesn't support elicitation, the request fails with `ErrElicitationUnsupported`.
+
+**Key design decisions:**
+- Gate at broadcast (`evm_send_raw_transaction`), not prepare -- prepare tools are safe (unsigned txs only).
+- Safe by default -- new clients require explicit opt-in to autonomous writes.
+- Graceful degradation -- fails clearly rather than silently bypassing approval.
 
 ### Error Sanitization
 

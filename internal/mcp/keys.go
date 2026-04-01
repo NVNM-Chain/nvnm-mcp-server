@@ -11,10 +11,11 @@ import (
 
 // KeyEntry represents a single API key with its associated client identity.
 type KeyEntry struct {
-	ID        string    `json:"id"`
-	Key       string    `json:"key"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Key           string    `json:"key"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	WriteApproval string    `json:"write_approval,omitempty"`
 }
 
 // KeyStore holds a set of API keys indexed by the raw key string for O(1) lookup.

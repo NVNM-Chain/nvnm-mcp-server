@@ -943,6 +943,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ## 16. evm\_send\_raw\_transaction
 
 > Requires `ENABLE_WRITE_TOOLS=true`
+>
+> **Write approval:** Before broadcasting, the server checks the write-approval
+> policy for the authenticated client. If approval is `required` (the default),
+> the server sends an MCP elicitation prompt with decoded transaction details
+> (to, value, gas, nonce, chain ID, data length) and waits for the user to
+> accept or decline. Set `WRITE_APPROVAL_DEFAULT=auto` or per-client
+> `write_approval: "auto"` to skip the prompt for trusted pipelines.
 
 Broadcast a signed transaction to the network. Input is the signed transaction as a hex string (0x-prefixed). Returns the transaction hash.
 
@@ -961,6 +968,8 @@ Broadcast a signed transaction to the network. Input is the signed transaction a
 ### Error Conditions
 
 - `signed_tx` is empty (missing required parameter).
+- Write approval declined by user (`ErrWriteDeclined`).
+- Write approval required but MCP client does not support elicitation (`ErrElicitationUnsupported`).
 - Invalid hex encoding.
 - RLP decoding failure (malformed transaction).
 - Nonce too low or too high.

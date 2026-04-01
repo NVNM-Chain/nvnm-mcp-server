@@ -12,14 +12,19 @@ import (
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
 
-func registerEVMWriteTools(srv *mcp.Server, evmClient evm.Client, logger *slog.Logger) {
+func registerEVMWriteTools(
+	srv *mcp.Server,
+	evmClient evm.Client,
+	approvalDefault string,
+	logger *slog.Logger,
+) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_send_raw_transaction",
 		Title: "Send Raw Transaction",
 		Description: "Broadcast a signed transaction to the network. " +
 			"Input is the signed transaction as a hex string (0x-prefixed). " +
 			"Returns the transaction hash.",
-	}, makeSendRawTxHandler(evmClient, logger))
+	}, makeSendRawTxHandler(evmClient, approvalDefault, logger))
 }
 
 // --- Input/output types ---
@@ -35,10 +40,12 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client, approvalDefault string, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
-		ctx context.Context, _ *mcp.CallToolRequest, input sendRawTxInput,
+		ctx context.Context,
+		req *mcp.CallToolRequest,
+		input sendRawTxInput,
 	) (*mcp.CallToolResult, sendRawTxOutput, error) {
 		if input.SignedTxHex == "" {
 			return nil, sendRawTxOutput{},
@@ -48,10 +55,24 @@ func makeSendRawTxHandler(
 				)
 		}
 
+		clientID := auth.ClientIDFromContext(ctx)
+
+		if err := CheckWriteApproval(
+			ctx, req.Session, input.SignedTxHex, approvalDefault,
+		); err != nil {
+			logger.LogAttrs(ctx, slog.LevelWarn,
+				"audit: send_raw_transaction approval check",
+				slog.String("client_id", clientID),
+				slog.String("result", err.Error()),
+			)
+			return nil, sendRawTxOutput{}, err
+		}
+
 		txHash, err := c.SendRawTransaction(ctx, input.SignedTxHex)
 		if err != nil {
-			logger.LogAttrs(ctx, slog.LevelWarn, "audit: send_raw_transaction failed",
-				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+			logger.LogAttrs(ctx, slog.LevelWarn,
+				"audit: send_raw_transaction failed",
+				slog.String("client_id", clientID),
 				slog.Int("signed_tx_len", len(input.SignedTxHex)),
 				slog.String("error", err.Error()),
 			)
@@ -59,7 +80,7 @@ func makeSendRawTxHandler(
 		}
 
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit: send_raw_transaction",
-			slog.String("client_id", auth.ClientIDFromContext(ctx)),
+			slog.String("client_id", clientID),
 			slog.String("tx_hash", txHash),
 		)
 		return nil, sendRawTxOutput{TxHash: txHash}, nil

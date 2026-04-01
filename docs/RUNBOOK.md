@@ -59,6 +59,19 @@ make key-disable ID=my-agent      # Disable a key
 make key-enable ID=my-agent       # Re-enable a key
 ```
 
+### Write approval (human-in-the-loop)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WRITE_APPROVAL_DEFAULT` | `required` | Global default for write approval. `required` prompts users via MCP elicitation before broadcasting signed transactions; `auto` broadcasts without prompting. |
+
+Per-client overrides are set via `write_approval` in the key store (see `make key-set-approval`). Resolution: per-client > global default > `"required"`.
+
+When approval is `required`:
+- The server decodes the signed transaction and presents details (to, value, gas, nonce, chain ID, data length) to the user via MCP elicitation.
+- The user must accept to proceed; decline or cancel returns an error.
+- If the MCP client does not support elicitation, the request is rejected.
+
 ### Secrets management
 
 - Store `INVENIAM_EVM_RPC_URL` in Kubernetes Secrets, AWS Secrets Manager/SSM, or equivalent when it contains API keys or signed tokens.
@@ -349,6 +362,7 @@ Then run an MCP client against `http://<host>:8080` for a minimal tool call (e.g
 
 - Configuration: `internal/config/config.go`, `README.md`
 - Authentication: `internal/mcp/auth.go`, `internal/mcp/keys.go`, `internal/auth/context.go`
+- Write approval: `internal/mcp/approval.go`, `internal/mcp/tools_evm_write.go`
 - Key management CLI: `cmd/key-mgmt/main.go`
 - Health server: `internal/telemetry/health.go`
 - Metrics instruments: `internal/telemetry/metrics.go`, `internal/telemetry/middleware.go`, `internal/evm/tracing.go`

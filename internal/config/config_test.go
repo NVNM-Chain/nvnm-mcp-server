@@ -34,6 +34,7 @@ func clearEnv(t *testing.T) {
 		"CIRCUIT_BREAKER_THRESHOLD",
 		"CIRCUIT_BREAKER_TIMEOUT",
 		"OTEL_TRACE_SAMPLE_RATIO",
+		"WRITE_APPROVAL_DEFAULT",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -418,5 +419,46 @@ func TestLoad_ResilienceOverrides(t *testing.T) {
 	}
 	if cfg.OTELTraceSampleRatio != 0.1 {
 		t.Errorf("OTELTraceSampleRatio = %f, want 0.1", cfg.OTELTraceSampleRatio)
+	}
+}
+
+func TestLoad_WriteApprovalDefault(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.WriteApprovalDefault != "required" {
+		t.Errorf("WriteApprovalDefault = %q, want %q", cfg.WriteApprovalDefault, "required")
+	}
+}
+
+func TestLoad_WriteApprovalDefault_Auto(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("WRITE_APPROVAL_DEFAULT", "auto")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.WriteApprovalDefault != "auto" {
+		t.Errorf("WriteApprovalDefault = %q, want %q", cfg.WriteApprovalDefault, "auto")
+	}
+}
+
+func TestLoad_WriteApprovalDefault_Invalid(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("WRITE_APPROVAL_DEFAULT", "yolo")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidWriteApproval) {
+		t.Errorf("error = %q, want ErrInvalidWriteApproval", err.Error())
 	}
 }

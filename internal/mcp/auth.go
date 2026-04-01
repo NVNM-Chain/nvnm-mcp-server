@@ -57,6 +57,7 @@ func APIKeyAuth(next http.Handler, keys *KeyStore, logger *slog.Logger) http.Han
 		}
 
 		ctx := auth.ContextWithClientID(r.Context(), entry.ID)
+		ctx = auth.ContextWithWriteApproval(ctx, entry.WriteApproval)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
 	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
@@ -435,9 +436,10 @@ func TestHandler_CallContract_WithBlock(t *testing.T) {
 
 func TestHandler_SendRawTx_Happy(t *testing.T) {
 	m := &mockEVM{sendTxHash: "0xdeadbeef"}
-	handler := makeSendRawTxHandler(m, testLogger())
+	handler := makeSendRawTxHandler(m, ApprovalAuto, testLogger())
 
-	_, out, err := handler(ctx, nil, sendRawTxInput{SignedTxHex: "0xf86c..."})
+	stubReq := &mcp.CallToolRequest{}
+	_, out, err := handler(ctx, stubReq, sendRawTxInput{SignedTxHex: "0xf86c..."})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -447,7 +449,7 @@ func TestHandler_SendRawTx_Happy(t *testing.T) {
 }
 
 func TestHandler_SendRawTx_Empty(t *testing.T) {
-	handler := makeSendRawTxHandler(&mockEVM{}, testLogger())
+	handler := makeSendRawTxHandler(&mockEVM{}, ApprovalAuto, testLogger())
 
 	_, _, err := handler(ctx, nil, sendRawTxInput{SignedTxHex: ""})
 	if err == nil {

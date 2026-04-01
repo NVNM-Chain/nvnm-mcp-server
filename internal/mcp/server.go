@@ -25,12 +25,13 @@ type Server struct {
 
 // NewServer creates a new MCP server and registers all tools.
 // When enableWriteTools is true, prepare-sign-submit tools and
-// evm_send_raw_transaction are registered.
+// evm_send_raw_transaction are registered, gated by writeApprovalDefault.
 // Middleware (if any) is registered via AddReceivingMiddleware.
 func NewServer(
 	evmClient evm.Client,
 	anchorClient anchor.Client,
 	enableWriteTools bool,
+	writeApprovalDefault string,
 	middleware []mcp.Middleware,
 	logger *slog.Logger,
 ) *Server {
@@ -55,9 +56,11 @@ func NewServer(
 	registerAnchorTools(mcpSrv, anchorClient, logger)
 
 	if enableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, logger)
+		registerEVMWriteTools(mcpSrv, evmClient, writeApprovalDefault, logger)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
-		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
+		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)",
+			slog.String("write_approval_default", writeApprovalDefault),
+		)
 	}
 
 	return s
