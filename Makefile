@@ -7,7 +7,8 @@ GO := go
 GOFLAGS := -v
 LDFLAGS := -s -w
 
-.PHONY: all build run run-http test test-unit test-integration test-coverage test-verbose \
+.PHONY: all build run run-http run-local healthz readyz metrics mcp-init mcp-chain-id \
+        mcp-registries mcp-anchor-info test test-unit test-integration test-coverage test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run \
         pre-commit install-hooks setup-dev install-dev ci release-check \
@@ -18,15 +19,61 @@ all: check-all test build
 ## Build
 
 build:
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o "$(BUILD_DIR)/$(BINARY_NAME)" ./$(CMD_DIR)
 
 ## Run
 
 run: build
-	$(BUILD_DIR)/$(BINARY_NAME) --transport stdio
+	"$(BUILD_DIR)/$(BINARY_NAME)" --transport stdio
 
 run-http: build
-	$(BUILD_DIR)/$(BINARY_NAME) --transport http
+	"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
+
+## Local dev
+
+MCP_ADDR := http://localhost:8080
+HEALTH_ADDR := http://localhost:9090
+
+run-local: build
+	INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+	INVENIAM_CHAIN_ID=58887 \
+	ANCHOR_ABI_PATH="$(CURDIR)/abi/anchoring.json" \
+	ENABLE_WRITE_TOOLS=true \
+	LOG_LEVEL=debug \
+	"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
+
+healthz:
+	@curl -s $(HEALTH_ADDR)/healthz | python3 -m json.tool
+
+readyz:
+	@curl -s $(HEALTH_ADDR)/readyz | python3 -m json.tool
+
+metrics:
+	@curl -s $(HEALTH_ADDR)/metrics | head -50
+
+mcp-init:
+	@curl -s -X POST $(MCP_ADDR)/ \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"make-test","version":"1.0.0"}}}' | python3 -m json.tool
+
+mcp-chain-id:
+	@curl -s -X POST $(MCP_ADDR)/ \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"evm_get_chain_id","arguments":{}}}' | python3 -m json.tool
+
+mcp-registries:
+	@curl -s -X POST $(MCP_ADDR)/ \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"anchor_get_registries","arguments":{}}}' | python3 -m json.tool
+
+mcp-anchor-info:
+	@curl -s -X POST $(MCP_ADDR)/ \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"anchor_info","arguments":{}}}' | python3 -m json.tool
 
 ## Test
 
@@ -146,6 +193,16 @@ help:
 	@echo "  build          Build the server binary"
 	@echo "  run            Run with stdio transport"
 	@echo "  run-http       Run with HTTP transport"
+	@echo ""
+	@echo "Local dev:"
+	@echo "  run-local      Build and run locally with HTTP transport + testnet config"
+	@echo "  healthz        Check liveness endpoint"
+	@echo "  readyz         Check readiness endpoint"
+	@echo "  metrics        Show first 50 lines of Prometheus metrics"
+	@echo "  mcp-init       Send MCP initialize handshake"
+	@echo "  mcp-chain-id   Call evm_get_chain_id tool"
+	@echo "  mcp-registries Call anchor_get_registries tool"
+	@echo "  mcp-anchor-info Call anchor_info tool"
 	@echo "  test           Run all tests"
 	@echo "  test-unit      Unit tests only (-short)"
 	@echo "  test-integration Integration tests (-tags integration)"

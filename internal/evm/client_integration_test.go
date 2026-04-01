@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	testRPCURL          = "https://evm.inveniam.mantrachain.io"
-	testChainID         = 58887
-	testPrecompileAddr  = "0x0000000000000000000000000000000000000A00"
-	testConnectTimeout  = 15 * time.Second
+	testRPCURL         = "https://evm.inveniam.mantrachain.io"
+	testChainID        = 58887
+	testPrecompileAddr = "0x0000000000000000000000000000000000000A00"
+	testConnectTimeout = 15 * time.Second
 )
 
 func integrationClient(t *testing.T) evm.Client {

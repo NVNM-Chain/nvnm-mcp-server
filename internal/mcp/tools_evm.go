@@ -251,15 +251,15 @@ func makeGetCodeHandler(
 
 func makeGetLogsHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[getLogsInput, []evm.NormalizedLog] {
+) mcp.ToolHandlerFor[getLogsInput, getLogsOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getLogsInput,
-	) (*mcp.CallToolResult, []evm.NormalizedLog, error) {
+	) (*mcp.CallToolResult, getLogsOutput, error) {
 		q := ethereum.FilterQuery{}
 		if input.Address != nil {
 			addr, err := parseAddress(*input.Address)
 			if err != nil {
-				return nil, nil, err
+				return nil, getLogsOutput{}, err
 			}
 			q.Addresses = []common.Address{addr}
 		}
@@ -274,7 +274,7 @@ func makeGetLogsHandler(
 			for i, t := range input.Topics {
 				hash, err := parseHash(t)
 				if err != nil {
-					return nil, nil,
+					return nil, getLogsOutput{},
 						fmt.Errorf("invalid topic at index %d: %w", i, err)
 				}
 				topicSet[i] = hash
@@ -284,10 +284,15 @@ func makeGetLogsHandler(
 
 		logs, err := c.FilterLogs(ctx, q)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to filter logs: %w", err)
+			return nil, getLogsOutput{}, fmt.Errorf("failed to filter logs: %w", err)
 		}
-		return nil, logs, nil
+		return nil, getLogsOutput{Logs: logs, Count: len(logs)}, nil
 	}
+}
+
+type getLogsOutput struct {
+	Logs  []evm.NormalizedLog `json:"logs"`
+	Count int                 `json:"count"`
 }
 
 type callContractOutput struct {
