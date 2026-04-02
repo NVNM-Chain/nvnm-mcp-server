@@ -9,11 +9,18 @@ import (
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 )
 
+// KeyLookup abstracts read-only key operations needed by the auth middleware.
+// Both *KeyStore and *ManagedKeyStore implement this interface.
+type KeyLookup interface {
+	Lookup(rawKey string) *KeyEntry
+	Empty() bool
+}
+
 // APIKeyAuth wraps an http.Handler with Bearer token authentication backed by
-// a KeyStore. When keys is nil or empty, the handler is returned unwrapped.
+// a KeyLookup. When keys is nil or empty, the handler is returned unwrapped.
 // On successful authentication the client identity from the matched KeyEntry
 // is stored in the request context (retrievable via ClientIDFromContext).
-func APIKeyAuth(next http.Handler, keys *KeyStore, logger *slog.Logger) http.Handler {
+func APIKeyAuth(next http.Handler, keys KeyLookup, logger *slog.Logger) http.Handler {
 	if keys == nil || keys.Empty() {
 		return next
 	}

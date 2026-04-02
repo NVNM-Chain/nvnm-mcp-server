@@ -78,7 +78,7 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // RunHTTP runs the MCP server over Streamable HTTP on the given address.
 // When keys is non-nil and non-empty, requests must include a valid
 // "Authorization: Bearer <key>" header matching an enabled key.
-func (s *Server) RunHTTP(ctx context.Context, addr string, keys *KeyStore) error {
+func (s *Server) RunHTTP(ctx context.Context, addr string, keys KeyLookup) error {
 	authRequired := keys != nil && !keys.Empty()
 	s.logger.Info("starting MCP server",
 		slog.String("transport", "http"),

@@ -61,6 +61,37 @@ make key-enable NAME=my-agent                        # Re-enable a key
 make key-set-approval NAME=my-agent APPROVAL=auto    # Set write approval policy for a client
 ```
 
+### Admin Key Management API
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ADMIN_API_KEY` | _(empty)_ | Admin bearer token for the key management REST API. The admin server only starts when this is set AND transport is `http`. |
+| `ADMIN_API_ADDR` | `:8081` | Listen address for the admin API. |
+
+When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` with REST endpoints for runtime key management. Changes take effect immediately -- no server restart needed.
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/admin/keys` | Create a new client key (returns raw key once). Body: `{"client_id": "name", "write_approval": "required\|auto"}` |
+| `GET` | `/admin/keys` | List all keys (redacted, no raw keys). |
+| `PATCH` | `/admin/keys/{id}` | Update enabled/write_approval. Body: `{"enabled": false}` or `{"write_approval": "auto"}` |
+| `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
+
+All requests require `Authorization: Bearer <ADMIN_API_KEY>`.
+
+**Example: create a key via curl:**
+
+```bash
+curl -X POST http://localhost:8081/admin/keys \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "new-agent", "write_approval": "required"}'
+```
+
+**Security:** The admin port should be restricted via firewall or Kubernetes NetworkPolicy to ops tooling only. The admin token is separate from client keys.
+
 ### Write approval (human-in-the-loop)
 
 | Variable | Default | Purpose |
@@ -91,9 +122,10 @@ When approval is `required`:
 | Port | Purpose |
 |------|---------|
 | **8080** | MCP HTTP transport (`MCP_HTTP_ADDR`). |
+| **8081** | Admin key management API (`ADMIN_API_ADDR`). Only active when `ADMIN_API_KEY` is set. |
 | **9090** | Health and metrics (`METRICS_ADDR`): `GET /healthz`, `GET /readyz`, `GET /metrics`. |
 
-Container image exposes 8080 and 9090. Map both in Kubernetes Services, ECS task definitions, and load balancers as required.
+Container image exposes 8080 and 9090. Map both in Kubernetes Services, ECS task definitions, and load balancers as required. The admin port (8081) should be exposed only to internal ops tooling -- restrict via NetworkPolicy or firewall rules.
 
 ### Transport and process args
 
@@ -366,6 +398,7 @@ Then run an MCP client against `http://<host>:8080` for a minimal tool call (e.g
 - Authentication: `internal/mcp/auth.go`, `internal/mcp/keys.go`, `internal/auth/context.go`
 - Write approval: `internal/mcp/approval.go`, `internal/mcp/tools_evm_write.go`
 - Key management CLI: `cmd/key-mgmt/main.go`
+- Admin key management API: `internal/mcp/admin.go`, `internal/mcp/managed_keys.go`
 - Health server: `internal/telemetry/health.go`
 - Metrics instruments: `internal/telemetry/metrics.go`, `internal/telemetry/middleware.go`, `internal/evm/tracing.go`
 - Resilience: `internal/evm/resilient.go`

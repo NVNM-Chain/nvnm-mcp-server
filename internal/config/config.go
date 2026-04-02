@@ -41,6 +41,8 @@ type Config struct {
 	HTTPAddr         string
 	APIKey           string
 	APIKeysFile      string
+	AdminAPIKey      string
+	AdminAPIAddr     string
 
 	// Telemetry
 	OTELEndpoint     string
@@ -97,6 +99,8 @@ func Load() (*Config, error) {
 	cfg.EnableWriteTools = envOrDefault("ENABLE_WRITE_TOOLS", "false") == "true"
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
+	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
+	cfg.AdminAPIAddr = envOrDefault("ADMIN_API_ADDR", ":8081")
 
 	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "inveniam-mcp-server")

@@ -564,7 +564,7 @@ The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to us
 - The server warns at startup if HTTP transport runs with no keys configured.
 - Stdio transport is unaffected (local-only, trusted).
 
-**Key management** is provided by the `cmd/key-mgmt/` CLI and Makefile targets:
+**Key management** is provided by the `cmd/key-mgmt/` CLI and Makefile targets (for local/dev use):
 
 ```bash
 make key-create NAME=my-agent                       # Create key
@@ -574,6 +574,35 @@ make key-disable NAME=my-agent                       # Disable key
 make key-enable NAME=my-agent                        # Re-enable key
 make key-set-approval NAME=my-agent APPROVAL=auto    # Set write approval policy for a client
 ```
+
+**Admin Key Management API** (for production/DevOps use):
+
+A dedicated REST API on a separate port (default `:8081`) enables runtime key management without server restarts. Changes take effect immediately -- no hot-reload delay.
+
+| Env Var | Default | Purpose |
+|---|---|---|
+| `ADMIN_API_KEY` | _(none)_ | Admin bearer token. Admin server only starts when set. |
+| `ADMIN_API_ADDR` | `:8081` | Admin API listen address. |
+
+The admin API is authenticated by its own bearer token (`ADMIN_API_KEY`), separate from the client keys it manages. This ensures that compromise of a client key does not grant admin access.
+
+**Endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/admin/keys` | Create a new client key. Returns the raw key **once**. |
+| `GET` | `/admin/keys` | List all keys (redacted -- prefix only, no raw keys). |
+| `PATCH` | `/admin/keys/{id}` | Update enabled status and/or write approval policy. |
+| `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
+
+**Security controls:**
+- Separate port -- firewalled/NetworkPolicy'd independently from MCP and metrics ports.
+- Separate credential -- admin token is distinct from client keys.
+- Constant-time token comparison.
+- Audit logging on every mutation (action, client ID, remote address).
+- Raw key shown once on creation, never retrievable after.
+- Request body size limit (1 MB).
+- Only starts on HTTP transport (not stdio).
 
 ### Human-in-the-Loop Write Approval
 

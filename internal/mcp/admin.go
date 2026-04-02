@@ -1,0 +1,269 @@
+package mcp
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const (
+	adminMaxRequestBody = 1 * 1024 * 1024 // 1 MB
+)
+
+var validApprovalValues = map[string]bool{"required": true, "auto": true, "": true}
+
+// AdminServer serves the key management REST API on a dedicated port,
+// authenticated by a separate admin bearer token.
+type AdminServer struct {
+	srv    *http.Server
+	keys   *ManagedKeyStore
+	logger *slog.Logger
+}
+
+// NewAdminServer creates an admin API server.
+// adminKey is the bearer token required for all requests.
+func NewAdminServer(addr, adminKey string, keys *ManagedKeyStore, logger *slog.Logger) *AdminServer {
+	a := &AdminServer{
+		keys:   keys,
+		logger: logger,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /admin/keys", a.handleList)
+	mux.HandleFunc("POST /admin/keys", a.handleCreate)
+	mux.HandleFunc("PATCH /admin/keys/{id}", a.handleUpdate)
+	mux.HandleFunc("DELETE /admin/keys/{id}", a.handleDelete)
+
+	handler := adminAuth(
+		limitAdminRequestBody(mux),
+		adminKey,
+		logger,
+	)
+
+	a.srv = &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 17, // 128 KB
+	}
+
+	return a
+}
+
+// Start begins listening. Blocks until the server stops.
+func (a *AdminServer) Start() error {
+	a.logger.Info("admin API server started",
+		slog.String("addr", a.srv.Addr),
+	)
+	if err := a.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("admin server: %w", err)
+	}
+	return nil
+}
+
+// Close gracefully shuts down the admin server.
+func (a *AdminServer) Close(ctx context.Context) error {
+	return a.srv.Shutdown(ctx)
+}
+
+// --- Handlers ---
+
+type createRequest struct {
+	ClientID      string `json:"client_id"`
+	WriteApproval string `json:"write_approval,omitempty"`
+}
+
+func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
+	var req createRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.ClientID == "" {
+		a.writeError(w, http.StatusBadRequest, "client_id is required")
+		return
+	}
+
+	if !validApprovalValues[req.WriteApproval] {
+		a.writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("write_approval must be \"required\", \"auto\", or omitted; got %q", req.WriteApproval))
+		return
+	}
+
+	result, err := a.keys.Create(req.ClientID, req.WriteApproval)
+	if err != nil {
+		if errors.Is(err, ErrClientExists) {
+			a.writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		a.logger.Error("admin: create key failed", slog.String("error", err.Error()))
+		a.writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	a.logger.Info("admin: key created",
+		slog.String("client_id", req.ClientID),
+		slog.String("write_approval", req.WriteApproval),
+		slog.String("remote_addr", r.RemoteAddr),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func (a *AdminServer) handleList(w http.ResponseWriter, _ *http.Request) {
+	summaries := a.keys.List()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summaries)
+}
+
+type updateRequest struct {
+	Enabled       *bool   `json:"enabled,omitempty"`
+	WriteApproval *string `json:"write_approval,omitempty"`
+}
+
+func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	clientID := r.PathValue("id")
+	if clientID == "" {
+		a.writeError(w, http.StatusBadRequest, "client id is required in path")
+		return
+	}
+
+	var req updateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.Enabled == nil && req.WriteApproval == nil {
+		a.writeError(w, http.StatusBadRequest, "at least one of enabled or write_approval must be provided")
+		return
+	}
+
+	if req.WriteApproval != nil && !validApprovalValues[*req.WriteApproval] {
+		a.writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("write_approval must be \"required\", \"auto\", or \"\"; got %q", *req.WriteApproval))
+		return
+	}
+
+	upd := KeyUpdate{
+		Enabled:       req.Enabled,
+		WriteApproval: req.WriteApproval,
+	}
+
+	summary, err := a.keys.Update(clientID, upd)
+	if err != nil {
+		if errors.Is(err, ErrClientMissing) {
+			a.writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		a.logger.Error("admin: update key failed",
+			slog.String("client_id", clientID),
+			slog.String("error", err.Error()),
+		)
+		a.writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	a.logger.Info("admin: key updated",
+		slog.String("client_id", clientID),
+		slog.String("remote_addr", r.RemoteAddr),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summary)
+}
+
+func (a *AdminServer) handleDelete(w http.ResponseWriter, r *http.Request) {
+	clientID := r.PathValue("id")
+	if clientID == "" {
+		a.writeError(w, http.StatusBadRequest, "client id is required in path")
+		return
+	}
+
+	if err := a.keys.Delete(clientID); err != nil {
+		if errors.Is(err, ErrClientMissing) {
+			a.writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		a.logger.Error("admin: delete key failed",
+			slog.String("client_id", clientID),
+			slog.String("error", err.Error()),
+		)
+		a.writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	a.logger.Info("admin: key deleted",
+		slog.String("client_id", clientID),
+		slog.String("remote_addr", r.RemoteAddr),
+	)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *AdminServer) writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// --- Middleware ---
+
+func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Handler {
+	keyBytes := []byte(adminKey)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			logger.Warn("admin: rejected unauthenticated request",
+				slog.String("remote_addr", r.RemoteAddr),
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+			)
+			http.Error(w, `{"error":"missing Authorization header"}`, http.StatusUnauthorized)
+			return
+		}
+
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) {
+			logger.Warn("admin: rejected request with invalid auth scheme",
+				slog.String("remote_addr", r.RemoteAddr),
+			)
+			http.Error(w, `{"error":"invalid Authorization scheme; expected Bearer"}`, http.StatusUnauthorized)
+			return
+		}
+
+		token := []byte(strings.TrimPrefix(authHeader, prefix))
+		if subtle.ConstantTimeCompare(token, keyBytes) != 1 {
+			logger.Warn("admin: rejected request with invalid admin key",
+				slog.String("remote_addr", r.RemoteAddr),
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+			)
+			http.Error(w, `{"error":"invalid admin key"}`, http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func limitAdminRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, adminMaxRequestBody)
+		next.ServeHTTP(w, r)
+	})
+}

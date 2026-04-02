@@ -19,7 +19,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phase 5 (Security Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, and pre-red-team security hardening are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results. HTTP transport now requires API key authentication with per-client identity. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`). The precompile ABI is loaded from `abi/anchoring.json`. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+**Phase 5 (Security Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, and pre-red-team security hardening are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results. HTTP transport now requires API key authentication with per-client identity. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`). A dedicated admin REST API on a separate port enables runtime key management (create, list, update, delete) without server restarts. The precompile ABI is loaded from `abi/anchoring.json`. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
@@ -126,6 +126,15 @@ All configuration is via environment variables. No config files required.
 | `MCP_API_KEY` | _(none)_ | Single API key for dev/test. Use `MCP_API_KEYS_FILE` in production for multi-key + client identity. |
 
 When either is set, HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.
+
+### Admin Key Management API
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADMIN_API_KEY` | _(none)_ | Admin bearer token. Enables the admin REST API on a separate port for runtime key CRUD. |
+| `ADMIN_API_ADDR` | `:8081` | Admin API listen address. |
+
+When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE /admin/keys` for runtime key management. Changes take effect immediately. See `docs/RUNBOOK.md` for full endpoint reference.
 
 ### Optional
 
@@ -354,7 +363,7 @@ internal/
   errors/                    Shared sentinel errors + error sanitization
   evm/                       Generic EVM RPC client layer + tracing wrapper
   anchor/                    Inveniam anchor adapter (with address validation)
-  mcp/                       MCP tool registration, handlers, auth middleware, key store
+  mcp/                       MCP tool registration, handlers, auth middleware, key store, admin API
   telemetry/                 OTel providers, MCP middleware, health server, metrics
   version/                   Canonical version constant (single source of truth)
 abi/

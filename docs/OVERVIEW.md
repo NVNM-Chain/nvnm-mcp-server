@@ -2,7 +2,7 @@
 
 ## What It Is
 
-A production-grade [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents, LLMs, and developer tools native access to the Inveniam NVNM blockchain -- the purpose-built L2 for document anchoring and provenance verification, secured by MANTRA's validator set.
+A production-grade [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents, LLMs, and developer tools native access to the Inveniam NVNM blockchain -- the purpose-built L2 for AI Agent and document anchoring and provenance verification, secured by MANTRA's validator set.
 
 This is not a raw JSON-RPC passthrough. It exposes **16 curated, typed tools** with normalized responses designed for both human comprehension and LLM consumption. All blockchain complexity -- ABI encoding, gas estimation, nonce management, transaction construction -- is handled server-side. Callers pass plain parameters and get structured JSON back.
 
@@ -29,7 +29,7 @@ This is not a raw JSON-RPC passthrough. It exposes **16 curated, typed tools** w
 
 **Observable by Default.** OpenTelemetry traces and Prometheus metrics on every tool call and upstream RPC request. Per-client identity flows through audit logs and OTel spans. Health and readiness probes for Kubernetes and cloud ALB health checks.
 
-**Production-Grade Security.** Pre-red-team hardened with a comprehensive security assessment. Bearer token authentication with per-client identity, error sanitization, input size limits, rate limiting, circuit breakers, distroless container, non-root execution, and dependency vulnerability scanning in CI.
+**Production-Grade Security.** Security hardened with a comprehensive security assessment. Bearer token authentication with per-client identity, error sanitization, input size limits, rate limiting, circuit breakers, distroless container, non-root execution, and dependency vulnerability scanning in CI.
 
 ---
 
