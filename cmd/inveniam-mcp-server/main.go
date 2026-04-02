@@ -140,28 +140,12 @@ func run() error {
 	}()
 
 	// --- Admin API Server ---
-	if cfg.AdminAPIKey != "" && cfg.Transport == "http" {
-		if managedKeys == nil {
-			return fmt.Errorf("ADMIN_API_KEY is set but no MCP_API_KEYS_FILE configured; " +
-				"admin API requires a keys file to manage")
-		}
-		adminSrv := mcpserver.NewAdminServer(
-			cfg.AdminAPIAddr, cfg.AdminAPIKey, managedKeys, logger,
-		)
-		go func() {
-			if aErr := adminSrv.Start(); aErr != nil {
-				logger.Error("admin API server error", slog.String("error", aErr.Error()))
-			}
-		}()
-		defer func() {
-			shutCtx, shutCancel := context.WithTimeout(context.Background(), shutdownTimeout)
-			defer shutCancel()
-			if shutErr := adminSrv.Close(shutCtx); shutErr != nil {
-				logger.Error("admin API shutdown error", slog.String("error", shutErr.Error()))
-			}
-		}()
-	} else if cfg.AdminAPIKey != "" && cfg.Transport != "http" {
-		logger.Warn("ADMIN_API_KEY is set but transport is not HTTP; admin API not started")
+	adminShutdown, err := startAdminServer(cfg, managedKeys, logger)
+	if err != nil {
+		return err
+	}
+	if adminShutdown != nil {
+		defer adminShutdown()
 	}
 
 	// --- MCP Server ---
@@ -219,6 +203,40 @@ func loadAPIKeys(cfg *config.Config, logger *slog.Logger) (*mcpserver.ManagedKey
 		}
 		return nil, nil
 	}
+}
+
+func startAdminServer(
+	cfg *config.Config,
+	keys *mcpserver.ManagedKeyStore,
+	logger *slog.Logger,
+) (shutdown func(), err error) {
+	if cfg.AdminAPIKey == "" {
+		return nil, nil
+	}
+	if cfg.Transport != "http" {
+		logger.Warn("ADMIN_API_KEY is set but transport is not HTTP; admin API not started")
+		return nil, nil
+	}
+	if keys == nil {
+		return nil, config.ErrAdminKeyWithoutFile
+	}
+
+	adminSrv := mcpserver.NewAdminServer(
+		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, logger,
+	)
+	go func() {
+		if aErr := adminSrv.Start(); aErr != nil {
+			logger.Error("admin API server error", slog.String("error", aErr.Error()))
+		}
+	}()
+
+	return func() {
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer shutCancel()
+		if shutErr := adminSrv.Close(shutCtx); shutErr != nil {
+			logger.Error("admin API shutdown error", slog.String("error", shutErr.Error()))
+		}
+	}, nil
 }
 
 func extractHost(rawURL string) string {

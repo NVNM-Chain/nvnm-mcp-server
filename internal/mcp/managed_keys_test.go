@@ -282,8 +282,8 @@ func TestManagedKeyStore_FilePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mks.Create("test", ""); err != nil {
-		t.Fatal(err)
+	if _, createErr := mks.Create("test", ""); createErr != nil {
+		t.Fatal(createErr)
 	}
 
 	info, err := os.Stat(path)

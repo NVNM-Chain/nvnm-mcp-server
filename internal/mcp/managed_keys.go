@@ -95,8 +95,8 @@ func (m *ManagedKeyStore) List() []KeySummary {
 	defer m.mu.RUnlock()
 
 	summaries := make([]KeySummary, len(m.entries))
-	for i, e := range m.entries {
-		summaries[i] = summarize(e)
+	for i := range m.entries {
+		summaries[i] = summarize(&m.entries[i])
 	}
 	return summaries
 }
@@ -135,7 +135,7 @@ func (m *ManagedKeyStore) Create(clientID, writeApproval string) (*KeyCreateResu
 	m.store = NewKeyStore(updated)
 
 	return &KeyCreateResult{
-		KeySummary: summarize(entry),
+		KeySummary: summarize(&entry),
 		Key:        rawKey,
 	}, nil
 }
@@ -172,7 +172,7 @@ func (m *ManagedKeyStore) Update(clientID string, upd KeyUpdate) (*KeySummary, e
 	m.entries = updated
 	m.store = NewKeyStore(updated)
 
-	s := summarize(updated[idx])
+	s := summarize(&updated[idx])
 	return &s, nil
 }
 
@@ -225,7 +225,7 @@ func (m *ManagedKeyStore) TotalCount() int {
 	return len(m.entries)
 }
 
-func summarize(e KeyEntry) KeySummary {
+func summarize(e *KeyEntry) KeySummary {
 	prefix := e.Key
 	if len(prefix) > 8 {
 		prefix = prefix[:8] + "..."

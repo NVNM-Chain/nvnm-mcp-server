@@ -119,14 +119,18 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		a.logger.Error("admin: encode create response", slog.String("error", err.Error()))
+	}
 }
 
 func (a *AdminServer) handleList(w http.ResponseWriter, _ *http.Request) {
 	summaries := a.keys.List()
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(summaries)
+	if err := json.NewEncoder(w).Encode(summaries); err != nil {
+		a.logger.Error("admin: encode list response", slog.String("error", err.Error()))
+	}
 }
 
 type updateRequest struct {
@@ -158,12 +162,7 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upd := KeyUpdate{
-		Enabled:       req.Enabled,
-		WriteApproval: req.WriteApproval,
-	}
-
-	summary, err := a.keys.Update(clientID, upd)
+	summary, err := a.keys.Update(clientID, KeyUpdate(req))
 	if err != nil {
 		if errors.Is(err, ErrClientMissing) {
 			a.writeError(w, http.StatusNotFound, err.Error())
@@ -183,7 +182,9 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(summary)
+	if err := json.NewEncoder(w).Encode(summary); err != nil {
+		a.logger.Error("admin: encode update response", slog.String("error", err.Error()))
+	}
 }
 
 func (a *AdminServer) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +218,9 @@ func (a *AdminServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 func (a *AdminServer) writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
+		a.logger.Error("admin: encode error response", slog.String("error", err.Error()))
+	}
 }
 
 // --- Middleware ---
