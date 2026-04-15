@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 	"github.com/inveniam/nvnm-mcp-server/internal/config"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 	"github.com/inveniam/nvnm-mcp-server/internal/logging"
@@ -81,12 +82,16 @@ func run() error {
 		slog.Int64("chain_id", cfg.ChainID),
 		logging.SafeURL("rpc_url", cfg.EVMRPCURL),
 		slog.String("anchor_address", cfg.AnchorAddress),
+		slog.String("auth_provider", cfg.AuthProvider),
 	)
 
-	// --- API Key Auth ---
-	managedKeys, err := loadAPIKeys(cfg, logger)
+	// --- Authentication ---
+	validator, managedKeys, authCleanup, err := loadAuth(cfg, logger)
 	if err != nil {
 		return err
+	}
+	if authCleanup != nil {
+		defer authCleanup()
 	}
 
 	// --- EVM Client (with tracing wrapper) ---
@@ -139,7 +144,7 @@ func run() error {
 		_ = healthSrv.Close(shutCtx)
 	}()
 
-	// --- Admin API Server ---
+	// --- Admin API Server (API key mode only) ---
 	adminShutdown, err := startAdminServer(cfg, managedKeys, logger)
 	if err != nil {
 		return err
@@ -163,19 +168,69 @@ func run() error {
 	case "stdio":
 		return srv.RunStdio(ctx)
 	case "http":
-		return srv.RunHTTP(ctx, cfg.HTTPAddr, managedKeys)
+		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator)
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
 			cfg.Transport, config.ErrInvalidTransport)
 	}
 }
 
-func loadAPIKeys(cfg *config.Config, logger *slog.Logger) (*mcpserver.ManagedKeyStore, error) {
+// loadAuth creates the appropriate TokenValidator based on AUTH_PROVIDER config.
+// Returns the validator, the managed key store (only for apikey provider, nil otherwise),
+// a cleanup function, and any error.
+func loadAuth(
+	cfg *config.Config,
+	logger *slog.Logger,
+) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+	switch cfg.AuthProvider {
+	case "fusionauth":
+		return loadFusionAuth(cfg, logger)
+	default:
+		return loadAPIKeys(cfg, logger)
+	}
+}
+
+func loadFusionAuth(
+	cfg *config.Config,
+	logger *slog.Logger,
+) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+	validator, err := auth.NewFusionAuthValidator(&auth.FusionAuthConfig{
+		BaseURL:       cfg.FusionAuthURL,
+		ApplicationID: cfg.FusionAuthAppID,
+		Issuer:        cfg.GetFusionAuthIssuer(),
+		JWKSURL:       cfg.GetFusionAuthJWKSURL(),
+		ClockSkew:     cfg.JWTClockSkew,
+		RolesClaim:    cfg.JWTRolesClaim,
+	}, logger)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("FusionAuth init: %w", err)
+	}
+
+	logger.Info("authentication provider: FusionAuth",
+		slog.String("fusionauth_url", cfg.FusionAuthURL),
+		slog.String("application_id", cfg.FusionAuthAppID),
+	)
+
+	cleanup := func() {
+		if cErr := validator.Close(); cErr != nil {
+			logger.Error("FusionAuth validator close", slog.String("error", cErr.Error()))
+		}
+	}
+
+	return validator, nil, cleanup, nil
+}
+
+func loadAPIKeys(
+	cfg *config.Config,
+	logger *slog.Logger,
+) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+	var managedKeys *mcpserver.ManagedKeyStore
+
 	switch {
 	case cfg.APIKeysFile != "":
 		mks, err := mcpserver.NewManagedKeyStore(cfg.APIKeysFile)
 		if err != nil {
-			return nil, fmt.Errorf("load API keys file: %w", err)
+			return nil, nil, nil, fmt.Errorf("load API keys file: %w", err)
 		}
 		if mks.Empty() && cfg.Transport == "http" {
 			logger.Warn("API keys file has no enabled keys; HTTP transport has no authentication",
@@ -188,7 +243,7 @@ func loadAPIKeys(cfg *config.Config, logger *slog.Logger) (*mcpserver.ManagedKey
 				slog.Int("enabled", mks.ActiveCount()),
 			)
 		}
-		return mks, nil
+		managedKeys = mks
 	case cfg.APIKey != "":
 		logger.Info("using single API key from MCP_API_KEY")
 		entry := mcpserver.KeyEntry{
@@ -196,13 +251,23 @@ func loadAPIKeys(cfg *config.Config, logger *slog.Logger) (*mcpserver.ManagedKey
 			Key:     cfg.APIKey,
 			Enabled: true,
 		}
-		return mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry}), nil
+		managedKeys = mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry})
 	default:
 		if cfg.Transport == "http" {
 			logger.Warn("no API keys configured; HTTP transport has no authentication")
 		}
-		return nil, nil
+		return nil, nil, nil, nil
 	}
+
+	adapter := mcpserver.NewKeyLookupAdapter(managedKeys)
+	validator := auth.NewAPIKeyValidator(adapter)
+
+	var v auth.TokenValidator
+	if validator != nil {
+		v = validator
+	}
+
+	return v, managedKeys, nil, nil
 }
 
 func startAdminServer(
@@ -215,6 +280,10 @@ func startAdminServer(
 	}
 	if cfg.Transport != "http" {
 		logger.Warn("ADMIN_API_KEY is set but transport is not HTTP; admin API not started")
+		return nil, nil
+	}
+	if cfg.AuthProvider != "apikey" {
+		logger.Info("admin key management API not started (FusionAuth manages users externally)")
 		return nil, nil
 	}
 	if keys == nil {

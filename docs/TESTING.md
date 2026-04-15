@@ -176,7 +176,7 @@ These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock 
 | `TestE2E_PerClientApproval_RequiredOverridesGlobalAuto` | Key with `write_approval: "required"` forces elicitation despite global `auto` |
 | `TestE2E_Auth_ValidKey_SendTx_WithElicitation` | Full auth + approval flow; client ID appears in elicitation prompt |
 
-This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, error propagation, Bearer token authentication with `APIKeyAuth` middleware, write approval with MCP elicitation, per-client policy override via key store, and client identity propagation.
+This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, error propagation, Bearer token authentication with `AuthMiddleware` (API key and FusionAuth providers), write approval with MCP elicitation, per-client policy override via key store, and client identity propagation.
 
 **Admin key management E2E** (`admin_test.go`):
 

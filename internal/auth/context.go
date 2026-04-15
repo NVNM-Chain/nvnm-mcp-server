@@ -2,34 +2,36 @@ package auth
 
 import "context"
 
-type clientIDKey struct{}
-type writeApprovalKey struct{}
+type claimsKey struct{}
+
+// ClaimsFromContext returns the authenticated Claims set by the auth middleware,
+// or nil if unauthenticated (e.g. stdio transport).
+func ClaimsFromContext(ctx context.Context) *Claims {
+	if c, ok := ctx.Value(claimsKey{}).(*Claims); ok {
+		return c
+	}
+	return nil
+}
+
+// ContextWithClaims returns a derived context carrying the authenticated claims.
+func ContextWithClaims(ctx context.Context, c *Claims) context.Context {
+	return context.WithValue(ctx, claimsKey{}, c)
+}
 
 // ClientIDFromContext returns the authenticated client ID set by the auth
 // middleware, or "" if unauthenticated (e.g. stdio transport).
 func ClientIDFromContext(ctx context.Context) string {
-	if id, ok := ctx.Value(clientIDKey{}).(string); ok {
-		return id
+	if c := ClaimsFromContext(ctx); c != nil {
+		return c.ClientID
 	}
 	return ""
-}
-
-// ContextWithClientID returns a derived context carrying the client identity.
-func ContextWithClientID(ctx context.Context, clientID string) context.Context {
-	return context.WithValue(ctx, clientIDKey{}, clientID)
 }
 
 // WriteApprovalFromContext returns the per-client write approval policy
 // ("required", "auto", or "" for unset/use-global-default).
 func WriteApprovalFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(writeApprovalKey{}).(string); ok {
-		return v
+	if c := ClaimsFromContext(ctx); c != nil {
+		return c.WriteApproval
 	}
 	return ""
-}
-
-// ContextWithWriteApproval returns a derived context carrying the per-client
-// write approval policy.
-func ContextWithWriteApproval(ctx context.Context, policy string) context.Context {
-	return context.WithValue(ctx, writeApprovalKey{}, policy)
 }

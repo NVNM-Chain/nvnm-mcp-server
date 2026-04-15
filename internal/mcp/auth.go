@@ -1,7 +1,7 @@
 package mcp
 
 import (
-	"crypto/subtle"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -9,19 +9,13 @@ import (
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 )
 
-// KeyLookup abstracts read-only key operations needed by the auth middleware.
-// Both *KeyStore and *ManagedKeyStore implement this interface.
-type KeyLookup interface {
-	Lookup(rawKey string) *KeyEntry
-	Empty() bool
-}
-
-// APIKeyAuth wraps an http.Handler with Bearer token authentication backed by
-// a KeyLookup. When keys is nil or empty, the handler is returned unwrapped.
-// On successful authentication the client identity from the matched KeyEntry
-// is stored in the request context (retrievable via ClientIDFromContext).
-func APIKeyAuth(next http.Handler, keys KeyLookup, logger *slog.Logger) http.Handler {
-	if keys == nil || keys.Empty() {
+// AuthMiddleware wraps an http.Handler with Bearer token authentication
+// using the provided TokenValidator. When validator is nil, the handler is
+// returned unwrapped (no authentication enforced).
+// On successful authentication the Claims are stored in the request context
+// (retrievable via auth.ClaimsFromContext).
+func AuthMiddleware(next http.Handler, validator auth.TokenValidator, logger *slog.Logger) http.Handler {
+	if validator == nil {
 		return next
 	}
 
@@ -47,24 +41,22 @@ func APIKeyAuth(next http.Handler, keys KeyLookup, logger *slog.Logger) http.Han
 
 		token := strings.TrimPrefix(authHeader, prefix)
 
-		entry := keys.Lookup(token)
-		if entry == nil {
-			logger.Warn("rejected request with unknown API key",
+		claims, err := validator.Validate(token)
+		if err != nil {
+			status := http.StatusForbidden
+			msg := "invalid credentials"
+			if errors.Is(err, auth.ErrInvalidAPIKey) {
+				msg = "invalid API key"
+			}
+			logger.Warn("rejected request with invalid credentials",
 				slog.String("remote_addr", r.RemoteAddr),
+				slog.String("error", err.Error()),
 			)
-			http.Error(w, "invalid API key", http.StatusForbidden)
+			http.Error(w, msg, status)
 			return
 		}
 
-		// Constant-time verify even though Lookup already matched, to avoid
-		// timing side channels from the map lookup.
-		if subtle.ConstantTimeCompare([]byte(token), []byte(entry.Key)) != 1 {
-			http.Error(w, "invalid API key", http.StatusForbidden)
-			return
-		}
-
-		ctx := auth.ContextWithClientID(r.Context(), entry.ID)
-		ctx = auth.ContextWithWriteApproval(ctx, entry.WriteApproval)
+		ctx := auth.ContextWithClaims(r.Context(), claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -3,8 +3,10 @@ module github.com/inveniam/nvnm-mcp-server
 go 1.26.1
 
 require (
+	github.com/MicahParks/keyfunc/v3 v3.8.0
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/ethereum/go-ethereum v1.17.2
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/prometheus/client_golang v1.23.2
@@ -23,6 +25,7 @@ require (
 )
 
 require (
+	github.com/MicahParks/jwkset v0.11.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect

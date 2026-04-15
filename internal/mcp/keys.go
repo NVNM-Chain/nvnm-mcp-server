@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 )
 
 // KeyEntry represents a single API key with its associated client identity.
@@ -87,4 +89,32 @@ func GenerateKey() (string, error) {
 		return "", fmt.Errorf("generate random key: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// KeyLookupAdapter wraps a ManagedKeyStore to satisfy auth.KeyLookup.
+type KeyLookupAdapter struct {
+	store *ManagedKeyStore
+}
+
+// NewKeyLookupAdapter creates an adapter that bridges ManagedKeyStore to auth.KeyLookup.
+func NewKeyLookupAdapter(store *ManagedKeyStore) *KeyLookupAdapter {
+	return &KeyLookupAdapter{store: store}
+}
+
+// Lookup returns a KeyResult for the given raw API key, or nil if not found.
+func (a *KeyLookupAdapter) Lookup(rawKey string) *auth.KeyResult {
+	entry := a.store.Lookup(rawKey)
+	if entry == nil {
+		return nil
+	}
+	return &auth.KeyResult{
+		ID:            entry.ID,
+		Key:           entry.Key,
+		WriteApproval: entry.WriteApproval,
+	}
+}
+
+// Empty returns true if the underlying store has no enabled keys.
+func (a *KeyLookupAdapter) Empty() bool {
+	return a.store.Empty()
 }

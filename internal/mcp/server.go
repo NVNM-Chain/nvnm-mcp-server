@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 	"github.com/inveniam/nvnm-mcp-server/internal/version"
 )
@@ -76,21 +77,20 @@ func (s *Server) RunStdio(ctx context.Context) error {
 const MaxRequestBodyBytes = 10 * 1024 * 1024
 
 // RunHTTP runs the MCP server over Streamable HTTP on the given address.
-// When keys is non-nil and non-empty, requests must include a valid
-// "Authorization: Bearer <key>" header matching an enabled key.
-func (s *Server) RunHTTP(ctx context.Context, addr string, keys KeyLookup) error {
-	authRequired := keys != nil && !keys.Empty()
+// When validator is non-nil, requests must include a valid
+// "Authorization: Bearer <token>" header.
+func (s *Server) RunHTTP(ctx context.Context, addr string, validator auth.TokenValidator) error {
 	s.logger.Info("starting MCP server",
 		slog.String("transport", "http"),
 		slog.String("addr", addr),
-		slog.Bool("api_key_required", authRequired),
+		slog.Bool("auth_required", validator != nil),
 	)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return s.mcpServer
 	}, nil)
 
-	handler := limitRequestBody(APIKeyAuth(mcpHandler, keys, s.logger))
+	handler := limitRequestBody(AuthMiddleware(mcpHandler, validator, s.logger))
 
 	srv := &http.Server{
 		Addr:              addr,

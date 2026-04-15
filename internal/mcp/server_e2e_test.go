@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
+	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
@@ -371,6 +372,33 @@ func TestSafeForClient_PassesThroughApprovalErrors(t *testing.T) {
 // API key authentication E2E tests
 // ---------------------------------------------------------------------------
 
+// testKeyLookup adapts a slice of KeyEntry to auth.KeyLookup for tests.
+type testKeyLookup struct {
+	entries []KeyEntry
+}
+
+func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
+	for i := range t.entries {
+		if t.entries[i].Enabled && t.entries[i].Key == rawKey {
+			return &auth.KeyResult{
+				ID:            t.entries[i].ID,
+				Key:           t.entries[i].Key,
+				WriteApproval: t.entries[i].WriteApproval,
+			}
+		}
+	}
+	return nil
+}
+
+func (t *testKeyLookup) Empty() bool {
+	for _, e := range t.entries {
+		if e.Enabled {
+			return false
+		}
+	}
+	return true
+}
+
 // bearerTransport injects an Authorization header into every outgoing request.
 type bearerTransport struct {
 	token string
@@ -423,9 +451,10 @@ func startAuthTestServer(
 		approval = ApprovalRequired
 	}
 
-	var ks *KeyStore
+	var validator auth.TokenValidator
 	if len(cfg.keys) > 0 {
-		ks = NewKeyStore(cfg.keys)
+		adapter := &testKeyLookup{entries: cfg.keys}
+		validator = auth.NewAPIKeyValidator(adapter)
 	}
 
 	srv := NewServer(evmClient, anchorClient, true, approval, nil, logger)
@@ -434,10 +463,7 @@ func startAuthTestServer(
 		return srv.mcpServer
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
-	var handler http.Handler = mcpHandler
-	if ks != nil && !ks.Empty() {
-		handler = APIKeyAuth(mcpHandler, ks, logger)
-	}
+	handler := AuthMiddleware(mcpHandler, validator, logger)
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)

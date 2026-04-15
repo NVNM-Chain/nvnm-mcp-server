@@ -80,7 +80,7 @@ cmd/inveniam-mcp-server/main.go
     ├── internal/telemetry   (OTel providers, MCP middleware, health server, metrics)
     ├── internal/evm         (ethclient wrapper, normalized types, tracing wrapper)
     ├── internal/anchor      (anchor adapter, prepare-sign-submit, address validation)
-    ├── internal/auth         (client identity context propagation)
+    ├── internal/auth         (claims, token validation, FusionAuth JWT, API key adapter)
     ├── internal/mcp         (MCP server, tool handlers, auth middleware, key store)
     └── internal/version     (canonical version constant)
             │
@@ -94,7 +94,7 @@ cmd/key-mgmt/main.go
     └── internal/mcp         (KeyStore, key file I/O)
 ```
 
-Key constraint: `internal/evm` knows nothing about anchors. `internal/anchor` knows nothing about MCP. `internal/mcp` orchestrates both. `internal/auth` is a minimal package depended on by `internal/mcp` and `internal/telemetry` for client identity propagation without import cycles.
+Key constraint: `internal/evm` knows nothing about anchors. `internal/anchor` knows nothing about MCP. `internal/mcp` orchestrates both. `internal/auth` owns authentication: unified `Claims` type, `TokenValidator` interface, FusionAuth JWT/JWKS validation, and API key validation adapter. It is depended on by `internal/mcp` (middleware) and `internal/telemetry` (client identity in spans) without import cycles.
 
 ### Package Responsibilities
 
@@ -532,7 +532,16 @@ Timeout: 5 seconds for telemetry flush and health server shutdown.
 
 ### Authentication (HTTP transport)
 
-When using HTTP transport, the server supports Bearer token authentication.
+When using HTTP transport, the server supports Bearer token authentication via a configurable auth provider. The provider is selected by the `AUTH_PROVIDER` env var.
+
+| Value | Description |
+|---|---|
+| `apikey` (default) | Self-managed API keys. Simple, no external dependencies. |
+| `fusionauth` | FusionAuth OAuth/JWT with JWKS validation. Production multi-tenant use. |
+
+Stdio transport is always unauthenticated (local-only, trusted), regardless of provider setting.
+
+#### API Key Provider (`AUTH_PROVIDER=apikey`)
 
 **Configuration (choose one):**
 
@@ -562,7 +571,37 @@ The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to us
 - Each key maps to a client ID that flows through to structured logs and OTel spans (`client_id` attribute), enabling per-client audit trails.
 - Disabled keys are rejected.
 - The server warns at startup if HTTP transport runs with no keys configured.
-- Stdio transport is unaffected (local-only, trusted).
+
+#### FusionAuth Provider (`AUTH_PROVIDER=fusionauth`)
+
+**Configuration:**
+
+| Variable | Required | Description |
+|---|---|---|
+| `FUSIONAUTH_URL` | Yes | Base URL of the FusionAuth instance (e.g. `https://auth.example.com`) |
+| `FUSIONAUTH_APPLICATION_ID` | Yes | Application UUID in FusionAuth |
+| `FUSIONAUTH_ISSUER` | No | Expected JWT `iss` claim (defaults to `FUSIONAUTH_URL`) |
+| `FUSIONAUTH_JWKS_URL` | No | JWKS endpoint (defaults to `FUSIONAUTH_URL/.well-known/jwks.json`) |
+| `JWT_CLOCK_SKEW` | No | Leeway for token expiry checks (default `60s`) |
+| `JWT_ROLES_CLAIM` | No | Name of the roles claim in JWT (default `roles`) |
+
+**Behaviour:**
+- JWTs are validated locally using JWKS (public key signature verification). No token introspection.
+- Issuer and audience (application ID) are verified on every request.
+- The JWT `sub` claim becomes the client identity for logs and OTel spans.
+- Roles are extracted from the `roles` claim (top-level or nested under the application ID key, FusionAuth-style).
+- The `automation` role maps to `auto` write approval; all other roles default to `required`.
+- The admin key management API does not start in FusionAuth mode (user management is external).
+- FusionAuth's scheme-stripping quirk (issuer without `http://` prefix) is handled.
+
+**Expected roles:** `reader`, `writer`, `admin`, `automation`
+
+**FusionAuth setup (external):**
+1. Create a tenant in the existing FusionAuth instance
+2. Create an application within the tenant
+3. Define roles: `reader`, `writer`, `admin`, `automation`
+4. Configure JWT template if custom claims are needed beyond default `roles`
+5. Set `FUSIONAUTH_URL` and `FUSIONAUTH_APPLICATION_ID` env vars
 
 **Key management** is provided by the `cmd/key-mgmt/` CLI and Makefile targets (for local/dev use):
 
@@ -613,7 +652,8 @@ The `evm_send_raw_transaction` tool supports configurable human approval before 
 | Level | Setting | Values |
 |---|---|---|
 | Global default | `WRITE_APPROVAL_DEFAULT` env var | `required` (default) or `auto` |
-| Per-client | `write_approval` field in key store entry | `required`, `auto`, or empty (use global) |
+| Per-client (API key) | `write_approval` field in key store entry | `required`, `auto`, or empty (use global) |
+| Per-client (FusionAuth) | `automation` role in JWT | `automation` role maps to `auto`; absence maps to `required` |
 
 **Resolution order:** Per-client `write_approval` > `WRITE_APPROVAL_DEFAULT` > `"required"` (safe default).
 
@@ -745,3 +785,6 @@ State transitions are logged at WARN level and recorded in the `evm.rpc.circuit_
 | Rate limiting | golang.org/x/time/rate | Stdlib-adjacent token bucket; no external dependency complexity |
 | Circuit breaker | sony/gobreaker v2 | Well-maintained (5k+ stars), simple API, generic type support |
 | Trace sampling | OTel SDK ParentBased | Respects upstream decisions, configurable ratio for cost control |
+| Auth provider | Dual: API key + FusionAuth | API keys for simplicity/dev/agents; FusionAuth for production multi-tenant OAuth. Provider-selectable via `AUTH_PROVIDER` |
+| JWT validation | `keyfunc/v3` + `golang-jwt/jwt/v5` | Same stack as TraceChain API; JWKS auto-refresh; proven in production |
+| Write approval (FusionAuth) | Role-based (`automation` role) | No custom JWT claims needed; aligns with RBAC model |

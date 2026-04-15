@@ -35,6 +35,13 @@ func clearEnv(t *testing.T) {
 		"CIRCUIT_BREAKER_TIMEOUT",
 		"OTEL_TRACE_SAMPLE_RATIO",
 		"WRITE_APPROVAL_DEFAULT",
+		"AUTH_PROVIDER",
+		"FUSIONAUTH_URL",
+		"FUSIONAUTH_APPLICATION_ID",
+		"FUSIONAUTH_ISSUER",
+		"FUSIONAUTH_JWKS_URL",
+		"JWT_CLOCK_SKEW",
+		"JWT_ROLES_CLAIM",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -460,5 +467,149 @@ func TestLoad_WriteApprovalDefault_Invalid(t *testing.T) {
 	}
 	if !errors.Is(err, ErrInvalidWriteApproval) {
 		t.Errorf("error = %q, want ErrInvalidWriteApproval", err.Error())
+	}
+}
+
+func TestLoad_AuthProviderDefaults(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthProvider != "apikey" {
+		t.Errorf("AuthProvider = %q, want %q", cfg.AuthProvider, "apikey")
+	}
+	if cfg.JWTRolesClaim != "roles" {
+		t.Errorf("JWTRolesClaim = %q, want %q", cfg.JWTRolesClaim, "roles")
+	}
+	if cfg.JWTClockSkew != 60*time.Second {
+		t.Errorf("JWTClockSkew = %v, want 60s", cfg.JWTClockSkew)
+	}
+}
+
+func TestLoad_AuthProviderFusionAuth(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "fusionauth")
+	t.Setenv("FUSIONAUTH_URL", "https://auth.example.com")
+	t.Setenv("FUSIONAUTH_APPLICATION_ID", "app-uuid-123")
+	t.Setenv("FUSIONAUTH_ISSUER", "https://custom-issuer.example.com")
+	t.Setenv("FUSIONAUTH_JWKS_URL", "https://auth.example.com/custom-jwks")
+	t.Setenv("JWT_CLOCK_SKEW", "30s")
+	t.Setenv("JWT_ROLES_CLAIM", "app_roles")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.AuthProvider != "fusionauth" {
+		t.Errorf("AuthProvider = %q, want %q", cfg.AuthProvider, "fusionauth")
+	}
+	if cfg.FusionAuthURL != "https://auth.example.com" {
+		t.Errorf("FusionAuthURL = %q", cfg.FusionAuthURL)
+	}
+	if cfg.FusionAuthAppID != "app-uuid-123" {
+		t.Errorf("FusionAuthAppID = %q", cfg.FusionAuthAppID)
+	}
+	if cfg.FusionAuthIssuer != "https://custom-issuer.example.com" {
+		t.Errorf("FusionAuthIssuer = %q", cfg.FusionAuthIssuer)
+	}
+	if cfg.FusionAuthJWKSURL != "https://auth.example.com/custom-jwks" {
+		t.Errorf("FusionAuthJWKSURL = %q", cfg.FusionAuthJWKSURL)
+	}
+	if cfg.JWTClockSkew != 30*time.Second {
+		t.Errorf("JWTClockSkew = %v, want 30s", cfg.JWTClockSkew)
+	}
+	if cfg.JWTRolesClaim != "app_roles" {
+		t.Errorf("JWTRolesClaim = %q, want %q", cfg.JWTRolesClaim, "app_roles")
+	}
+}
+
+func TestLoad_AuthProviderInvalid(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "oauth2")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidAuthProvider) {
+		t.Errorf("error = %q, want ErrInvalidAuthProvider", err.Error())
+	}
+}
+
+func TestLoad_FusionAuth_MissingURL(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "fusionauth")
+	t.Setenv("FUSIONAUTH_APPLICATION_ID", "app-uuid-123")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrMissingFusionAuthURL) {
+		t.Errorf("error = %q, want ErrMissingFusionAuthURL", err.Error())
+	}
+}
+
+func TestLoad_FusionAuth_MissingAppID(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "fusionauth")
+	t.Setenv("FUSIONAUTH_URL", "https://auth.example.com")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrMissingFusionAuthAppID) {
+		t.Errorf("error = %q, want ErrMissingFusionAuthAppID", err.Error())
+	}
+}
+
+func TestLoad_FusionAuth_InvalidURL(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "fusionauth")
+	t.Setenv("FUSIONAUTH_URL", "ws://auth.example.com")
+	t.Setenv("FUSIONAUTH_APPLICATION_ID", "app-uuid-123")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidFusionAuthURL) {
+		t.Errorf("error = %q, want ErrInvalidFusionAuthURL", err.Error())
+	}
+}
+
+func TestGetFusionAuthIssuer(t *testing.T) {
+	cfg := &Config{FusionAuthURL: "https://auth.example.com"}
+
+	if got := cfg.GetFusionAuthIssuer(); got != "https://auth.example.com" {
+		t.Errorf("GetFusionAuthIssuer() = %q, want base URL fallback", got)
+	}
+
+	cfg.FusionAuthIssuer = "https://custom.example.com"
+	if got := cfg.GetFusionAuthIssuer(); got != "https://custom.example.com" {
+		t.Errorf("GetFusionAuthIssuer() = %q, want custom issuer", got)
+	}
+}
+
+func TestGetFusionAuthJWKSURL(t *testing.T) {
+	cfg := &Config{FusionAuthURL: "https://auth.example.com"}
+
+	if got := cfg.GetFusionAuthJWKSURL(); got != "https://auth.example.com/.well-known/jwks.json" {
+		t.Errorf("GetFusionAuthJWKSURL() = %q, want default JWKS path", got)
+	}
+
+	cfg.FusionAuthJWKSURL = "https://auth.example.com/custom-jwks"
+	if got := cfg.GetFusionAuthJWKSURL(); got != "https://auth.example.com/custom-jwks" {
+		t.Errorf("GetFusionAuthJWKSURL() = %q, want custom JWKS URL", got)
 	}
 }

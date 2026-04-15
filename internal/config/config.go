@@ -24,6 +24,10 @@ var (
 	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
 	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
 	ErrAdminKeyWithoutFile    = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
+	ErrInvalidAuthProvider    = errors.New("AUTH_PROVIDER must be \"apikey\" or \"fusionauth\"")
+	ErrMissingFusionAuthURL   = errors.New("FUSIONAUTH_URL is required when AUTH_PROVIDER is \"fusionauth\"")
+	ErrMissingFusionAuthAppID = errors.New("FUSIONAUTH_APPLICATION_ID is required when AUTH_PROVIDER is \"fusionauth\"")
+	ErrInvalidFusionAuthURL   = errors.New("FUSIONAUTH_URL must start with http:// or https://")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -67,6 +71,17 @@ type Config struct {
 
 	// Write approval: "required" (default) or "auto"
 	WriteApprovalDefault string
+
+	// Authentication provider: "apikey" (default) or "fusionauth"
+	AuthProvider string
+
+	// FusionAuth settings (required when AuthProvider == "fusionauth")
+	FusionAuthURL     string        // FUSIONAUTH_URL: base URL of the FusionAuth instance
+	FusionAuthAppID   string        // FUSIONAUTH_APPLICATION_ID: application UUID
+	FusionAuthIssuer  string        // FUSIONAUTH_ISSUER: expected JWT issuer (defaults to FusionAuthURL)
+	FusionAuthJWKSURL string        // FUSIONAUTH_JWKS_URL: JWKS endpoint (defaults to BaseURL/jwks.json)
+	JWTClockSkew      time.Duration // JWT_CLOCK_SKEW: leeway for token expiry checks (default 60s)
+	JWTRolesClaim     string        // JWT_ROLES_CLAIM: name of the roles claim in JWT (default "roles")
 }
 
 // Load reads configuration from environment variables and returns a validated Config.
@@ -168,6 +183,20 @@ func Load() (*Config, error) {
 
 	cfg.WriteApprovalDefault = envOrDefault("WRITE_APPROVAL_DEFAULT", "required")
 
+	cfg.AuthProvider = envOrDefault("AUTH_PROVIDER", "apikey")
+	cfg.FusionAuthURL = os.Getenv("FUSIONAUTH_URL")
+	cfg.FusionAuthAppID = os.Getenv("FUSIONAUTH_APPLICATION_ID")
+	cfg.FusionAuthIssuer = os.Getenv("FUSIONAUTH_ISSUER")
+	cfg.FusionAuthJWKSURL = os.Getenv("FUSIONAUTH_JWKS_URL")
+	cfg.JWTRolesClaim = envOrDefault("JWT_ROLES_CLAIM", "roles")
+
+	clockSkewStr := envOrDefault("JWT_CLOCK_SKEW", "60s")
+	clockSkew, err := time.ParseDuration(clockSkewStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWT_CLOCK_SKEW %q: %w", clockSkewStr, err)
+	}
+	cfg.JWTClockSkew = clockSkew
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -195,7 +224,28 @@ func (c *Config) Validate() error {
 	if c.WriteApprovalDefault != "required" && c.WriteApprovalDefault != "auto" {
 		return fmt.Errorf("%w: got %q", ErrInvalidWriteApproval, c.WriteApprovalDefault)
 	}
+	if err := c.validateAuth(); err != nil {
+		return err
+	}
 	return c.validateResilience()
+}
+
+func (c *Config) validateAuth() error {
+	if c.AuthProvider != "apikey" && c.AuthProvider != "fusionauth" {
+		return fmt.Errorf("%w: got %q", ErrInvalidAuthProvider, c.AuthProvider)
+	}
+	if c.AuthProvider == "fusionauth" {
+		if c.FusionAuthURL == "" {
+			return ErrMissingFusionAuthURL
+		}
+		if !strings.HasPrefix(c.FusionAuthURL, "http://") && !strings.HasPrefix(c.FusionAuthURL, "https://") {
+			return fmt.Errorf("%w: got %q", ErrInvalidFusionAuthURL, c.FusionAuthURL)
+		}
+		if c.FusionAuthAppID == "" {
+			return ErrMissingFusionAuthAppID
+		}
+	}
+	return nil
 }
 
 func (c *Config) validateResilience() error {
@@ -218,6 +268,22 @@ func (c *Config) validateResilience() error {
 		return ErrInvalidSampleRatio
 	}
 	return nil
+}
+
+// GetFusionAuthIssuer returns the expected JWT issuer. Falls back to FusionAuthURL.
+func (c *Config) GetFusionAuthIssuer() string {
+	if c.FusionAuthIssuer != "" {
+		return c.FusionAuthIssuer
+	}
+	return c.FusionAuthURL
+}
+
+// GetFusionAuthJWKSURL returns the JWKS endpoint. Falls back to FusionAuthURL + /.well-known/jwks.json.
+func (c *Config) GetFusionAuthJWKSURL() string {
+	if c.FusionAuthJWKSURL != "" {
+		return c.FusionAuthJWKSURL
+	}
+	return strings.TrimRight(c.FusionAuthURL, "/") + "/.well-known/jwks.json"
 }
 
 func envOrDefault(key, fallback string) string {

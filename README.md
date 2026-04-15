@@ -77,35 +77,42 @@ export MCP_HTTP_ADDR=:8080
 ./inveniam-mcp-server --transport http
 ```
 
-### API Key Authentication (HTTP transport)
+### Authentication (HTTP transport)
 
-When using HTTP transport, API key authentication is strongly recommended. Requests must include `Authorization: Bearer <key>`.
+When using HTTP transport, authentication is strongly recommended. The server supports two auth providers, selected by `AUTH_PROVIDER` (default: `apikey`).
+
+#### API Key Provider (default)
 
 ```bash
+export AUTH_PROVIDER=apikey  # default, can be omitted
+
 # Create an API key for a client
 make key-create NAME=my-agent
 
 # List all keys
 make key-list
 
-# Disable a key
-make key-disable NAME=my-agent
-
-# Enable a disabled key
-make key-enable NAME=my-agent
+# Configure the server to use keys:
+export MCP_API_KEYS_FILE=.mcp-keys.json   # Multi-key file (recommended)
+# OR
+export MCP_API_KEY=your-secret-key         # Single key (dev/test only)
 ```
 
-Configure the server to use keys:
+#### FusionAuth Provider (OAuth/JWT)
 
 ```bash
-# Option A: Multi-key file (recommended)
-export MCP_API_KEYS_FILE=.mcp-keys.json
-
-# Option B: Single key (dev/test only)
-export MCP_API_KEY=your-secret-key
+export AUTH_PROVIDER=fusionauth
+export FUSIONAUTH_URL=https://auth.example.com
+export FUSIONAUTH_APPLICATION_ID=your-app-uuid
+# Optional:
+export FUSIONAUTH_ISSUER=https://auth.example.com  # defaults to FUSIONAUTH_URL
+export JWT_CLOCK_SKEW=60s                           # default 60s
+export JWT_ROLES_CLAIM=roles                        # default "roles"
 ```
 
-The authenticated client ID flows into all audit logs and OTel spans, enabling per-client observability.
+The `automation` role in the JWT maps to `auto` write approval. All other roles default to `required`.
+
+The authenticated client ID (API key ID or JWT `sub`) flows into all audit logs and OTel spans.
 
 ## Configuration
 
@@ -122,10 +129,17 @@ All configuration is via environment variables. No config files required.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MCP_API_KEYS_FILE` | _(none)_ | Path to JSON key store file (see `make key-create`). Takes precedence over `MCP_API_KEY`. |
-| `MCP_API_KEY` | _(none)_ | Single API key for dev/test. Use `MCP_API_KEYS_FILE` in production for multi-key + client identity. |
+| `AUTH_PROVIDER` | `apikey` | Auth provider: `apikey` or `fusionauth` |
+| `MCP_API_KEYS_FILE` | _(none)_ | Path to JSON key store file (API key mode). |
+| `MCP_API_KEY` | _(none)_ | Single API key for dev/test (API key mode). |
+| `FUSIONAUTH_URL` | _(none)_ | FusionAuth base URL (required for `fusionauth` mode). |
+| `FUSIONAUTH_APPLICATION_ID` | _(none)_ | FusionAuth application UUID (required for `fusionauth` mode). |
+| `FUSIONAUTH_ISSUER` | `FUSIONAUTH_URL` | Expected JWT issuer (FusionAuth mode). |
+| `FUSIONAUTH_JWKS_URL` | auto | JWKS endpoint (defaults to `FUSIONAUTH_URL/.well-known/jwks.json`). |
+| `JWT_CLOCK_SKEW` | `60s` | Leeway for JWT expiry checks (FusionAuth mode). |
+| `JWT_ROLES_CLAIM` | `roles` | JWT claim name for roles (FusionAuth mode). |
 
-When either is set, HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.
+When auth is configured, HTTP requests must include `Authorization: Bearer <token>`.
 
 ### Admin Key Management API
 
