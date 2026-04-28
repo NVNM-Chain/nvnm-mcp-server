@@ -92,19 +92,57 @@ type GetRecordsResponse struct {
 
 // --- Unsigned transaction (prepare-sign-submit) ---
 
+// WalletTransactionRequest contains the transaction fields in the format
+// expected by EIP-1193 browser wallets such as MetaMask. Pass this object
+// directly to eth_sendTransaction:
+//
+//	await window.ethereum.request({
+//	  method: "eth_sendTransaction",
+//	  params: [wallet_tx_request],
+//	})
+//
+// All numeric fields are 0x-prefixed hexadecimal strings so the wallet can
+// interpret them without conversion. The wallet signs the transaction locally
+// and broadcasts it directly to the chain; the MCP server never holds the key.
+type WalletTransactionRequest struct {
+	From     string `json:"from"`     // Sender address (0x-prefixed, checksummed)
+	To       string `json:"to"`       // Target address (precompile)
+	Data     string `json:"data"`     // ABI-encoded calldata (0x-prefixed hex)
+	Value    string `json:"value"`    // Always "0x0" for precompile calls
+	ChainID  string `json:"chainId"`  // EIP-155 chain ID as 0x-prefixed hex
+	Gas      string `json:"gas"`      // Estimated gas limit as 0x-prefixed hex
+	GasPrice string `json:"gasPrice"` // Gas price as 0x-prefixed hex (wei)
+}
+
 // UnsignedTransaction contains a fully constructed but unsigned EVM transaction.
-// The caller signs raw_tx with their private key, then submits via
-// evm_send_raw_transaction. The other fields are provided for transparency
-// so the caller can verify what they're signing.
+// Two signing paths are provided:
+//
+//   - wallet_tx_request: pass directly to MetaMask/EIP-1193 eth_sendTransaction.
+//     The wallet signs and broadcasts; use evm_get_transaction_receipt for the result.
+//
+//   - raw_tx: RLP-encoded unsigned bytes for local/headless signers.
+//     Sign externally, then broadcast via evm_send_raw_transaction.
+//
+// The MCP server never receives or stores private keys in either path.
 type UnsignedTransaction struct {
-	RawTx    string `json:"raw_tx"`    // RLP-encoded unsigned tx (hex, 0x-prefixed)
-	To       string `json:"to"`        // Target address (precompile)
-	Data     string `json:"data"`      // ABI-encoded calldata (hex, 0x-prefixed)
-	Nonce    uint64 `json:"nonce"`     // Sender's pending nonce
-	Gas      uint64 `json:"gas"`       // Estimated gas limit (with buffer)
-	GasPrice string `json:"gas_price"` // Current gas price (wei, decimal string)
-	Value    string `json:"value"`     // Always "0" for precompile calls
-	ChainID  int64  `json:"chain_id"`  // EIP-155 chain ID
+	// RLP-encoded unsigned tx (hex, 0x-prefixed) for local/headless signers.
+	RawTx string `json:"raw_tx"`
+	// Target address (anchor precompile).
+	To string `json:"to"`
+	// ABI-encoded calldata (hex, 0x-prefixed).
+	Data string `json:"data"`
+	// Sender's pending nonce.
+	Nonce uint64 `json:"nonce"`
+	// Estimated gas limit (with 20% buffer).
+	Gas uint64 `json:"gas"`
+	// Current gas price (wei, decimal string).
+	GasPrice string `json:"gas_price"`
+	// Always "0" for precompile calls.
+	Value string `json:"value"`
+	// EIP-155 chain ID.
+	ChainID int64 `json:"chain_id"`
+	// MetaMask / EIP-1193 compatible request; omitted for backwards compatibility.
+	WalletTxRequest *WalletTransactionRequest `json:"wallet_tx_request,omitempty"`
 }
 
 // --- Prepare request types (write operations) ---

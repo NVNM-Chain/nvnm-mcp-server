@@ -229,17 +229,49 @@ The MCP server handles all blockchain complexity (ABI encoding, nonce lookup, ga
 
 **Flow:**
 
-1. **Prepare** -- Caller invokes `anchor_prepare_add_registry(from, name, description, metadata)`. The MCP server ABI-encodes the call, fetches the nonce for the sender address, estimates gas, and returns a complete unsigned transaction as hex plus metadata (gas estimate, nonce, chain ID).
+1. **Prepare** -- Caller invokes `anchor_prepare_add_registry(from, name, description, metadata)`. The MCP server ABI-encodes the call, fetches the nonce for the sender address, estimates gas, and returns a complete unsigned transaction with two signing paths.
 
-2. **Sign** -- The caller signs the unsigned transaction bytes with their private key. This is a single ECDSA operation -- no web3 library required.
+2. **Sign & Submit (choose one):**
 
-3. **Submit** -- The caller sends the signed transaction back via `evm_send_raw_transaction(signed_tx_hex)`. The MCP server broadcasts it to the chain and returns the transaction hash. The caller can then monitor the result with `evm_get_transaction_receipt`.
+**Path A -- MetaMask / browser wallet (recommended for human users):**
+
+```js
+const prepared = await callMCPTool("anchor_prepare_add_record", {
+  from, registry, uri, checksum
+});
+
+// Pass wallet_tx_request directly to MetaMask
+const txHash = await window.ethereum.request({
+  method: "eth_sendTransaction",
+  params: [prepared.wallet_tx_request],
+});
+
+// Confirm on-chain
+const receipt = await callMCPTool("evm_get_transaction_receipt", { tx_hash: txHash });
+```
+
+MetaMask signs and broadcasts directly. The response includes `wallet_tx_request` with all numeric fields as `0x`-prefixed hex quantities ready for EIP-1193 wallets. You do not call `evm_send_raw_transaction` in this path.
+
+**Path B -- Local/headless signer (CLI, HSM, automation):**
+
+```python
+prepared = mcp.call("anchor_prepare_add_record", {...})
+
+# Sign the raw_tx bytes externally
+signed_hex = my_signer.sign(prepared["raw_tx"])
+
+# Broadcast via MCP server
+result = mcp.call("evm_send_raw_transaction", {"signed_tx": signed_hex})
+receipt = mcp.call("evm_get_transaction_receipt", {"tx_hash": result["tx_hash"]})
+```
+
+3. **Verify** -- Use `evm_get_transaction_receipt(tx_hash)` and `anchor_get_records` to confirm the anchor is on-chain.
 
 This pattern means:
 - Private keys never touch the MCP server
-- Signing can happen in an HSM, Vault, or any secure enclave
-- The caller needs minimal crypto capability (just ECDSA sign)
-- The MCP server handles all the "fiddly" ABI and RPC work
+- Browser wallet users get native MetaMask confirmation prompts
+- Signing can happen in an HSM, Vault, hardware wallet, or any secure enclave
+- The MCP server handles all the ABI encoding, nonce, and gas estimation
 
 ## Observability
 

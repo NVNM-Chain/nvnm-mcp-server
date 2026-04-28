@@ -308,6 +308,154 @@ func TestPrepareWithoutABI_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
+	abiPath := testABIPath(t)
+	logger := logging.New("error")
+	const chainID = int64(58887)
+	mock := &mockEVMClient{
+		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+			return 7, nil
+		},
+		suggestGasFn: func(_ context.Context) (*big.Int, error) {
+			return big.NewInt(1_000_000_000), nil
+		},
+		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+			return 50000, nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, chainID, abiPath, logger)
+
+	tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
+		From: "0x1234567890abcdef1234567890abcdef12345678",
+		Name: "wallet-test",
+	})
+	if err != nil {
+		t.Fatalf("PrepareAddRegistry: %v", err)
+	}
+
+	w := tx.WalletTxRequest
+	if w == nil {
+		t.Fatal("WalletTxRequest must not be nil")
+	}
+
+	// from is checksummed address
+	if w.From == "" {
+		t.Error("WalletTxRequest.From must not be empty")
+	}
+
+	// to is the precompile
+	if w.To != PrecompileAddress {
+		t.Errorf("WalletTxRequest.To = %q, want %q", w.To, PrecompileAddress)
+	}
+
+	// data matches the unsigned tx data field
+	if w.Data != tx.Data {
+		t.Errorf("WalletTxRequest.Data = %q, want same as tx.Data", w.Data)
+	}
+
+	// value is 0x0
+	if w.Value != "0x0" {
+		t.Errorf("WalletTxRequest.Value = %q, want 0x0", w.Value)
+	}
+
+	// chainId is 0xe607 (58887 in hex)
+	if w.ChainID != "0xe607" {
+		t.Errorf("WalletTxRequest.ChainID = %q, want 0xe607", w.ChainID)
+	}
+
+	// gas is 0x-prefixed hex: 60000 (50000 + 20%) = 0xea60
+	if w.Gas != "0xea60" {
+		t.Errorf("WalletTxRequest.Gas = %q, want 0xea60", w.Gas)
+	}
+
+	// gasPrice is 0x-prefixed hex: 1_000_000_000 = 0x3b9aca00
+	if w.GasPrice != "0x3b9aca00" {
+		t.Errorf("WalletTxRequest.GasPrice = %q, want 0x3b9aca00", w.GasPrice)
+	}
+
+	// data must be 0x-prefixed non-empty calldata
+	if len(w.Data) < 3 || w.Data[:2] != "0x" {
+		t.Errorf("WalletTxRequest.Data must be 0x-prefixed hex, got %q", w.Data)
+	}
+}
+
+func TestWalletTransactionRequest_JSON(t *testing.T) {
+	req := WalletTransactionRequest{
+		From:     "0x1234567890AbcdEF1234567890aBcdef12345678",
+		To:       PrecompileAddress,
+		Data:     "0xcafebabe",
+		Value:    "0x0",
+		ChainID:  "0xe607",
+		Gas:      "0xea60",
+		GasPrice: "0x3b9aca00",
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded WalletTransactionRequest
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	checks := map[string][2]string{
+		"From":     {decoded.From, req.From},
+		"To":       {decoded.To, req.To},
+		"Data":     {decoded.Data, req.Data},
+		"Value":    {decoded.Value, req.Value},
+		"ChainID":  {decoded.ChainID, req.ChainID},
+		"Gas":      {decoded.Gas, req.Gas},
+		"GasPrice": {decoded.GasPrice, req.GasPrice},
+	}
+	for field, pair := range checks {
+		if pair[0] != pair[1] {
+			t.Errorf("%s = %q, want %q", field, pair[0], pair[1])
+		}
+	}
+}
+
+func TestUnsignedTransaction_WalletTxRequestOmittedWhenNil(t *testing.T) {
+	tx := UnsignedTransaction{
+		RawTx:   "0xdeadbeef",
+		ChainID: 58887,
+	}
+	data, err := json.Marshal(tx)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if containsSubstring(string(data), "wallet_tx_request") {
+		t.Error("wallet_tx_request should be omitted when nil")
+	}
+}
+
+func TestUnsignedTransaction_WalletTxRequestIncludedWhenSet(t *testing.T) {
+	tx := UnsignedTransaction{
+		RawTx:   "0xdeadbeef",
+		ChainID: 58887,
+		WalletTxRequest: &WalletTransactionRequest{
+			From:     "0xabc",
+			To:       PrecompileAddress,
+			Data:     "0x1234",
+			Value:    "0x0",
+			ChainID:  "0xe607",
+			Gas:      "0x1",
+			GasPrice: "0x1",
+		},
+	}
+	data, err := json.Marshal(tx)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !containsSubstring(string(data), "wallet_tx_request") {
+		t.Error("wallet_tx_request should be present when set")
+	}
+	if !containsSubstring(string(data), "0xe607") {
+		t.Error("wallet_tx_request should contain chain ID hex")
+	}
+}
+
 func TestUnsignedTransaction_JSON(t *testing.T) {
 	tx := UnsignedTransaction{
 		RawTx:    "0xdeadbeef",

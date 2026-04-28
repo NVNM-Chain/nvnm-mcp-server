@@ -178,15 +178,28 @@ func (c *client) buildUnsignedTx(
 		return nil, fmt.Errorf("serialize unsigned transaction: %w", err)
 	}
 
+	dataHex := "0x" + hex.EncodeToString(calldata)
+	toHex := c.address.Hex()
+	fromChecksummed := common.HexToAddress(fromHex).Hex()
+
 	return &UnsignedTransaction{
 		RawTx:    "0x" + hex.EncodeToString(txBytes),
-		To:       c.address.Hex(),
-		Data:     "0x" + hex.EncodeToString(calldata),
+		To:       toHex,
+		Data:     dataHex,
 		Nonce:    nonce,
 		Gas:      gasLimit,
 		GasPrice: gasPrice.String(),
 		Value:    "0",
 		ChainID:  c.chainID,
+		WalletTxRequest: &WalletTransactionRequest{
+			From:     fromChecksummed,
+			To:       toHex,
+			Data:     dataHex,
+			Value:    "0x0",
+			ChainID:  "0x" + big.NewInt(c.chainID).Text(16),
+			Gas:      "0x" + new(big.Int).SetUint64(gasLimit).Text(16),
+			GasPrice: "0x" + gasPrice.Text(16),
+		},
 	}, nil
 }
 

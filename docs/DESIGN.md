@@ -272,9 +272,55 @@ Tools return errors via the MCP `isError` flag with a human-readable text messag
 
 ## 4. Write Transaction Architecture
 
-Write operations use a **prepare-sign-submit** pattern that keeps private keys entirely outside the MCP server. The server handles all blockchain complexity; the caller only needs to perform a single ECDSA signature.
+Write operations use a **prepare-sign-submit** pattern that keeps private keys entirely outside the MCP server. The server handles all blockchain complexity (ABI encoding, nonce, gas estimation, chain ID); the caller signs using their own key infrastructure.
 
-### Flow
+Two signing paths are supported, both originating from the same `anchor_prepare_*` tool call:
+
+- **MetaMask / EIP-1193 (browser wallets):** use `wallet_tx_request` from the response.
+- **Local / headless signers (CLI, HSM, WalletConnect):** use `raw_tx` from the response.
+
+### Flow A: MetaMask / Browser Wallet
+
+```
+┌──────────────────┐         ┌──────────────────┐         ┌──────────┐  ┌──────────────────┐
+│   Browser / UI   │         │    MCP Server     │         │ MetaMask │  │  Inveniam Chain  │
+└────────┬─────────┘         └────────┬──────────┘         └────┬─────┘  └────────┬─────────┘
+         │                            │                          │                 │
+         │  anchor_prepare_add_record │                          │                 │
+         │ ─────────────────────────► │                          │                 │
+         │                            │  ABI-encode + gas est.  │                 │
+         │  ◄──────────────────────── │                          │                 │
+         │  {raw_tx, wallet_tx_req}   │                          │                 │
+         │                            │                          │                 │
+         │  eth_sendTransaction       │                          │                 │
+         │  (wallet_tx_request) ─────────────────────────────── ►│                 │
+         │                            │                          │  Sign + broadcast ──────────►
+         │                            │                          │  ◄── tx_hash                │
+         │  ◄──────────────────────────────────────────────────  │                 │
+         │  tx_hash                   │                          │                 │
+         │                            │                          │                 │
+         │  evm_get_transaction_receipt(tx_hash)                 │                 │
+         │ ─────────────────────────► │                          │                 │
+         │                            │  eth_getTransactionReceipt ───────────────►
+         │  ◄──────────────────────── │  ◄── receipt            │                 │
+         │  {status, gas_used, ...}   │                          │                 │
+         └────────────────────────────┘                          └─────────────────┘
+```
+
+**JavaScript client example:**
+
+```js
+const prepared = await callMCPTool("anchor_prepare_add_record", { from, registry, uri, checksum });
+
+const txHash = await window.ethereum.request({
+  method: "eth_sendTransaction",
+  params: [prepared.wallet_tx_request],
+});
+
+const receipt = await callMCPTool("evm_get_transaction_receipt", { tx_hash: txHash });
+```
+
+### Flow B: Local / Headless Signer
 
 ```
 ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
@@ -282,8 +328,7 @@ Write operations use a **prepare-sign-submit** pattern that keeps private keys e
 └────────┬─────────┘         └────────┬──────────┘         └────────┬─────────┘
          │                            │                             │
          │  anchor_prepare_add_       │                             │
-         │  registry(from, name,      │                             │
-         │  description, metadata)    │                             │
+         │  registry(from, name, ...) │                             │
          │ ─────────────────────────► │                             │
          │                            │  ABI-encode calldata        │
          │                            │  eth_getTransactionCount ──►│
@@ -294,10 +339,10 @@ Write operations use a **prepare-sign-submit** pattern that keeps private keys e
          │                            │  ◄── gas price              │
          │                            │  Construct unsigned tx      │
          │  ◄──────────────────────── │                             │
-         │  {unsigned_tx, nonce,      │                             │
-         │   gas, chain_id, to, ...}  │                             │
+         │  {raw_tx, wallet_tx_req,   │                             │
+         │   nonce, gas, chain_id...} │                             │
          │                            │                             │
-         │  Sign tx bytes locally     │                             │
+         │  Sign raw_tx locally       │                             │
          │  (ECDSA with private key)  │                             │
          │                            │                             │
          │  evm_send_raw_transaction  │                             │
@@ -307,35 +352,39 @@ Write operations use a **prepare-sign-submit** pattern that keeps private keys e
          │                            │  ◄── tx_hash                │
          │  ◄──────────────────────── │                             │
          │  {tx_hash}                 │                             │
-         │                            │                             │
-         │  evm_get_transaction_      │                             │
-         │  receipt(tx_hash)          │                             │
-         │ ─────────────────────────► │                             │
-         │                            │  eth_getTransactionReceipt─►│
-         │                            │  ◄── receipt                │
-         │  ◄──────────────────────── │                             │
-         │  {status, gas_used, ...}   │                             │
          └────────────────────────────┘                             │
 ```
 
 ### UnsignedTransaction type
 
-The `anchor_prepare_*` tools return an `UnsignedTransaction` containing everything the caller needs to sign and submit:
+The `anchor_prepare_*` tools return an `UnsignedTransaction` with fields for both signing paths:
 
 ```go
 type UnsignedTransaction struct {
-    RawTx   string `json:"raw_tx"`    // RLP-encoded unsigned tx (hex, 0x-prefixed)
-    To      string `json:"to"`        // Target address (precompile)
-    Data    string `json:"data"`      // ABI-encoded calldata (hex)
-    Nonce   uint64 `json:"nonce"`     // Sender's current nonce
-    Gas     uint64 `json:"gas"`       // Estimated gas limit (with buffer)
+    // Local/headless signer path
+    RawTx    string `json:"raw_tx"`    // RLP-encoded unsigned tx (hex, 0x-prefixed)
+    To       string `json:"to"`        // Target address (precompile)
+    Data     string `json:"data"`      // ABI-encoded calldata (hex)
+    Nonce    uint64 `json:"nonce"`     // Sender's current nonce
+    Gas      uint64 `json:"gas"`       // Estimated gas limit (with buffer)
     GasPrice string `json:"gas_price"` // Current gas price (wei, decimal string)
-    Value   string `json:"value"`     // Always "0" for precompile calls
-    ChainID int64  `json:"chain_id"`  // For EIP-155 replay protection
+    Value    string `json:"value"`     // Always "0" for precompile calls
+    ChainID  int64  `json:"chain_id"`  // For EIP-155 replay protection
+
+    // MetaMask / EIP-1193 path
+    WalletTxRequest *WalletTransactionRequest `json:"wallet_tx_request,omitempty"`
+}
+
+type WalletTransactionRequest struct {
+    From     string `json:"from"`      // Sender address
+    To       string `json:"to"`        // Precompile address
+    Data     string `json:"data"`      // ABI-encoded calldata
+    Value    string `json:"value"`     // "0x0"
+    ChainID  string `json:"chainId"`   // 0x-prefixed hex (e.g. "0xe607")
+    Gas      string `json:"gas"`       // 0x-prefixed hex quantity
+    GasPrice string `json:"gasPrice"`  // 0x-prefixed hex quantity (wei)
 }
 ```
-
-The `raw_tx` field is a serialized `types.Transaction` ready for signing. The other fields are provided for caller transparency -- the caller can verify what they're signing before applying their key.
 
 ### Why prepare-sign-submit
 
@@ -777,7 +826,7 @@ State transitions are logged at WARN level and recorded in the `evm.rpc.circuit_
 | Config | Plain env vars | Simplest possible; no framework overhead; 12-factor compliant |
 | Normalization | Inside `evm/` package | Reduces package count; normalization is a concern of the EVM layer |
 | Anchor isolation | Adapter pattern in `internal/anchor` | Must be swappable without touching EVM or MCP layers |
-| Write key management | Prepare-sign-submit (no server keys) | Keys never leave caller's domain; MCP server stays a stateless translator; supports HSM/Vault/any signer without server changes |
+| Write key management | Prepare-sign-submit (no server keys) | Keys never leave caller's domain; MCP server stays a stateless translator; supports MetaMask, HSM/Vault, CLI signers without server changes |
 | Nonce management | Fetch-at-prepare-time | Correct for serial writes; sufficient for document anchoring volumes; avoids statefulness in the server |
 | No `normalize/` package | Merged into `evm/` and `anchor/` | Original plan had too much indirection for the value |
 | MCP middleware | Custom (~100 lines) | Avoided 1-star `mcp-otel-go` dependency; full control over privacy and metric naming |
