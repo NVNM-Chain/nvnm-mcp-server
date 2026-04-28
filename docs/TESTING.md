@@ -328,7 +328,7 @@ $ make docker-smoke
 
 - Docker image builds successfully (multi-stage: `golang:1.26.2-alpine` digest-pinned → `gcr.io/distroless/static-debian12` digest-pinned)
 - Container starts, ABI loads from `/app/abi/anchoring.json`
-- `/healthz` → `{"status":"ok","version":"0.4.0"}`
+- `/healthz` → `{"status":"ok","version":"1.0.0-rc.1"}` (or whatever `internal/version.Version` reports for the build)
 - `/readyz` → `{"status":"ready","checks":{"abi":"loaded","evm_rpc":"ok"}}`
 - MCP `initialize` → HTTP 200, session established
 - Container stops cleanly

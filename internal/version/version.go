@@ -6,4 +6,4 @@ package version
 // Override at build time with:
 //
 //	go build -ldflags "-X github.com/inveniam/nvnm-mcp-server/internal/version.Version=1.2.3"
-var Version = "0.4.0"
+var Version = "1.0.0-rc.1"
