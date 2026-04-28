@@ -35,7 +35,7 @@ Layered Go packages: `cmd/` -> `config`, `logging`, `telemetry`, `evm`, `anchor`
 
 ### 3. Tech Stack
 
-- **Language:** Go 1.26.1 (`CGO_ENABLED=0`)
+- **Language:** Go 1.26.2 (`CGO_ENABLED=0`)
 - **MCP SDK:** `github.com/modelcontextprotocol/go-sdk` v1.4.1
 - **EVM:** `github.com/ethereum/go-ethereum` v1.17.2
 - **Resilience:** `cenkalti/backoff/v5`, `sony/gobreaker/v2`, `golang.org/x/time/rate`
@@ -337,7 +337,7 @@ The Inveniam EVM MCP Server has a solid defensive foundation: no server-side key
 
 **10. Docker Base Image Not Pinned by Digest**
 
-- **Evidence:** `Dockerfile` line 1 `golang:1.26-alpine`, line 13 `gcr.io/distroless/static-debian12` -- both tag-based, not digest-pinned
+- **Evidence:** Prior to remediation, `Dockerfile` used tag-based base images rather than digest-pinned references.
 - **Label:** Observed
 - **Why it matters:** Tag-based references are mutable; a supply chain attack on the base image registry would silently affect builds
 - **Attacker preconditions:** Compromise of Docker Hub or GCR image tags
@@ -618,7 +618,7 @@ All "Immediate Fixes" and "Before Red Team" items have been implemented. Each fi
 |---|---|
 | Fix | Both Dockerfile base images pinned by `sha256` digest |
 | Files | `Dockerfile` |
-| Changes | `golang:1.26-alpine` pinned to `@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039`. `gcr.io/distroless/static-debian12` pinned to `@sha256:20bc6c0bc4d625a22a8fde3e55f6515709b32055ef8fb9cfbddaa06d1760f838`. Dependabot will flag when newer digests are available. |
+| Changes | `golang:1.26.2-alpine` pinned to `@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1`. `gcr.io/distroless/static-debian12` pinned to `@sha256:20bc6c0bc4d625a22a8fde3e55f6515709b32055ef8fb9cfbddaa06d1760f838`. Dependabot will flag when newer digests are available. |
 
 ### Longer-Term Items -- Triaged
 

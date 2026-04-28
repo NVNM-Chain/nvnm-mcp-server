@@ -1,6 +1,6 @@
 module github.com/inveniam/nvnm-mcp-server
 
-go 1.26.1
+go 1.26.2
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0
