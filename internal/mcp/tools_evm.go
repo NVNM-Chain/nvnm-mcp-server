@@ -63,16 +63,23 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_get_logs",
 		Title: "Get Logs",
-		Description: "Returns event logs matching a filter. " +
-			"Specify address(es), block range, and/or topics.",
+		Description: "Returns event logs emitted by smart contracts matching a filter. " +
+			"Specify address to filter by contract, from_block/to_block for a block range, " +
+			"and topics as keccak256 hashes of event signatures " +
+			"(e.g. keccak256('Transfer(address,address,uint256)') = 0xddf252...). " +
+			"All filters are optional -- omitting all returns all logs in the block range. " +
+			"Useful for watching for on-chain events or auditing contract activity.",
 	}, makeGetLogsHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "evm_call_contract",
 		Title: "Call Contract",
-		Description: "Execute a read-only contract call. " +
-			"Provide the contract address and hex-encoded calldata. " +
-			"Returns raw hex output.",
+		Description: "Execute a read-only (eth_call) call to any smart contract. " +
+			"Provide the contract address and ABI-encoded calldata as a 0x-prefixed hex string. " +
+			"Returns the raw hex output -- you must ABI-decode it to get structured data. " +
+			"For anchor precompile reads, prefer the anchor_get_* tools which handle ABI " +
+			"encoding and decoding automatically. " +
+			"Use this tool for arbitrary contract reads not covered by specific tools.",
 	}, makeCallContractHandler(evmClient))
 }
 
