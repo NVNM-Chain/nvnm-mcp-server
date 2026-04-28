@@ -236,9 +236,15 @@ Design decisions:
 MCP tool registration and request handling using the official Go MCP SDK.
 
 Responsibilities:
-- Construct `mcp.Server` with tool definitions
+- Construct `mcp.Server` with tool definitions (`server.go`, `tools_evm.go`, `tools_anchor.go`, `tools_evm_write.go`, `tools_anchor_write.go`)
 - Each tool handler: validate input -> call EVM/anchor client -> return normalized result
 - Map internal errors to MCP-safe responses (human-readable message + error flag)
+- HTTP authentication middleware (`auth.go`) -- delegates to `internal/auth.TokenValidator` (API key or FusionAuth JWT)
+- Per-client token-bucket rate limiting (`ratelimit.go`) -- returns HTTP `429` when exceeded
+- Per-tool role-based authorization (`rbac.go`) -- gates each handler on `reader` / `writer` / `admin` / `automation` roles
+- API key store (`keys.go`, `managed_keys.go`) -- file-backed JSON store with hot-reload semantics
+- Admin REST API (`admin.go`) -- runtime key CRUD on a separate port (`:8081`), guarded by `ADMIN_API_KEY`
+- Write approval workflow (`approval.go`) -- MCP elicitation prompt for `evm_send_raw_transaction` based on per-client + global policy
 
 ## 3. MCP Tool Design
 
@@ -442,14 +448,43 @@ type Config struct {
     Transport        string        // default "stdio"
     HTTPAddr         string        // default ":8080"
 
-    // Authentication
+    // Authentication -- provider selection
+    AuthProvider     string        // AUTH_PROVIDER; "apikey" (default) or "fusionauth"
+
+    // API key authentication
     APIKey           string        // MCP_API_KEY; single key for simple deployments
     APIKeysFile      string        // MCP_API_KEYS_FILE; path to JSON key store (preferred)
+
+    // FusionAuth authentication
+    FusionAuthURL           string        // FUSIONAUTH_URL; base URL of FusionAuth instance
+    FusionAuthApplicationID string        // FUSIONAUTH_APPLICATION_ID
+    FusionAuthIssuer        string        // FUSIONAUTH_ISSUER; defaults to FUSIONAUTH_URL
+    FusionAuthJWKSURL       string        // FUSIONAUTH_JWKS_URL; defaults to ${URL}/.well-known/jwks.json
+    JWTClockSkew            time.Duration // JWT_CLOCK_SKEW; default 60s
+    JWTRolesClaim           string        // JWT_ROLES_CLAIM; default "roles"
+
+    // Admin key management API
+    AdminAPIKey      string        // ADMIN_API_KEY; required to start admin server
+    AdminAPIAddr     string        // ADMIN_API_ADDR; default ":8081"
+
+    // MCP-level rate limiting (per client)
+    MCPRateLimit     float64       // MCP_RATE_LIMIT; default 60 req/s per client
+    MCPRateBurst     int           // MCP_RATE_BURST; default 10
+
+    // Upstream RPC resilience
+    RPCMaxRetries     int           // RPC_MAX_RETRIES; default 3
+    RPCInitialBackoff time.Duration // RPC_INITIAL_BACKOFF; default 500ms
+    RPCMaxBackoff     time.Duration // RPC_MAX_BACKOFF; default 10s
+    RPCRateLimit      float64       // RPC_RATE_LIMIT; default 100 req/s
+    RPCRateBurst      int           // RPC_RATE_BURST; default 20
+    BreakerThreshold  uint          // CIRCUIT_BREAKER_THRESHOLD; default 5
+    BreakerTimeout    time.Duration // CIRCUIT_BREAKER_TIMEOUT; default 30s
 
     // Telemetry
     OTELEndpoint     string        // OTEL_EXPORTER_OTLP_ENDPOINT; enables OTLP export
     OTELServiceName  string        // default "inveniam-mcp-server"
     OTLPInsecure     bool          // OTLP_INSECURE; default true; set false for TLS
+    TraceSampleRatio float64       // OTEL_TRACE_SAMPLE_RATIO; default 1.0
     EnablePrometheus bool          // default true; exposes /metrics
     EnableStdoutTel  bool          // default false; for dev debugging
     MetricsAddr      string        // default ":9090"; health + metrics server
@@ -568,6 +603,8 @@ The server handles `SIGINT` and `SIGTERM`:
 Timeout: 5 seconds for telemetry flush and health server shutdown.
 
 ## 10. Security Considerations
+
+> See `docs/SECURITY_AUDIT.md` for the full pre-red-team threat model, ranked attack paths, remediation log, and tabletop scenarios.
 
 - **No raw RPC passthrough**: Callers cannot send arbitrary JSON-RPC. Only curated tools are exposed.
 - **Input validation**: All inputs validated at tool boundary. Hex data and signed transaction inputs are capped at 2 MB to prevent memory exhaustion.
@@ -788,12 +825,20 @@ Transient RPC errors (timeouts, network errors, connection resets) are retried u
 
 ### Rate Limiting
 
-A token-bucket rate limiter controls the rate of upstream RPC calls. Configuration:
+There are **two independent** rate limiters:
+
+**Upstream RPC rate limit** -- token-bucket on outbound EVM JSON-RPC calls (`internal/evm/resilient.go`):
 
 - `RPC_RATE_LIMIT` (default 100 req/s) -- sustained request rate
 - `RPC_RATE_BURST` (default 20) -- burst capacity
+- When exceeded and the context expires waiting for a token, the call returns `ErrRateLimited`.
 
-When the rate limit is exceeded and the context expires waiting for a token, the call returns `ErrRateLimited`.
+**Per-client MCP rate limit** -- token-bucket on inbound MCP requests, keyed by authenticated client ID (`internal/mcp/ratelimit.go`):
+
+- `MCP_RATE_LIMIT` (default 60 req/s) -- per-client sustained rate
+- `MCP_RATE_BURST` (default 10) -- per-client burst
+- When exceeded, the server returns HTTP `429 Too Many Requests`.
+- Auth middleware runs first so the client ID is available to key the bucket.
 
 ### Circuit Breaker
 
@@ -817,7 +862,7 @@ State transitions are logged at WARN level and recorded in the `evm.rpc.circuit_
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| MCP SDK | Official `go-sdk` v1.4.1 | Maintained by Google/Anthropic, typed tool binding, both transports |
+| MCP SDK | Official `go-sdk` v1.5.0 | Maintained by Google/Anthropic, typed tool binding, both transports |
 | EVM client | `go-ethereum/ethclient` | Industry standard, well-tested, directly wraps JSON-RPC |
 | Logging | `log/slog` + redaction | Structured, zero-dep base, safe redaction utilities |
 | Telemetry | OpenTelemetry SDK | Vendor-agnostic; native Prometheus + OTLP export; follows OTel env var conventions |

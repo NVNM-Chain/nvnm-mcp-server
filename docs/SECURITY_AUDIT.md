@@ -1,6 +1,7 @@
 # Pre-Red-Team Security Assessment: Inveniam EVM MCP Server
 
 **Date:** 2026-04-01
+**Last reviewed:** 2026-04-28 (backlog items refreshed; see "Updates since 2026-04-01" at the end)
 **Scope:** Full repository defensive security review
 **Status:** Assessment complete; remediation complete (see Phase 4)
 
@@ -628,20 +629,38 @@ The following items from the "Longer-Term Hardening" tier have been triaged with
 |---|---|---|
 | Human-in-the-loop approval for write ops | **Completed** | Implemented via MCP elicitation in `internal/mcp/approval.go`. Configurable per-client (`write_approval` in key store) and globally (`WRITE_APPROVAL_DEFAULT`). E2E tested in `server_e2e_test.go`. |
 | Reverse proxy requirements | **Done** | Operational guide with nginx example added to `docs/DESIGN.md` section 10. |
-| SBOM generation in CI | **Backlog (Medium)** | Single `syft` command in CI; zero risk. Track in implementation plan. |
-| MCP-level rate limiting per client | **Backlog (Medium)** | Auth significantly reduces attack surface; upstream RPC limits exist. Add when multi-tenant load patterns emerge. |
-| Image signing with Cosign/Sigstore | **Backlog (Medium)** | Requires admission controller in cluster. Digest pinning (done) is the first step. |
-| License scanning for dependency compliance | **Backlog (Low)** | Add `go-licenses` or equivalent to CI when distribution model is clearer. |
-| Per-tool authorization (RBAC) | **Backlog (Low)** | Multi-key auth provides client identity; per-tool gating not yet needed. |
+| SBOM generation in CI | **Completed (`c357898`)** | `anchore/sbom-action` emits CycloneDX JSON artifact on every push to `main`. |
+| MCP-level rate limiting per client | **Completed (`568ae50`)** | Token-bucket per-client limiter via `MCP_RATE_LIMIT` (default 60 req/s) and `MCP_RATE_BURST` (default 10). Returns HTTP `429` when exceeded. Implementation in `internal/mcp/ratelimit.go`. |
+| Image signing with Cosign/Sigstore | **Completed (`c357898`)** | Cosign keyless signing of compiled binary on `main` push via Sigstore OIDC. Image-digest signing requires registry decision (still pending; see `docs/IMPLEMENTATION_PLAN.md` backlog). |
+| License scanning for dependency compliance | **Completed (`c357898`)** | `go-licenses` check on every push/PR with explicit allowed-licenses list. |
+| Per-tool authorization (RBAC) | **Completed (`568ae50`)** | Roles on API keys (`reader`, `writer`, `admin`, `automation`); FusionAuth maps via `roles` claim. All 16 tools gated; `ErrPermissionDenied` is client-safe. |
 | CORS middleware | **Backlog (Low)** | Low priority since auth is enforced; only relevant if browser-based MCP clients are used. |
+| Self-serve key request workflow | **Backlog (Medium)** | Allow clients to request an API key via an endpoint; a human or agent reviews and approves. Builds on the admin key management API. |
 
-### Summary
+### Summary (refreshed 2026-04-28)
 
-| Tier | Total | Remediated | Triaged/Documented | Open |
+| Tier | Total | Remediated | Documented Only | Backlog |
 |---|---|---|---|---|
 | Immediate Fixes | 5 | 5 | 0 | 0 |
 | Before Red Team | 5 | 5 | 0 | 0 |
-| Longer-Term | 8 | 2 | 6 | 0 |
-| **Total** | **18** | **12** | **6** | **0** |
+| Longer-Term | 8 | 7 | 0 | 1 |
+| **Total** | **18** | **17** | **0** | **1** |
 
-All findings rated High or Critical have been remediated, including human-in-the-loop write approval. Reverse proxy documentation has been added. Remaining items are triaged and tracked in `docs/IMPLEMENTATION_PLAN.md` backlog section with priority levels.
+All findings rated High or Critical have been remediated. Of the original 8 Longer-Term items, 7 have shipped (5 since the original assessment in commits `c357898` and `568ae50`); only **CORS middleware** remains in the backlog and is rated Low priority. Remaining open items are tracked in `docs/IMPLEMENTATION_PLAN.md`.
+
+---
+
+## Updates since 2026-04-01
+
+The original assessment marked 6 items as "Backlog" and 2 as "Done" in the Longer-Term tier. As of 2026-04-28, 5 of those 6 backlog items have been delivered:
+
+| Item | Status as of 2026-04-01 | Status as of 2026-04-28 |
+|---|---|---|
+| SBOM generation in CI | Backlog (Medium) | **Completed** -- `c357898` |
+| MCP-level rate limiting per client | Backlog (Medium) | **Completed** -- `568ae50` |
+| Image signing with Cosign/Sigstore (binary) | Backlog (Medium) | **Completed** -- `c357898` |
+| License scanning | Backlog (Low) | **Completed** -- `c357898` |
+| Per-tool authorization (RBAC) | Backlog (Low) | **Completed** -- `568ae50` |
+| CORS middleware | Backlog (Low) | Still backlog (Low) |
+
+In addition, **FusionAuth OAuth/JWT authentication** was added in Phase 6 as a second auth provider alongside API keys, and **MetaMask wallet signing support** was added in Phase 7 with a `wallet_tx_request` payload returned from every `anchor_prepare_*` tool. Neither was scoped in the original audit but both materially improve the production security posture (centralized identity, browser-wallet UX without server-side keys).

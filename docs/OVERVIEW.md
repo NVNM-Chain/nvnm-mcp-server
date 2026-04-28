@@ -12,7 +12,7 @@ This is not a raw JSON-RPC passthrough. It exposes **16 curated, typed tools** w
 |---|---|
 | **16** MCP tools | 8 chain reads, 4 anchor reads, 4 writes |
 | **0** private keys on the server | Prepare-sign-submit by design |
-| **248** automated tests | Unit, E2E, integration, load, golden |
+| **271** automated tests | Unit, E2E, integration, load, golden |
 | **<2ms** p95 latency | Under sustained 75-VU load |
 
 ---
@@ -124,4 +124,4 @@ Your Agent          MCP Server           Your Signer          NVNM Chain
 
 ---
 
-**Stack:** Go 1.26 -- MCP SDK v1.4.1 -- go-ethereum -- OpenTelemetry -- Prometheus -- Distroless
+**Stack:** Go 1.26 -- MCP SDK v1.5.0 -- go-ethereum -- OpenTelemetry -- Prometheus -- Distroless

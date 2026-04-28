@@ -8,11 +8,22 @@ Complete schema reference for all 16 tools exposed by the Inveniam EVM MCP Serve
 > when the `ENABLE_WRITE_TOOLS` environment variable is set to `true`.
 > Without it the server exposes 12 read-only tools.
 >
-> **HTTP authentication:** When using HTTP transport with API keys configured
-> (`MCP_API_KEYS_FILE` or `MCP_API_KEY`), all requests must include an
-> `Authorization: Bearer <key>` header. The authenticated client ID is logged
+> **HTTP authentication:** When using HTTP transport with auth configured
+> (API keys via `MCP_API_KEYS_FILE` / `MCP_API_KEY`, or FusionAuth via
+> `AUTH_PROVIDER=fusionauth`), all requests must include an
+> `Authorization: Bearer <token>` header. The authenticated client ID is logged
 > with all write operations for audit purposes. See `README.md` for key
-> management commands.
+> management commands and FusionAuth configuration.
+>
+> **Per-tool authorization (RBAC):** When roles are present on the API key or
+> in the JWT, tools are gated by role. Reads require `reader`, `writer`,
+> `admin`, or `automation`. Writes require `writer`, `admin`, or `automation`.
+> `anchor_prepare_grant_role` requires `admin`. Calls without sufficient role
+> return `permission denied`.
+>
+> **Per-client rate limiting:** When configured (`MCP_RATE_LIMIT`,
+> `MCP_RATE_BURST`), requests beyond the per-client token budget receive
+> HTTP `429 Too Many Requests`.
 
 ---
 
@@ -76,7 +87,7 @@ _No parameters._
 
 ```json
 {
-  "chain_id": 2024,
+  "chain_id": 58887,
   "latest_block_number": 185432
 }
 ```
@@ -545,8 +556,8 @@ This tool reads local configuration only and does not make RPC calls. It should 
 
 ```json
 {
-  "address": "0x0000000000000000000000000000000000001000",
-  "chain_id": 2024,
+  "address": "0x0000000000000000000000000000000000000A00",
+  "chain_id": 58887,
   "abi_loaded": true,
   "method_count": 12
 }
@@ -808,13 +819,22 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ```json
 {
   "raw_tx": "0xf8a80185...",
-  "to": "0x0000000000000000000000000000000000001000",
+  "to": "0x0000000000000000000000000000000000000A00",
   "data": "0x12345678...",
   "nonce": 5,
   "gas": 200000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 2024
+  "chain_id": 58887,
+  "wallet_tx_request": {
+    "from": "0xaaa...111",
+    "to": "0x0000000000000000000000000000000000000A00",
+    "data": "0x12345678...",
+    "value": "0x0",
+    "chainId": "0xe607",
+    "gas": "0x30d40",
+    "gasPrice": "0x3b9aca00"
+  }
 }
 ```
 
@@ -870,13 +890,22 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ```json
 {
   "raw_tx": "0xf8c80185...",
-  "to": "0x0000000000000000000000000000000000001000",
+  "to": "0x0000000000000000000000000000000000000A00",
   "data": "0xabcdef01...",
   "nonce": 6,
   "gas": 250000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 2024
+  "chain_id": 58887,
+  "wallet_tx_request": {
+    "from": "0xaaa...111",
+    "to": "0x0000000000000000000000000000000000000A00",
+    "data": "0xabcdef01...",
+    "value": "0x0",
+    "chainId": "0xe607",
+    "gas": "0x3d090",
+    "gasPrice": "0x3b9aca00"
+  }
 }
 ```
 
@@ -928,13 +957,22 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ```json
 {
   "raw_tx": "0xf8b80185...",
-  "to": "0x0000000000000000000000000000000000001000",
+  "to": "0x0000000000000000000000000000000000000A00",
   "data": "0x87654321...",
   "nonce": 7,
   "gas": 150000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 2024
+  "chain_id": 58887,
+  "wallet_tx_request": {
+    "from": "0xaaa...111",
+    "to": "0x0000000000000000000000000000000000000A00",
+    "data": "0x87654321...",
+    "value": "0x0",
+    "chainId": "0xe607",
+    "gas": "0x249f0",
+    "gasPrice": "0x3b9aca00"
+  }
 }
 ```
 
@@ -1001,24 +1039,50 @@ Broadcast a signed transaction to the network. Input is the signed transaction a
 
 ### UnsignedTransaction Fields
 
-All `anchor_prepare_*` tools return an `UnsignedTransaction` with these fields:
+All `anchor_prepare_*` tools return an `UnsignedTransaction` with two signing
+paths in the same response:
 
-| Field       | Type     | Description                                           |
-|-------------|----------|-------------------------------------------------------|
-| `raw_tx`    | `string` | RLP-encoded unsigned transaction (hex, 0x-prefixed)   |
-| `to`        | `string` | Target address (precompile, 0x-prefixed)              |
-| `data`      | `string` | ABI-encoded calldata (hex, 0x-prefixed)               |
-| `nonce`     | `uint64` | Sender's pending nonce                                |
-| `gas`       | `uint64` | Estimated gas limit (includes safety buffer)          |
-| `gas_price` | `string` | Current gas price (wei, decimal string)               |
-| `value`     | `string` | Always `"0"` for precompile calls                     |
-| `chain_id`  | `int64`  | EIP-155 chain ID                                      |
+| Field               | Type     | Description                                           |
+|---------------------|----------|-------------------------------------------------------|
+| `raw_tx`            | `string` | RLP-encoded unsigned transaction (hex, 0x-prefixed). Used by **local/headless** signers (CLI, HSM, server-side ECDSA). |
+| `to`                | `string` | Target address (precompile, 0x-prefixed).             |
+| `data`              | `string` | ABI-encoded calldata (hex, 0x-prefixed).              |
+| `nonce`             | `uint64` | Sender's pending nonce.                               |
+| `gas`               | `uint64` | Estimated gas limit (includes safety buffer).         |
+| `gas_price`         | `string` | Current gas price (wei, decimal string).              |
+| `value`             | `string` | Always `"0"` for precompile calls.                    |
+| `chain_id`          | `int64`  | EIP-155 chain ID.                                     |
+| `wallet_tx_request` | `object` | EIP-1193 / **MetaMask** transaction request payload (see below). Pass directly to `window.ethereum.request({ method: "eth_sendTransaction", params: [...] })`. |
 
-The workflow for write operations is:
+**`wallet_tx_request` object fields** (all values are `0x`-prefixed hex
+quantities suitable for EIP-1193 wallets):
 
-1. Call an `anchor_prepare_*` tool to get an `UnsignedTransaction`.
-2. Sign the `raw_tx` with the sender's private key (off-server).
-3. Submit the signed transaction via `evm_send_raw_transaction`.
+| Field      | Type     | Description                                  |
+|------------|----------|----------------------------------------------|
+| `from`     | `string` | Sender address (0x-prefixed).                |
+| `to`       | `string` | Precompile address (0x-prefixed).            |
+| `data`     | `string` | ABI-encoded calldata (hex, 0x-prefixed).     |
+| `value`    | `string` | `"0x0"` for precompile calls.                |
+| `chainId`  | `string` | 0x-prefixed hex chain ID (e.g. `"0xe607"`).  |
+| `gas`      | `string` | 0x-prefixed hex gas limit.                   |
+| `gasPrice` | `string` | 0x-prefixed hex gas price (wei).             |
+
+Workflow for write operations -- choose one path:
+
+**Path A (MetaMask / browser wallet):**
+
+1. Call an `anchor_prepare_*` tool.
+2. Pass `wallet_tx_request` to `window.ethereum.request({ method: "eth_sendTransaction", params: [prepared.wallet_tx_request] })`.
+3. MetaMask signs and broadcasts directly. **Do not** call `evm_send_raw_transaction` in this path.
+4. Use the returned `txHash` with `evm_get_transaction_receipt` to confirm.
+
+See `docs/METAMASK_GUIDE.md` for a full walkthrough.
+
+**Path B (local / headless signer):**
+
+1. Call an `anchor_prepare_*` tool.
+2. Sign the `raw_tx` bytes with the sender's private key (off-server -- HSM, Vault, local keystore, etc.).
+3. Submit the signed hex via `evm_send_raw_transaction`.
 
 ### NormalizedLog Fields
 

@@ -199,7 +199,7 @@ The resilient EVM client wrapper records retry attempts, circuit breaker state t
 
 ## 4. Alert response procedures
 
-Define Prometheus alert rules in **`deploy/prometheus/alerts.yaml`** (add this file to your repo or overlay if it is not present yet). Use the metric series from section 3 after verifying exported names on `/metrics`.
+Prometheus alert rules ship with the repo at **`deploy/prometheus/alerts.yaml`** (`PrometheusRule` for the Prometheus Operator, with `runbook_url` annotations pointing to the sections below). Verify exported metric names on `/metrics` before tuning thresholds; OTel-exported names follow the `prometheus/otlptranslator` rules and may include `otel_scope_*` labels.
 
 ### `InveniamMCPHighErrorRate`
 
@@ -230,6 +230,10 @@ Define Prometheus alert rules in **`deploy/prometheus/alerts.yaml`** (add this f
 
 - **Actions:** The in-process token-bucket rate limiter (`golang.org/x/time/rate`) caps upstream RPC calls at `RPC_RATE_LIMIT` req/s with `RPC_RATE_BURST` burst. If clients are being throttled, increase the rate limit, add replicas with fair routing, or negotiate higher quotas with the RPC provider.
 
+### `InveniamMCPClientRateLimit429`
+
+- **Actions:** The MCP layer enforces a per-client token-bucket via `MCP_RATE_LIMIT` (req/s, default 60) and `MCP_RATE_BURST` (default 10). When exceeded, the server returns HTTP `429 Too Many Requests` keyed by the authenticated client ID. Investigate by client ID in structured logs (`client_id` attribute). Mitigations: identify the noisy client; raise the per-client limit if legitimate; rotate or disable the client key if abusive.
+
 ---
 
 ## 5. Resilience configuration
@@ -245,12 +249,14 @@ raw ethclient → TracingClient → ResilientClient → (used by anchor + MCP ha
 | Feature | Config variable | Default | Description |
 |---------|----------------|---------|-------------|
 | Timeouts | `REQUEST_TIMEOUT` | `15s` | Per-call context deadline on the ethclient |
-| Retry with exponential backoff | `RPC_MAX_RETRIES` | `3` | Maximum retry attempts for transient RPC errors |
+| Per-client MCP rate limit | `MCP_RATE_LIMIT` | `60` | Token-bucket cap on MCP requests per second per authenticated client. Returns HTTP `429 Too Many Requests` when exceeded. |
+| | `MCP_RATE_BURST` | `10` | Burst capacity per client. |
+| Upstream RPC retry | `RPC_MAX_RETRIES` | `3` | Maximum retry attempts for transient RPC errors |
 | | `RPC_INITIAL_BACKOFF` | `500ms` | Initial wait between retries |
 | | `RPC_MAX_BACKOFF` | `10s` | Maximum wait between retries |
-| Rate limiting | `RPC_RATE_LIMIT` | `100` | Upstream RPC rate limit (requests per second) |
+| Upstream RPC rate limit | `RPC_RATE_LIMIT` | `100` | Upstream RPC rate limit (requests per second) |
 | | `RPC_RATE_BURST` | `20` | Burst capacity for token-bucket rate limiter |
-| Circuit breaker | `CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to trip the breaker |
+| Upstream RPC circuit breaker | `CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to trip the breaker |
 | | `CIRCUIT_BREAKER_TIMEOUT` | `30s` | Time in open state before half-open probe |
 
 ### `eth_sendRawTransaction` and retries

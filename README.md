@@ -19,7 +19,9 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phase 5 (Security Hardening) complete.** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, and pre-red-team security hardening are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results. HTTP transport now requires API key authentication with per-client identity. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`). A dedicated admin REST API on a separate port enables runtime key management (create, list, update, delete) without server restarts. The precompile ABI is loaded from `abi/anchoring.json`. Write tools construct complete unsigned transactions but never hold private keys -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+**All phases complete (0-7).** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, pre-red-team security hardening, FusionAuth OAuth integration, and MetaMask wallet signing support are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results.
+
+HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all audit logs and OTel spans. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Per-client MCP rate limiting returns HTTP `429` when exceeded. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`). A dedicated admin REST API on a separate port enables runtime key management without server restarts. Write tools construct complete unsigned transactions with both `raw_tx` (for HSM/CLI signers) and `wallet_tx_request` (for MetaMask / EIP-1193 wallets); private keys never touch the server -- see [Write Architecture](#write-architecture-phase-3). OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
 ## Prerequisites
 
@@ -179,11 +181,13 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 
 | Variable | Default | Description |
 |---|---|---|
+| `MCP_RATE_LIMIT` | `60` | Per-client MCP request rate limit (requests per second). Returns HTTP 429 when exceeded. |
+| `MCP_RATE_BURST` | `10` | Per-client burst capacity for the MCP rate limiter. |
 | `RPC_MAX_RETRIES` | `3` | Maximum retry attempts for transient RPC errors |
 | `RPC_INITIAL_BACKOFF` | `500ms` | Initial backoff duration between retries |
 | `RPC_MAX_BACKOFF` | `10s` | Maximum backoff duration between retries |
 | `RPC_RATE_LIMIT` | `100` | Upstream RPC rate limit (requests per second) |
-| `RPC_RATE_BURST` | `20` | Burst capacity for rate limiter |
+| `RPC_RATE_BURST` | `20` | Burst capacity for upstream RPC rate limiter |
 | `CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures to trip circuit breaker |
 | `CIRCUIT_BREAKER_TIMEOUT` | `30s` | Time in open state before half-open probe |
 | `OTEL_TRACE_SAMPLE_RATIO` | `1.0` | Fraction of traces sampled (0.0-1.0) |
@@ -324,9 +328,9 @@ make setup-dev      # Install dev deps + hooks
 make ci             # install-dev + check-all + test-coverage
 make release-check  # clean + ci + build
 make info           # Show project info
-make docker-build   # Build Docker image
-make docker-buildx  # Multi-arch Docker build (amd64 + arm64)
-make docker-push    # Multi-arch build and push to registry
+make docker-build   # Build Docker image (host arch only)
+make docker-buildx  # Multi-arch Docker build (amd64 + arm64) via buildx -- local manual operation
+make docker-push    # Multi-arch build and push to registry -- local manual operation, requires registry login
 make docker-run     # Run in Docker
 make docker-smoke   # Build, run, verify healthz + MCP, tear down
 make test-load      # Run k6 load tests (requires k6)

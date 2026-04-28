@@ -6,12 +6,12 @@ This document describes the testing strategy, framework, and latest results for 
 
 The project uses a layered testing approach: unit tests with mocks for fast feedback, golden tests for response shape stability, integration tests against the live Inveniam testnet, HTTP end-to-end tests through the MCP protocol layer, k6 load tests for performance, and Docker smoke tests for deployment verification.
 
-**Test inventory** (as of 2026-04-02):
+**Test inventory** (as of 2026-04-28):
 
 | Metric | Count |
 |--------|-------|
-| Test files | 27 |
-| Test functions | 278 |
+| Test files | 30 |
+| Test functions | 271 |
 | Lines of test code | ~5,800 |
 | Golden fixture files | 13 |
 | Integration test files (build tag) | 6 |
@@ -257,7 +257,7 @@ See `tests/load/README.md` for setup and usage details.
 
 This provides a known dataset for integration tests and manual testing.
 
-## Latest Test Results (2026-04-01)
+## Latest Test Results (2026-04-28)
 
 ### Unit Tests
 
@@ -272,7 +272,7 @@ ok  internal/mcp       1.555s
 ok  internal/telemetry 1.736s
 ```
 
-All 278 tests pass (170 unit + 108 in `internal/mcp` including 21 protocol E2E + 30 admin/managed-keys). Zero failures.
+All 271 tests pass (across 30 test files in 8 packages). Zero failures. Includes 25 protocol E2E and 30 admin/managed-keys tests in `internal/mcp`.
 
 ### Integration Tests
 
@@ -326,7 +326,7 @@ $ make test-load    # with server running via make run-local
 $ make docker-smoke
 ```
 
-- Docker image builds successfully (multi-stage: `golang:1.26-alpine` → `distroless/static-debian12`)
+- Docker image builds successfully (multi-stage: `golang:1.26.2-alpine` digest-pinned → `gcr.io/distroless/static-debian12` digest-pinned)
 - Container starts, ABI loads from `/app/abi/anchoring.json`
 - `/healthz` → `{"status":"ok","version":"0.4.0"}`
 - `/readyz` → `{"status":"ready","checks":{"abi":"loaded","evm_rpc":"ok"}}`
@@ -359,6 +359,8 @@ $ make docker-smoke
 **For a new MCP tool**: Add handler tests to `internal/mcp/tools_test.go` using the existing `mockEVM`/`mockAnchor` types. Add the tool name to `TestE2E_ListTools_ContainsExpectedNames` in `server_test.go`.
 
 **For write approval or auth features**: Add E2E tests to `internal/mcp/server_e2e_test.go`. Use `startTestServerWithConfig` for approval-only tests (configurable `approvalDefault` and `ClientOptions` with `ElicitationHandler`). Use `startAuthTestServer` for auth tests (configurable `KeyEntry` list and Bearer token via `bearerTransport`). Use `buildSignedTxHex` to generate real signed transactions for write approval tests.
+
+**For FusionAuth-related code**: Add unit tests to `internal/auth/auth_test.go` for JWT/JWKS validation (issuer matching, audience checks, expiry, role extraction, app-scoped roles, signature failures). The existing tests use `httptest.NewServer` to serve a JWKS endpoint and `golang-jwt/jwt/v5` to construct test tokens with controlled keys. `automation` role propagation through to write-approval policy is covered.
 
 **For admin key management**: Add tests to `internal/mcp/admin_test.go` for API endpoint tests (use `startAdminTestServer` and `adminRequest` helpers). Add tests to `internal/mcp/managed_keys_test.go` for `ManagedKeyStore` CRUD operations (use `tempKeysFile` helper for isolated test files).
 
