@@ -191,6 +191,8 @@ func (v *FusionAuthValidator) extractRoles(claims jwt.MapClaims) []string {
 	return nil
 }
 
+// extractRolesFromValue processes a JWT claim value. The JWT library returns
+// claims as interface{} regardless of the underlying type, making this unavoidable.
 func extractRolesFromValue(val interface{}) []string {
 	if val == nil {
 		return nil

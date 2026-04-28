@@ -131,6 +131,7 @@ func (h *HealthServer) handleReady(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, resp)
 }
 
+// writeJSON encodes v as JSON to w; accepts interface{} to serve multiple response types.
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)

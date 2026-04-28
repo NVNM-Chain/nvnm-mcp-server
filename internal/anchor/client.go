@@ -282,6 +282,7 @@ func (c *client) GetRecords(
 }
 
 // callPrecompile packs and executes an eth_call against the precompile.
+// args is passed directly to abi.ABI.Pack, which requires interface{} variadic.
 func (c *client) callPrecompile(
 	ctx context.Context,
 	method string,
