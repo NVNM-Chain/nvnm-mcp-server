@@ -20,6 +20,7 @@ type KeySummary struct {
 	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 	WriteApproval string    `json:"write_approval,omitempty"`
+	Roles         []string  `json:"roles,omitempty"`
 	KeyPrefix     string    `json:"key_prefix"`
 }
 
@@ -34,6 +35,7 @@ type KeyCreateResult struct {
 type KeyUpdate struct {
 	Enabled       *bool
 	WriteApproval *string
+	Roles         *[]string
 }
 
 // ManagedKeyStore provides thread-safe CRUD over a KeyStore backed by a JSON file.
@@ -103,7 +105,7 @@ func (m *ManagedKeyStore) List() []KeySummary {
 
 // Create generates a new API key for clientID, persists it, and returns the
 // result including the raw key. Returns ErrClientExists if clientID is taken.
-func (m *ManagedKeyStore) Create(clientID, writeApproval string) (*KeyCreateResult, error) {
+func (m *ManagedKeyStore) Create(clientID, writeApproval string, roles []string) (*KeyCreateResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -124,6 +126,7 @@ func (m *ManagedKeyStore) Create(clientID, writeApproval string) (*KeyCreateResu
 		Enabled:       true,
 		CreatedAt:     time.Now().UTC(),
 		WriteApproval: writeApproval,
+		Roles:         roles,
 	}
 
 	updated := append(copyEntries(m.entries), entry)
@@ -163,6 +166,9 @@ func (m *ManagedKeyStore) Update(clientID string, upd KeyUpdate) (*KeySummary, e
 	}
 	if upd.WriteApproval != nil {
 		updated[idx].WriteApproval = *upd.WriteApproval
+	}
+	if upd.Roles != nil {
+		updated[idx].Roles = *upd.Roles
 	}
 
 	if err := SaveKeysFile(m.path, updated); err != nil {
@@ -235,6 +241,7 @@ func summarize(e *KeyEntry) KeySummary {
 		Enabled:       e.Enabled,
 		CreatedAt:     e.CreatedAt,
 		WriteApproval: e.WriteApproval,
+		Roles:         e.Roles,
 		KeyPrefix:     prefix,
 	}
 }

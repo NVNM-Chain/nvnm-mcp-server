@@ -81,8 +81,11 @@ func makeAnchorInfoHandler(
 	c anchor.Client,
 ) mcp.ToolHandlerFor[anchorInfoInput, anchor.PrecompileInfo] {
 	return func(
-		_ context.Context, _ *mcp.CallToolRequest, _ anchorInfoInput,
+		ctx context.Context, _ *mcp.CallToolRequest, _ anchorInfoInput,
 	) (*mcp.CallToolResult, anchor.PrecompileInfo, error) {
+		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
+			return nil, anchor.PrecompileInfo{}, err
+		}
 		return nil, c.Info(), nil
 	}
 }
@@ -93,6 +96,9 @@ func makeGetRegistryHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRegistryInput,
 	) (*mcp.CallToolResult, anchor.Registry, error) {
+		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
+			return nil, anchor.Registry{}, err
+		}
 		if input.ID == nil && input.Name == nil {
 			return nil, anchor.Registry{},
 				fmt.Errorf("provide id or name: %w", apperrors.ErrMissingRequired)
@@ -115,6 +121,9 @@ func makeGetRegistriesHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRegistriesInput,
 	) (*mcp.CallToolResult, anchor.GetRegistriesResponse, error) {
+		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
+			return nil, anchor.GetRegistriesResponse{}, err
+		}
 		r := anchor.GetRegistriesRequest{
 			RegistryID: input.RegistryID,
 			Name:       input.Name,
@@ -143,6 +152,9 @@ func makeGetRecordsHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRecordsInput,
 	) (*mcp.CallToolResult, anchor.GetRecordsResponse, error) {
+		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
+			return nil, anchor.GetRecordsResponse{}, err
+		}
 		r := anchor.GetRecordsRequest{
 			RegistryID: input.RegistryID,
 			RecordID:   input.RecordID,

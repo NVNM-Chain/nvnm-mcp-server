@@ -182,10 +182,10 @@ func TestAdmin_List_Empty(t *testing.T) {
 func TestAdmin_List_WithKeys(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("alpha", "required"); err != nil {
+	if _, err := mks.Create("alpha", "required", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mks.Create("beta", "auto"); err != nil {
+	if _, err := mks.Create("beta", "auto", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,7 +209,7 @@ func TestAdmin_List_WithKeys(t *testing.T) {
 func TestAdmin_Update_DisableAndEnable(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("target", "")
+	result, err := mks.Create("target", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestAdmin_Update_NotFound(t *testing.T) {
 func TestAdmin_Update_EmptyBody(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("target", ""); err != nil {
+	if _, err := mks.Create("target", "", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -296,7 +296,7 @@ func TestAdmin_Update_EmptyBody(t *testing.T) {
 func TestAdmin_Delete_Success(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("to-delete", ""); err != nil {
+	if _, err := mks.Create("to-delete", "", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -408,7 +408,7 @@ func TestAdmin_HotReload_CreatedKeyImmediatelyUsable(t *testing.T) {
 func TestAdmin_HotReload_DisabledKeyImmediatelyRejected(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("soon-disabled", "")
+	result, err := mks.Create("soon-disabled", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,5 +421,100 @@ func TestAdmin_HotReload_DisabledKeyImmediatelyRejected(t *testing.T) {
 	entry := mks.Lookup(rawKey)
 	if entry != nil {
 		t.Fatal("disabled key should be immediately rejected by Lookup")
+	}
+}
+
+func TestAdmin_Create_WithRoles(t *testing.T) {
+	ts, _ := startAdminTestServer(t)
+
+	createBody := map[string]interface{}{
+		"client_id": "writer-client",
+		"roles":     []string{"reader", "writer"},
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, createBody)
+	if resp.StatusCode != http.StatusCreated {
+		resp.Body.Close()
+		t.Fatalf("create with roles: got status %d", resp.StatusCode)
+	}
+	var result KeyCreateResult
+	decodeJSON(t, resp, &result)
+
+	if len(result.Roles) != 2 {
+		t.Errorf("expected 2 roles, got %v", result.Roles)
+	}
+}
+
+func TestAdmin_Create_InvalidRole(t *testing.T) {
+	ts, _ := startAdminTestServer(t)
+
+	createBody := map[string]interface{}{
+		"client_id": "bad-client",
+		"roles":     []string{"superuser"},
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, createBody)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid role should return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestAdmin_Update_SetRoles(t *testing.T) {
+	ts, mks := startAdminTestServer(t)
+
+	result, err := mks.Create("no-role-client", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updateBody := map[string]interface{}{
+		"roles": []string{"admin"},
+	}
+	resp := adminRequest(t, ts, "PATCH", "/admin/keys/no-role-client", testAdminKey, updateBody)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("update roles: got status %d", resp.StatusCode)
+	}
+	var summary KeySummary
+	decodeJSON(t, resp, &summary)
+
+	if len(summary.Roles) != 1 || summary.Roles[0] != "admin" {
+		t.Errorf("expected [admin] roles, got %v", summary.Roles)
+	}
+
+	// Lookup confirms roles propagated to in-memory store
+	entry := mks.Lookup(result.Key)
+	if entry == nil || len(entry.Roles) != 1 || entry.Roles[0] != "admin" {
+		t.Errorf("roles not propagated to store: %v", entry)
+	}
+}
+
+func TestAdmin_Update_InvalidRole(t *testing.T) {
+	ts, mks := startAdminTestServer(t)
+
+	if _, err := mks.Create("some-client", "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	updateBody := map[string]interface{}{
+		"roles": []string{"god"},
+	}
+	resp := adminRequest(t, ts, "PATCH", "/admin/keys/some-client", testAdminKey, updateBody)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid role should return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestAdmin_Update_NothingProvided(t *testing.T) {
+	ts, mks := startAdminTestServer(t)
+
+	if _, err := mks.Create("some-client", "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := adminRequest(t, ts, "PATCH", "/admin/keys/some-client", testAdminKey, map[string]interface{}{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty update should return 400, got %d", resp.StatusCode)
 	}
 }

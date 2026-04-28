@@ -53,6 +53,9 @@ func makeSendRawTxHandler(
 		req *mcp.CallToolRequest,
 		input sendRawTxInput,
 	) (*mcp.CallToolResult, sendRawTxOutput, error) {
+		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
+			return nil, sendRawTxOutput{}, err
+		}
 		if input.SignedTxHex == "" {
 			return nil, sendRawTxOutput{},
 				fmt.Errorf(

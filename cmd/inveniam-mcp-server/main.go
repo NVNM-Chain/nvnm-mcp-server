@@ -153,6 +153,16 @@ func run() error {
 		defer adminShutdown()
 	}
 
+	// --- Per-client MCP rate limiter (HTTP only) ---
+	var mcpLimiter *mcpserver.ClientRateLimiter
+	if cfg.Transport == "http" {
+		mcpLimiter = mcpserver.NewClientRateLimiter(cfg.MCPRateLimit, cfg.MCPRateBurst)
+		logger.Info("MCP per-client rate limiter enabled",
+			slog.Float64("rps", cfg.MCPRateLimit),
+			slog.Int("burst", cfg.MCPRateBurst),
+		)
+	}
+
 	// --- MCP Server ---
 	middleware := []mcp.Middleware{
 		telemetry.NewMCPMiddleware(tel.Metrics, logger),
@@ -168,7 +178,7 @@ func run() error {
 	case "stdio":
 		return srv.RunStdio(ctx)
 	case "http":
-		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator)
+		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter)
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
 			cfg.Transport, config.ErrInvalidTransport)

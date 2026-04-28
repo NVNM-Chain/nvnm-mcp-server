@@ -13,6 +13,8 @@ type KeyResult struct {
 	ID            string
 	Key           string
 	WriteApproval string
+	// Roles are the RBAC roles assigned to this key. Empty means no enforcement.
+	Roles []string
 }
 
 // KeyLookup abstracts read-only key operations needed by the API key validator.
@@ -51,6 +53,7 @@ func (v *APIKeyValidator) Validate(token string) (*Claims, error) {
 	return &Claims{
 		ClientID:      entry.ID,
 		WriteApproval: entry.WriteApproval,
+		Roles:         entry.Roles,
 	}, nil
 }
 

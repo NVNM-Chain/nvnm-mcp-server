@@ -129,12 +129,17 @@ type callContractInput struct {
 
 // --- Handlers ---
 
+var readRoleSet = []string{"reader", "writer", "admin", "automation"}
+
 func makeChainIDHandler(
 	c evm.Client,
 ) mcp.ToolHandlerFor[chainIDInput, evm.ChainInfo] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, _ chainIDInput,
 	) (*mcp.CallToolResult, evm.ChainInfo, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, evm.ChainInfo{}, err
+		}
 		info, err := c.GetChainInfo(ctx)
 		if err != nil {
 			return nil, evm.ChainInfo{},
@@ -150,6 +155,9 @@ func makeGetBlockHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBlockInput,
 	) (*mcp.CallToolResult, evm.NormalizedBlock, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, evm.NormalizedBlock{}, err
+		}
 		if input.BlockHash != nil {
 			hash, err := parseHash(*input.BlockHash)
 			if err != nil {
@@ -183,6 +191,9 @@ func makeGetTransactionHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input txHashInput,
 	) (*mcp.CallToolResult, evm.NormalizedTransaction, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, evm.NormalizedTransaction{}, err
+		}
 		hash, err := parseHash(input.TxHash)
 		if err != nil {
 			return nil, evm.NormalizedTransaction{},
@@ -203,6 +214,9 @@ func makeGetReceiptHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input txHashInput,
 	) (*mcp.CallToolResult, evm.NormalizedReceipt, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, evm.NormalizedReceipt{}, err
+		}
 		hash, err := parseHash(input.TxHash)
 		if err != nil {
 			return nil, evm.NormalizedReceipt{},
@@ -223,6 +237,9 @@ func makeGetBalanceHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBalanceInput,
 	) (*mcp.CallToolResult, evm.NormalizedBalance, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, evm.NormalizedBalance{}, err
+		}
 		addr, err := parseAddress(input.Address)
 		if err != nil {
 			return nil, evm.NormalizedBalance{}, err
@@ -246,6 +263,9 @@ func makeGetCodeHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getCodeInput,
 	) (*mcp.CallToolResult, evm.CodeResult, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, evm.CodeResult{}, err
+		}
 		addr, err := parseAddress(input.Address)
 		if err != nil {
 			return nil, evm.CodeResult{}, err
@@ -269,6 +289,9 @@ func makeGetLogsHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getLogsInput,
 	) (*mcp.CallToolResult, getLogsOutput, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, getLogsOutput{}, err
+		}
 		q := ethereum.FilterQuery{}
 		if input.Address != nil {
 			addr, err := parseAddress(*input.Address)
@@ -319,6 +342,9 @@ func makeCallContractHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input callContractInput,
 	) (*mcp.CallToolResult, callContractOutput, error) {
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, callContractOutput{}, err
+		}
 		toAddr, err := parseAddress(input.To)
 		if err != nil {
 			return nil, callContractOutput{}, err

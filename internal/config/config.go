@@ -23,6 +23,8 @@ var (
 	ErrInvalidBreakerSettings = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
 	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
 	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
+	ErrInvalidMCPRateLimit    = errors.New("MCP_RATE_LIMIT must be positive")
+	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
 	ErrAdminKeyWithoutFile    = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
 	ErrInvalidAuthProvider    = errors.New("AUTH_PROVIDER must be \"apikey\" or \"fusionauth\"")
 	ErrMissingFusionAuthURL   = errors.New("FUSIONAUTH_URL is required when AUTH_PROVIDER is \"fusionauth\"")
@@ -71,6 +73,10 @@ type Config struct {
 
 	// Write approval: "required" (default) or "auto"
 	WriteApprovalDefault string
+
+	// Per-client MCP rate limiting
+	MCPRateLimit float64 // MCP_RATE_LIMIT: requests/second per client (default 60)
+	MCPRateBurst int     // MCP_RATE_BURST: burst capacity per client (default 10)
 
 	// Authentication provider: "apikey" (default) or "fusionauth"
 	AuthProvider string
@@ -183,6 +189,10 @@ func Load() (*Config, error) {
 
 	cfg.WriteApprovalDefault = envOrDefault("WRITE_APPROVAL_DEFAULT", "required")
 
+	if loadErr := cfg.loadMCPRateConfig(); loadErr != nil {
+		return nil, loadErr
+	}
+
 	cfg.AuthProvider = envOrDefault("AUTH_PROVIDER", "apikey")
 	cfg.FusionAuthURL = os.Getenv("FUSIONAUTH_URL")
 	cfg.FusionAuthAppID = os.Getenv("FUSIONAUTH_APPLICATION_ID")
@@ -267,6 +277,29 @@ func (c *Config) validateResilience() error {
 	if c.OTELTraceSampleRatio < 0 || c.OTELTraceSampleRatio > 1 {
 		return ErrInvalidSampleRatio
 	}
+	if c.MCPRateLimit <= 0 {
+		return ErrInvalidMCPRateLimit
+	}
+	if c.MCPRateBurst <= 0 {
+		return ErrInvalidMCPRateBurst
+	}
+	return nil
+}
+
+func (c *Config) loadMCPRateConfig() error {
+	rateLimitStr := envOrDefault("MCP_RATE_LIMIT", "60")
+	rateLimit, err := strconv.ParseFloat(rateLimitStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_RATE_LIMIT %q: %w", rateLimitStr, err)
+	}
+	c.MCPRateLimit = rateLimit
+
+	rateBurstStr := envOrDefault("MCP_RATE_BURST", "10")
+	rateBurst, err := strconv.Atoi(rateBurstStr)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_RATE_BURST %q: %w", rateBurstStr, err)
+	}
+	c.MCPRateBurst = rateBurst
 	return nil
 }
 

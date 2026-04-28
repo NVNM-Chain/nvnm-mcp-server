@@ -384,6 +384,7 @@ func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
 				ID:            t.entries[i].ID,
 				Key:           t.entries[i].Key,
 				WriteApproval: t.entries[i].WriteApproval,
+				Roles:         t.entries[i].Roles,
 			}
 		}
 	}
@@ -537,6 +538,117 @@ func TestE2E_Auth_DisabledKey_ConnectionFails(t *testing.T) {
 	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "disabled-key", nil)
 	if err == nil {
 		t.Fatal("expected connection to fail with disabled key")
+	}
+}
+
+func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
+	keys := []KeyEntry{
+		{
+			ID:      "reader-only",
+			Key:     "reader-key-123",
+			Enabled: true,
+			Roles:   []string{"reader"},
+		},
+	}
+	session, err := startAuthTestServer(t, authE2EConfig{
+		keys:            keys,
+		approvalDefault: ApprovalAuto,
+	}, "reader-key-123", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	// Read tool should work
+	readResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_get_chain_id",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool read: %v", err)
+	}
+	if readResult.IsError {
+		t.Fatalf("reader should be able to call read tools, got error: %v", readResult.Content)
+	}
+
+	// Write tool should be denied
+	writeResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "anchor_prepare_add_record",
+		Arguments: map[string]any{
+			"from":     "0x1234567890abcdef1234567890abcdef12345678",
+			"registry": "test",
+			"checksum": "abc",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool write: %v", err)
+	}
+	if !writeResult.IsError {
+		t.Fatal("reader should be denied from write tools")
+	}
+}
+
+func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
+	// API key with no roles should have no RBAC enforcement
+	keys := []KeyEntry{
+		{
+			ID:      "no-role-client",
+			Key:     "no-role-key",
+			Enabled: true,
+			// Roles intentionally omitted
+		},
+	}
+	session, err := startAuthTestServer(t, authE2EConfig{
+		keys:            keys,
+		approvalDefault: ApprovalAuto,
+	}, "no-role-key", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	// Both read and write tools should work without role enforcement
+	readResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_get_chain_id",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool read: %v", err)
+	}
+	if readResult.IsError {
+		t.Fatalf("no-role key should pass read tools: %v", readResult.Content)
+	}
+}
+
+func TestE2E_RBAC_GrantRoleRequiresAdmin(t *testing.T) {
+	keys := []KeyEntry{
+		{
+			ID:      "writer-client",
+			Key:     "writer-key",
+			Enabled: true,
+			Roles:   []string{"writer"},
+		},
+	}
+	session, err := startAuthTestServer(t, authE2EConfig{
+		keys:            keys,
+		approvalDefault: ApprovalAuto,
+	}, "writer-key", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "anchor_prepare_grant_role",
+		Arguments: map[string]any{
+			"from":        "0x1234567890abcdef1234567890abcdef12345678",
+			"registry_id": float64(1),
+			"account":     "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+			"role":        "editor",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("writer should be denied from grant_role (admin only)")
 	}
 }
 

@@ -79,18 +79,31 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // RunHTTP runs the MCP server over Streamable HTTP on the given address.
 // When validator is non-nil, requests must include a valid
 // "Authorization: Bearer <token>" header.
-func (s *Server) RunHTTP(ctx context.Context, addr string, validator auth.TokenValidator) error {
+// When limiter is non-nil, per-client rate limiting is enforced.
+func (s *Server) RunHTTP(
+	ctx context.Context,
+	addr string,
+	validator auth.TokenValidator,
+	limiter *ClientRateLimiter,
+) error {
 	s.logger.Info("starting MCP server",
 		slog.String("transport", "http"),
 		slog.String("addr", addr),
 		slog.Bool("auth_required", validator != nil),
+		slog.Bool("rate_limiting", limiter != nil),
 	)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return s.mcpServer
 	}, nil)
 
-	handler := limitRequestBody(AuthMiddleware(mcpHandler, validator, s.logger))
+	// Chain: limitRequestBody → AuthMiddleware → ClientRateLimiter → mcpHandler
+	// Rate limiter sits inside auth so the client ID is set on context.
+	var inner http.Handler = mcpHandler
+	if limiter != nil {
+		inner = limiter.Middleware(mcpHandler, s.logger)
+	}
+	handler := limitRequestBody(AuthMiddleware(inner, validator, s.logger))
 
 	srv := &http.Server{
 		Addr:              addr,

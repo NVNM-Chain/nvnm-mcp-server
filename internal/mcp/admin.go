@@ -18,6 +18,22 @@ const (
 
 var validApprovalValues = map[string]bool{"required": true, "auto": true, "": true}
 
+var validRoleValues = map[string]bool{
+	"reader":     true,
+	"writer":     true,
+	"admin":      true,
+	"automation": true,
+}
+
+func validateRoles(roles []string) bool {
+	for _, r := range roles {
+		if !validRoleValues[r] {
+			return false
+		}
+	}
+	return true
+}
+
 // AdminServer serves the key management REST API on a dedicated port,
 // authenticated by a separate admin bearer token.
 type AdminServer struct {
@@ -78,8 +94,9 @@ func (a *AdminServer) Close(ctx context.Context) error {
 // --- Handlers ---
 
 type createRequest struct {
-	ClientID      string `json:"client_id"`
-	WriteApproval string `json:"write_approval,omitempty"`
+	ClientID      string   `json:"client_id"`
+	WriteApproval string   `json:"write_approval,omitempty"`
+	Roles         []string `json:"roles,omitempty"`
 }
 
 func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +117,13 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.keys.Create(req.ClientID, req.WriteApproval)
+	if !validateRoles(req.Roles) {
+		a.writeError(w, http.StatusBadRequest,
+			"roles must be one or more of: reader, writer, admin, automation")
+		return
+	}
+
+	result, err := a.keys.Create(req.ClientID, req.WriteApproval, req.Roles)
 	if err != nil {
 		if errors.Is(err, ErrClientExists) {
 			a.writeError(w, http.StatusConflict, err.Error())
@@ -134,8 +157,9 @@ func (a *AdminServer) handleList(w http.ResponseWriter, _ *http.Request) {
 }
 
 type updateRequest struct {
-	Enabled       *bool   `json:"enabled,omitempty"`
-	WriteApproval *string `json:"write_approval,omitempty"`
+	Enabled       *bool     `json:"enabled,omitempty"`
+	WriteApproval *string   `json:"write_approval,omitempty"`
+	Roles         *[]string `json:"roles,omitempty"`
 }
 
 func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -151,14 +175,21 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Enabled == nil && req.WriteApproval == nil {
-		a.writeError(w, http.StatusBadRequest, "at least one of enabled or write_approval must be provided")
+	if req.Enabled == nil && req.WriteApproval == nil && req.Roles == nil {
+		a.writeError(w, http.StatusBadRequest,
+			"at least one of enabled, write_approval, or roles must be provided")
 		return
 	}
 
 	if req.WriteApproval != nil && !validApprovalValues[*req.WriteApproval] {
 		a.writeError(w, http.StatusBadRequest,
 			fmt.Sprintf("write_approval must be \"required\", \"auto\", or \"\"; got %q", *req.WriteApproval))
+		return
+	}
+
+	if req.Roles != nil && !validateRoles(*req.Roles) {
+		a.writeError(w, http.StatusBadRequest,
+			"roles must be one or more of: reader, writer, admin, automation")
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -17,9 +18,17 @@ var (
 	errClientExists    = errors.New("client already exists")
 	errClientMissing   = errors.New("client not found")
 	errInvalidApproval = errors.New("write-approval must be \"required\", \"auto\", or empty")
+	errInvalidRole     = errors.New("invalid role; must be one of: reader, writer, admin, automation")
 )
 
 var validApprovals = map[string]bool{"required": true, "auto": true, "": true}
+
+var validRoles = map[string]bool{
+	"reader":     true,
+	"writer":     true,
+	"admin":      true,
+	"automation": true,
+}
 
 var errUsage = errors.New("see usage")
 
@@ -52,6 +61,8 @@ func run(args []string) error {
 		return runSetEnabled(keysFile, args[1:], true)
 	case "set-approval":
 		return runSetApproval(keysFile, args[1:])
+	case "set-roles":
+		return runSetRoles(keysFile, args[1:])
 	case "list":
 		return listKeys(keysFile)
 	default:
@@ -63,11 +74,16 @@ func run(args []string) error {
 func runCreate(keysFile string, args []string) error {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr,
-			"usage: key-mgmt create <client-id> [--write-approval required|auto]\n")
+			"usage: key-mgmt create <client-id> [--write-approval required|auto] [--roles reader,writer,...]\n")
 		return errUsage
 	}
-	approval := parseApprovalFlag(args[1:])
-	return createKey(keysFile, args[0], approval)
+	approval := parseFlag(args[1:], "--write-approval")
+	rolesStr := parseFlag(args[1:], "--roles")
+	roles, err := parseRoles(rolesStr)
+	if err != nil {
+		return err
+	}
+	return createKey(keysFile, args[0], approval, roles)
 }
 
 func runSetEnabled(keysFile string, args []string, enabled bool) error {
@@ -91,15 +107,32 @@ func runSetApproval(keysFile string, args []string) error {
 	return setApproval(keysFile, args[0], args[1])
 }
 
+func runSetRoles(keysFile string, args []string) error {
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr,
+			"usage: key-mgmt set-roles <client-id> <role1,role2,...|\"\">\n")
+		fmt.Fprintf(os.Stderr, "  Pass empty string \"\" to remove all roles.\n")
+		fmt.Fprintf(os.Stderr, "  Valid roles: reader, writer, admin, automation\n")
+		return errUsage
+	}
+	roles, err := parseRoles(args[1])
+	if err != nil {
+		return err
+	}
+	return setRoles(keysFile, args[0], roles)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: key-mgmt <command> [args]\n\n")
 	fmt.Fprintf(os.Stderr, "commands:\n")
-	fmt.Fprintf(os.Stderr, "  create <client-id> [--write-approval required|auto]\n")
+	fmt.Fprintf(os.Stderr, "  create <client-id> [--write-approval required|auto] [--roles reader,writer,...]\n")
 	fmt.Fprintf(os.Stderr, "                       Generate a new API key for a client\n")
 	fmt.Fprintf(os.Stderr, "  disable <client-id>  Disable an existing API key\n")
 	fmt.Fprintf(os.Stderr, "  enable <client-id>   Re-enable a disabled API key\n")
 	fmt.Fprintf(os.Stderr, "  set-approval <client-id> <required|auto>\n")
 	fmt.Fprintf(os.Stderr, "                       Set write-approval policy for a client\n")
+	fmt.Fprintf(os.Stderr, "  set-roles <client-id> <role1,role2,...|\"\">\n")
+	fmt.Fprintf(os.Stderr, "                       Set RBAC roles for a client (reader/writer/admin/automation)\n")
 	fmt.Fprintf(os.Stderr, "  list                 List all API keys and their status\n")
 	fmt.Fprintf(os.Stderr, "\nSet MCP_API_KEYS_FILE to override the default path (%s).\n", defaultKeysFile)
 }
@@ -115,16 +148,35 @@ func loadOrInit(path string) ([]mcpkeys.KeyEntry, error) {
 	return entries, nil
 }
 
-func parseApprovalFlag(args []string) string {
+func parseFlag(args []string, flag string) string {
 	for i, a := range args {
-		if a == "--write-approval" && i+1 < len(args) {
+		if a == flag && i+1 < len(args) {
 			return args[i+1]
 		}
 	}
 	return ""
 }
 
-func createKey(path, clientID, writeApproval string) error {
+func parseRoles(rolesStr string) ([]string, error) {
+	if rolesStr == "" {
+		return nil, nil
+	}
+	parts := strings.Split(rolesStr, ",")
+	roles := make([]string, 0, len(parts))
+	for _, r := range parts {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if !validRoles[r] {
+			return nil, fmt.Errorf("%q: %w", r, errInvalidRole)
+		}
+		roles = append(roles, r)
+	}
+	return roles, nil
+}
+
+func createKey(path, clientID, writeApproval string, roles []string) error {
 	if !validApprovals[writeApproval] {
 		return fmt.Errorf("%q: %w", writeApproval, errInvalidApproval)
 	}
@@ -154,6 +206,7 @@ func createKey(path, clientID, writeApproval string) error {
 		Enabled:       true,
 		CreatedAt:     time.Now().UTC(),
 		WriteApproval: writeApproval,
+		Roles:         roles,
 	})
 
 	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
@@ -164,6 +217,9 @@ func createKey(path, clientID, writeApproval string) error {
 	fmt.Printf("  Bearer %s\n\n", key)
 	if writeApproval != "" {
 		fmt.Printf("  Write approval: %s\n", writeApproval)
+	}
+	if len(roles) > 0 {
+		fmt.Printf("  Roles: %s\n", strings.Join(roles, ", "))
 	}
 	fmt.Printf("Store this key securely — it cannot be retrieved later.\n")
 	fmt.Printf("Keys file: %s\n", path)
@@ -197,6 +253,36 @@ func setApproval(path, clientID, approval string) error {
 	}
 
 	fmt.Printf("Client %q write-approval set to %q.\n", clientID, approval)
+	return nil
+}
+
+func setRoles(path, clientID string, roles []string) error {
+	entries, err := loadOrInit(path)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for i := range entries {
+		if entries[i].ID == clientID {
+			entries[i].Roles = roles
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("client %q: %w", clientID, errClientMissing)
+	}
+
+	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
+		return err
+	}
+
+	if len(roles) == 0 {
+		fmt.Printf("Client %q roles cleared (no RBAC enforcement).\n", clientID)
+	} else {
+		fmt.Printf("Client %q roles set to: %s\n", clientID, strings.Join(roles, ", "))
+	}
 	return nil
 }
 
@@ -242,8 +328,8 @@ func listKeys(path string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "CLIENT ID\tSTATUS\tWRITE APPROVAL\tCREATED\tKEY PREFIX\n")
-	fmt.Fprintf(w, "---------\t------\t--------------\t-------\t----------\n")
+	fmt.Fprintf(w, "CLIENT ID\tSTATUS\tWRITE APPROVAL\tROLES\tCREATED\tKEY PREFIX\n")
+	fmt.Fprintf(w, "---------\t------\t--------------\t-----\t-------\t----------\n")
 	for _, e := range entries {
 		status := "enabled"
 		if !e.Enabled {
@@ -257,10 +343,15 @@ func listKeys(path string) error {
 		if approval == "" {
 			approval = "(default)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		roles := strings.Join(e.Roles, ",")
+		if roles == "" {
+			roles = "(none)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			e.ID,
 			status,
 			approval,
+			roles,
 			e.CreatedAt.Format("2006-01-02"),
 			prefix,
 		)

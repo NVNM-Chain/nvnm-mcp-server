@@ -83,6 +83,9 @@ func makePrepareAddRegistryHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRegistryInput,
 	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
+		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
+			return nil, anchor.UnsignedTransaction{}, err
+		}
 		tx, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
 			From:        input.From,
 			Name:        input.Name,
@@ -107,6 +110,9 @@ func makePrepareAddRecordHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRecordInput,
 	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
+		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
+			return nil, anchor.UnsignedTransaction{}, err
+		}
 		tx, err := c.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
 			From:         input.From,
 			Registry:     input.Registry,
@@ -135,6 +141,9 @@ func makePrepareGrantRoleHandler(
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareGrantRoleInput,
 	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
+		if err := requireRole(ctx, "admin"); err != nil {
+			return nil, anchor.UnsignedTransaction{}, err
+		}
 		tx, err := c.PrepareGrantRole(ctx, anchor.PrepareGrantRoleRequest{
 			From:       input.From,
 			RegistryID: input.RegistryID,

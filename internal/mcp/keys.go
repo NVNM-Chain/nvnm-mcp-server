@@ -18,6 +18,9 @@ type KeyEntry struct {
 	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 	WriteApproval string    `json:"write_approval,omitempty"`
+	// Roles controls per-tool RBAC. Valid values: reader, writer, admin, automation.
+	// Empty (omitted) means no role enforcement for this key.
+	Roles []string `json:"roles,omitempty"`
 }
 
 // KeyStore holds a set of API keys indexed by the raw key string for O(1) lookup.
@@ -111,6 +114,7 @@ func (a *KeyLookupAdapter) Lookup(rawKey string) *auth.KeyResult {
 		ID:            entry.ID,
 		Key:           entry.Key,
 		WriteApproval: entry.WriteApproval,
+		Roles:         entry.Roles,
 	}
 }
 

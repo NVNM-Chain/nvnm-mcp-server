@@ -167,6 +167,36 @@ func TestAPIKeyValidator_EmptyLookup(t *testing.T) {
 	}
 }
 
+func TestAPIKeyValidator_RolesPropagated(t *testing.T) {
+	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
+		"key": {ID: "agent", Key: "key", Roles: []string{"writer", "automation"}},
+	}}
+	v := NewAPIKeyValidator(lookup)
+
+	claims, err := v.Validate("key")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if !claims.HasRole("writer") || !claims.HasRole("automation") {
+		t.Errorf("roles = %v, want writer and automation", claims.Roles)
+	}
+}
+
+func TestAPIKeyValidator_EmptyRolesNoEnforcement(t *testing.T) {
+	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
+		"key": {ID: "agent", Key: "key", Roles: nil},
+	}}
+	v := NewAPIKeyValidator(lookup)
+
+	claims, err := v.Validate("key")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(claims.Roles) != 0 {
+		t.Errorf("expected empty roles, got %v", claims.Roles)
+	}
+}
+
 func TestAPIKeyValidator_Close(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
 		"k": {ID: "c", Key: "k"},
