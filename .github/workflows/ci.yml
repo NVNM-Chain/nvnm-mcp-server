@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # required for Cosign keyless signing on push to main
 
 jobs:
   check:
@@ -32,6 +33,13 @@ jobs:
           version: v2.11.4
           args: --timeout=5m
 
+      - name: License scan
+        run: |
+          go install github.com/google/go-licenses@latest
+          go-licenses check ./... \
+            --ignore github.com/inveniam/nvnm-mcp-server \
+            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,GPL-3.0,LGPL-3.0,BSD-2-Clause-FreeBSD,BSD-4-Clause,Unlicense,CC0-1.0
+
       - name: Vulnerability check
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -41,7 +49,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
 
       - name: Build
-        run: go build ./...
+        run: go build -o bin/inveniam-mcp-server ./cmd/inveniam-mcp-server
 
       - name: Upload coverage
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -49,3 +57,19 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+      - name: Generate SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          artifact-name: sbom.cyclonedx.json
+          upload-artifact: true
+
+      - name: Install Cosign
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign binary
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cosign sign-blob --yes bin/inveniam-mcp-server
