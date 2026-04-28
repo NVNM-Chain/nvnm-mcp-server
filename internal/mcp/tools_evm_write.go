@@ -22,8 +22,14 @@ func registerEVMWriteTools(
 		Name:  "evm_send_raw_transaction",
 		Title: "Send Raw Transaction",
 		Description: "Broadcast a signed transaction to the network. " +
-			"Input is the signed transaction as a hex string (0x-prefixed). " +
-			"Returns the transaction hash.",
+			"Use this for the local/headless signer path only: " +
+			"sign the raw_tx bytes from anchor_prepare_* externally, " +
+			"then pass the signed hex here. " +
+			"Do NOT use this after signing with MetaMask or a browser wallet -- " +
+			"those wallets broadcast directly and return a tx_hash themselves. " +
+			"Input is a 0x-prefixed signed transaction hex string. " +
+			"Returns the transaction hash. " +
+			"Confirm the result with evm_get_transaction_receipt.",
 	}, makeSendRawTxHandler(evmClient, approvalDefault, logger))
 }
 

@@ -16,28 +16,35 @@ func registerAnchorWriteTools(
 	anchorClient anchor.Client,
 	logger *slog.Logger,
 ) {
+	const walletSigningPaths = "Returns two signing paths: " +
+		"(1) wallet_tx_request -- pass this object directly to a MetaMask / EIP-1193 " +
+		"wallet via eth_sendTransaction; the wallet signs and broadcasts, " +
+		"so do NOT call evm_send_raw_transaction in that case. " +
+		"(2) raw_tx -- RLP-encoded unsigned bytes for local or headless signers; " +
+		"sign externally, then broadcast via evm_send_raw_transaction. " +
+		"Confirm either path with evm_get_transaction_receipt(tx_hash). " +
+		"The server never holds or receives private keys."
+
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:  "anchor_prepare_add_registry",
-		Title: "Prepare Add Registry Transaction",
-		Description: "Construct an unsigned addRegistry transaction. " +
-			"Returns a complete unsigned transaction for the caller to sign " +
-			"and submit via evm_send_raw_transaction.",
+		Name:        "anchor_prepare_add_registry",
+		Title:       "Prepare Add Registry Transaction",
+		Description: "Construct an unsigned addRegistry transaction. " + walletSigningPaths,
 	}, makePrepareAddRegistryHandler(anchorClient, logger))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_add_record",
 		Title: "Prepare Add Record Transaction",
 		Description: "Construct an unsigned addRecord transaction to anchor " +
-			"a document checksum and URI in a registry. Returns a complete " +
-			"unsigned transaction for the caller to sign and submit.",
+			"a document checksum and URI in a registry. " + walletSigningPaths +
+			" After confirming, verify with anchor_get_records.",
 	}, makePrepareAddRecordHandler(anchorClient, logger))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_grant_role",
 		Title: "Prepare Grant Role Transaction",
 		Description: "Construct an unsigned grantRole transaction to assign " +
-			"admin or editor permissions on a registry. Returns a complete " +
-			"unsigned transaction for the caller to sign and submit.",
+			"admin or editor permissions on a registry or specific record. " +
+			walletSigningPaths,
 	}, makePrepareGrantRoleHandler(anchorClient, logger))
 }
 
