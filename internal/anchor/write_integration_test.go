@@ -92,7 +92,11 @@ func signUnsignedTx(
 		t.Fatalf("unmarshal unsigned tx: %v", err)
 	}
 
-	signer := types.NewEIP155Signer(big.NewInt(utx.ChainID))
+	// LatestSignerForChainID returns a signer that handles every
+	// transaction type the chain supports. For Phase 8.4+ this matters:
+	// PrepareAddRegistry now defaults to EIP-1559 (type 2), and the
+	// previous EIP155Signer could only sign type-0 transactions.
+	signer := types.LatestSignerForChainID(big.NewInt(utx.ChainID))
 	signedTx, err := types.SignTx(tx, signer, key)
 	if err != nil {
 		t.Fatalf("sign tx: %v", err)

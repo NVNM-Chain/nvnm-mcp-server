@@ -136,6 +136,9 @@ func TestGolden_EmptyResponses(t *testing.T) {
 	assertGolden(t, "empty_records_response", resp)
 }
 
+// TestGolden_UnsignedTransaction locks in the legacy (type-0) JSON
+// shape. Type and the EIP-1559 fields are omitempty, so a type-0
+// transaction marshals exactly as it did before Phase 8.4.
 func TestGolden_UnsignedTransaction(t *testing.T) {
 	tx := UnsignedTransaction{
 		RawTx:    "0xf86c2a8501dcd650008301d4c0940000000000000000000000000000000000000a008080",
@@ -148,4 +151,37 @@ func TestGolden_UnsignedTransaction(t *testing.T) {
 		ChainID:  58887,
 	}
 	assertGolden(t, "unsigned_transaction", tx)
+}
+
+// TestGolden_UnsignedTransactionEIP1559 locks in the type-2 JSON shape
+// added in Phase 8.4: explicit "type":2, MaxFeePerGas /
+// MaxPriorityFeePerGas populated, GasPrice dual-populated (equals
+// MaxFeePerGas) for legacy signers. WalletTxRequest carries the
+// type-2 fee fields and omits gasPrice.
+func TestGolden_UnsignedTransactionEIP1559(t *testing.T) {
+	tx := UnsignedTransaction{
+		RawTx: "0x02f86d83018f478064850ba43b740083" +
+			"01d4c0940000000000000000000000000000000000000a0080884cafebabe01020304c0",
+		Type:                 2,
+		To:                   "0x0000000000000000000000000000000000000A00",
+		Data:                 "0xcafebabe01020304",
+		Nonce:                100,
+		Gas:                  120000,
+		GasPrice:             "50000000000", // dual-populate (equals MaxFeePerGas)
+		MaxFeePerGas:         "50000000000",
+		MaxPriorityFeePerGas: "2000000000",
+		Value:                "0",
+		ChainID:              58887,
+		WalletTxRequest: &WalletTransactionRequest{
+			From:                 "0x0000000000000000000000000000000000000A00",
+			To:                   "0x0000000000000000000000000000000000000A00",
+			Data:                 "0xcafebabe01020304",
+			Value:                "0x0",
+			ChainID:              "0xe607",
+			Gas:                  "0x1d4c0",
+			MaxFeePerGas:         "0xba43b7400",
+			MaxPriorityFeePerGas: "0x77359400",
+		},
+	}
+	assertGolden(t, "unsigned_transaction_eip1559", tx)
 }

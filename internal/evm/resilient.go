@@ -256,6 +256,12 @@ func (r *resilientClient) SuggestGasPrice(ctx context.Context) (*big.Int, error)
 	})
 }
 
+func (r *resilientClient) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	return resilientCall(ctx, r, "eth_maxPriorityFeePerGas", func(ctx context.Context) (*big.Int, error) {
+		return r.inner.SuggestGasTipCap(ctx)
+	})
+}
+
 //nolint:gocritic // hugeParam: msg matches go-ethereum's EstimateGas signature
 func (r *resilientClient) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
 	return resilientCall(ctx, r, "eth_estimateGas", func(ctx context.Context) (uint64, error) {

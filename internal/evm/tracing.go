@@ -195,6 +195,14 @@ func (t *tracingClient) SuggestGasPrice(ctx context.Context) (result *big.Int, e
 	return
 }
 
+func (t *tracingClient) SuggestGasTipCap(ctx context.Context) (result *big.Int, err error) {
+	err = t.rpcCall(ctx, "eth_maxPriorityFeePerGas", func(c context.Context) error {
+		result, err = t.inner.SuggestGasTipCap(c)
+		return err
+	})
+	return
+}
+
 //nolint:gocritic // hugeParam: msg matches go-ethereum's EstimateGas signature
 func (t *tracingClient) EstimateGas(
 	ctx context.Context, msg ethereum.CallMsg,

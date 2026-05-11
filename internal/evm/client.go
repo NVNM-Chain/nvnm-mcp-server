@@ -33,6 +33,7 @@ type Client interface {
 	// Write support methods
 	PendingNonceAt(ctx context.Context, address common.Address) (uint64, error)
 	SuggestGasPrice(ctx context.Context) (*big.Int, error)
+	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
 	EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	SendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
 
@@ -207,6 +208,15 @@ func (c *client) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
 	return c.eth.SuggestGasPrice(ctx)
+}
+
+// SuggestGasTipCap returns the current suggested miner tip (EIP-1559
+// priority fee). Used alongside baseFee from the latest block to derive
+// MaxFeePerGas and MaxPriorityFeePerGas for type-2 transactions.
+func (c *client) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	return c.eth.SuggestGasTipCap(ctx)
 }
 
 // EstimateGas estimates the gas needed for a transaction.

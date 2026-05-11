@@ -116,7 +116,8 @@ func (s *stubClient) FilterLogs(_ context.Context, _ ethereum.FilterQuery) ([]No
 func (s *stubClient) PendingNonceAt(_ context.Context, _ common.Address) (uint64, error) {
 	return 0, nil
 }
-func (s *stubClient) SuggestGasPrice(_ context.Context) (*big.Int, error) { return big.NewInt(0), nil }
+func (s *stubClient) SuggestGasPrice(_ context.Context) (*big.Int, error)  { return big.NewInt(0), nil }
+func (s *stubClient) SuggestGasTipCap(_ context.Context) (*big.Int, error) { return big.NewInt(0), nil }
 
 //nolint:gocritic // hugeParam: matches go-ethereum's EstimateGas signature
 func (s *stubClient) EstimateGas(_ context.Context, _ ethereum.CallMsg) (uint64, error) {

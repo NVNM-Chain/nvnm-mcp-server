@@ -3,6 +3,7 @@ package anchor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"testing"
 
@@ -171,6 +172,9 @@ func TestPrepareGrantRole_Validation(t *testing.T) {
 	}
 }
 
+// TestPrepareAddRegistry_BuildsUnsignedTx exercises the legacy (type-0)
+// path. Phase 8.4 made EIP-1559 (type-2) the default; this test keeps
+// the legacy path covered by setting PreferLegacy=true on the request.
 func TestPrepareAddRegistry_BuildsUnsignedTx(t *testing.T) {
 	abiPath := testABIPath(t)
 	logger := logging.New("error")
@@ -188,10 +192,11 @@ func TestPrepareAddRegistry_BuildsUnsignedTx(t *testing.T) {
 	c := NewClient(mock, PrecompileAddress, 58887, abiPath, logger)
 
 	tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
-		From:        "0x1234567890abcdef1234567890abcdef12345678",
-		Name:        "test-registry",
-		Description: "A test registry",
-		Metadata:    "{\"env\":\"test\"}",
+		From:         "0x1234567890abcdef1234567890abcdef12345678",
+		Name:         "test-registry",
+		Description:  "A test registry",
+		Metadata:     "{\"env\":\"test\"}",
+		PreferLegacy: true,
 	})
 	if err != nil {
 		t.Fatalf("PrepareAddRegistry: %v", err)
@@ -308,6 +313,9 @@ func TestPrepareWithoutABI_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestPrepareAddRegistry_WalletTxRequest exercises the legacy (type-0)
+// EIP-1193 path. The wallet_tx_request shape for type-2 transactions
+// is covered separately in TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault.
 func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
 	abiPath := testABIPath(t)
 	logger := logging.New("error")
@@ -326,8 +334,9 @@ func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
 	c := NewClient(mock, PrecompileAddress, chainID, abiPath, logger)
 
 	tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
-		From: "0x1234567890abcdef1234567890abcdef12345678",
-		Name: "wallet-test",
+		From:         "0x1234567890abcdef1234567890abcdef12345678",
+		Name:         "wallet-test",
+		PreferLegacy: true,
 	})
 	if err != nil {
 		t.Fatalf("PrepareAddRegistry: %v", err)
@@ -376,6 +385,120 @@ func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
 	// data must be 0x-prefixed non-empty calldata
 	if len(w.Data) < 3 || w.Data[:2] != "0x" {
 		t.Errorf("WalletTxRequest.Data must be 0x-prefixed hex, got %q", w.Data)
+	}
+}
+
+// TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault verifies the default
+// (Phase 8.4+) path produces a type-2 DynamicFeeTx with the EIP-1559
+// fields populated, GasPrice dual-populated for legacy signers, and a
+// WalletTxRequest that carries the type-2 fee fields.
+func TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault(t *testing.T) {
+	abiPath := testABIPath(t)
+	logger := logging.New("error")
+	const chainID = int64(58887)
+	mock := &mockEVMClient{
+		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+			return 13, nil
+		},
+		suggestGasFn: func(_ context.Context) (*big.Int, error) {
+			return big.NewInt(20_000_000_000), nil // 20 gwei
+		},
+		suggestGasTipFn: func(_ context.Context) (*big.Int, error) {
+			return big.NewInt(2_000_000_000), nil // 2 gwei tip
+		},
+		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+			return 80000, nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, chainID, abiPath, logger)
+
+	tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
+		From:        "0x1234567890abcdef1234567890abcdef12345678",
+		Name:        "eip1559-test",
+		Description: "default type-2 path",
+	})
+	if err != nil {
+		t.Fatalf("PrepareAddRegistry: %v", err)
+	}
+
+	if tx.Type != 2 {
+		t.Errorf("Type = %d, want 2", tx.Type)
+	}
+	// maxFeePerGas = SuggestGasPrice * 2 = 40 gwei
+	if tx.MaxFeePerGas != "40000000000" {
+		t.Errorf("MaxFeePerGas = %q, want 40000000000", tx.MaxFeePerGas)
+	}
+	// maxPriorityFeePerGas = SuggestGasTipCap = 2 gwei
+	if tx.MaxPriorityFeePerGas != "2000000000" {
+		t.Errorf("MaxPriorityFeePerGas = %q, want 2000000000", tx.MaxPriorityFeePerGas)
+	}
+	// Dual-populate: GasPrice == MaxFeePerGas so legacy signers have a usable value
+	if tx.GasPrice != tx.MaxFeePerGas {
+		t.Errorf("GasPrice = %q, MaxFeePerGas = %q -- dual-populate violated", tx.GasPrice, tx.MaxFeePerGas)
+	}
+	if tx.Nonce != 13 {
+		t.Errorf("Nonce = %d, want 13", tx.Nonce)
+	}
+	if tx.Gas != 96000 { // 80000 + 20%
+		t.Errorf("Gas = %d, want 96000 (80000 + 20%% buffer)", tx.Gas)
+	}
+	if tx.ChainID != chainID {
+		t.Errorf("ChainID = %d, want %d", tx.ChainID, chainID)
+	}
+
+	// WalletTxRequest carries type-2 fields, NOT GasPrice
+	w := tx.WalletTxRequest
+	if w == nil {
+		t.Fatal("WalletTxRequest must not be nil")
+	}
+	if w.MaxFeePerGas != "0x"+big.NewInt(40_000_000_000).Text(16) {
+		t.Errorf("WalletTxRequest.MaxFeePerGas = %q", w.MaxFeePerGas)
+	}
+	if w.MaxPriorityFeePerGas != "0x"+big.NewInt(2_000_000_000).Text(16) {
+		t.Errorf("WalletTxRequest.MaxPriorityFeePerGas = %q", w.MaxPriorityFeePerGas)
+	}
+	if w.GasPrice != "" {
+		t.Errorf("WalletTxRequest.GasPrice = %q, want empty (omitted for type-2)", w.GasPrice)
+	}
+}
+
+// TestPrepareAddRegistry_FallsBackToDefaultTipCap_WhenSuggestGasTipCapErrors
+// verifies that a chain that does not expose eth_maxPriorityFeePerGas
+// (or transiently errors) still produces a valid type-2 transaction
+// by falling back to defaultPriorityFeeWei.
+func TestPrepareAddRegistry_FallsBackToDefaultTipCap_WhenSuggestGasTipCapErrors(t *testing.T) {
+	abiPath := testABIPath(t)
+	logger := logging.New("error")
+	mock := &mockEVMClient{
+		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+			return 0, nil
+		},
+		suggestGasFn: func(_ context.Context) (*big.Int, error) {
+			return big.NewInt(5_000_000_000), nil
+		},
+		suggestGasTipFn: func(_ context.Context) (*big.Int, error) {
+			return nil, errors.New("eth_maxPriorityFeePerGas not supported")
+		},
+		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+			return 50000, nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 58887, abiPath, logger)
+
+	tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
+		From: "0x1234567890abcdef1234567890abcdef12345678",
+		Name: "fallback-test",
+	})
+	if err != nil {
+		t.Fatalf("PrepareAddRegistry should succeed despite SuggestGasTipCap error, got: %v", err)
+	}
+
+	if tx.Type != 2 {
+		t.Errorf("Type = %d, want 2 (default type-2 path)", tx.Type)
+	}
+	// Default fallback = 1 gwei
+	if tx.MaxPriorityFeePerGas != "1000000000" {
+		t.Errorf("MaxPriorityFeePerGas = %q, want 1000000000 (default fallback)", tx.MaxPriorityFeePerGas)
 	}
 }
 

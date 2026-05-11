@@ -58,6 +58,8 @@ type prepareAddRegistryInput struct {
 	Name        string `json:"name" jsonschema:"Registry name (unique)"`
 	Description string `json:"description" jsonschema:"Registry description"`
 	Metadata    string `json:"metadata,omitempty" jsonschema:"Optional JSON metadata"`
+	//nolint:lll // descriptive prose for agents
+	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default. Use only when the signer cannot produce type-2 signatures."`
 }
 
 type prepareAddRecordInput struct {
@@ -68,6 +70,8 @@ type prepareAddRecordInput struct {
 	ChecksumAlgo string `json:"checksum_algo,omitempty" jsonschema:"Hash algorithm (e.g. sha256)"`
 	Status       string `json:"status,omitempty" jsonschema:"Record status (default: Active)"`
 	Metadata     string `json:"metadata,omitempty" jsonschema:"Optional JSON metadata"`
+	//nolint:lll // descriptive prose for agents
+	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }
 
 type prepareGrantRoleInput struct {
@@ -76,6 +80,8 @@ type prepareGrantRoleInput struct {
 	Checksum   string `json:"checksum,omitempty" jsonschema:"Optional: scope role to a specific record checksum"`
 	Account    string `json:"account" jsonschema:"Address to grant the role to (0x...)"`
 	Role       string `json:"role" jsonschema:"Role to grant: admin or editor"`
+	//nolint:lll // descriptive prose for agents
+	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }
 
 // --- Handlers ---
@@ -90,10 +96,11 @@ func makePrepareAddRegistryHandler(
 			return nil, unsignedTxOutput{}, err
 		}
 		tx, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
-			From:        input.From,
-			Name:        input.Name,
-			Description: input.Description,
-			Metadata:    input.Metadata,
+			From:         input.From,
+			Name:         input.Name,
+			Description:  input.Description,
+			Metadata:     input.Metadata,
+			PreferLegacy: input.PreferLegacyTx,
 		})
 		if err != nil {
 			return nil, unsignedTxOutput{}, err
@@ -124,6 +131,7 @@ func makePrepareAddRecordHandler(
 			ChecksumAlgo: input.ChecksumAlgo,
 			Status:       input.Status,
 			Metadata:     input.Metadata,
+			PreferLegacy: input.PreferLegacyTx,
 		})
 		if err != nil {
 			return nil, unsignedTxOutput{}, err
@@ -148,11 +156,12 @@ func makePrepareGrantRoleHandler(
 			return nil, unsignedTxOutput{}, err
 		}
 		tx, err := c.PrepareGrantRole(ctx, anchor.PrepareGrantRoleRequest{
-			From:       input.From,
-			RegistryID: input.RegistryID,
-			Checksum:   input.Checksum,
-			Account:    input.Account,
-			Role:       input.Role,
+			From:         input.From,
+			RegistryID:   input.RegistryID,
+			Checksum:     input.Checksum,
+			Account:      input.Account,
+			Role:         input.Role,
+			PreferLegacy: input.PreferLegacyTx,
 		})
 		if err != nil {
 			return nil, unsignedTxOutput{}, err

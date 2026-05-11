@@ -105,13 +105,21 @@ type GetRecordsResponse struct {
 // interpret them without conversion. The wallet signs the transaction locally
 // and broadcasts it directly to the chain; the MCP server never holds the key.
 type WalletTransactionRequest struct {
-	From     string `json:"from"`     // Sender address (0x-prefixed, checksummed)
-	To       string `json:"to"`       // Target address (precompile)
-	Data     string `json:"data"`     // ABI-encoded calldata (0x-prefixed hex)
-	Value    string `json:"value"`    // Always "0x0" for precompile calls
-	ChainID  string `json:"chainId"`  // EIP-155 chain ID as 0x-prefixed hex
-	Gas      string `json:"gas"`      // Estimated gas limit as 0x-prefixed hex
-	GasPrice string `json:"gasPrice"` // Gas price as 0x-prefixed hex (wei)
+	From    string `json:"from"`    // Sender address (0x-prefixed, checksummed)
+	To      string `json:"to"`      // Target address (precompile)
+	Data    string `json:"data"`    // ABI-encoded calldata (0x-prefixed hex)
+	Value   string `json:"value"`   // Always "0x0" for precompile calls
+	ChainID string `json:"chainId"` // EIP-155 chain ID as 0x-prefixed hex
+	Gas     string `json:"gas"`     // Estimated gas limit as 0x-prefixed hex
+	// Type-0 (legacy) gas pricing. Omitted when the prepared transaction
+	// is EIP-1559 (type 2). EIP-1193 wallets fall back to the
+	// maxFeePerGas / maxPriorityFeePerGas fields below.
+	GasPrice string `json:"gasPrice,omitempty"`
+	// EIP-1559 (type-2) gas pricing. Populated when the prepared
+	// transaction is type 2. MetaMask et al. prefer these over GasPrice
+	// when both are present.
+	MaxFeePerGas         string `json:"maxFeePerGas,omitempty"`
+	MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas,omitempty"`
 }
 
 // UnsignedTransaction contains a fully constructed but unsigned EVM transaction.
@@ -127,6 +135,12 @@ type WalletTransactionRequest struct {
 type UnsignedTransaction struct {
 	// RLP-encoded unsigned tx (hex, 0x-prefixed) for local/headless signers.
 	RawTx string `json:"raw_tx"`
+	// EIP-2718 transaction type. 0 for legacy (LegacyTx); 2 for EIP-1559
+	// (DynamicFeeTx). Phase 8.4 makes type 2 the default; callers can
+	// opt back into type 0 via the prefer_legacy_tx parameter on
+	// anchor_prepare_* tools. Omitted from JSON when 0 (legacy default)
+	// so existing type-0 consumers see no shape change.
+	Type uint8 `json:"type,omitempty"`
 	// Target address (anchor precompile).
 	To string `json:"to"`
 	// ABI-encoded calldata (hex, 0x-prefixed).
@@ -135,8 +149,17 @@ type UnsignedTransaction struct {
 	Nonce uint64 `json:"nonce"`
 	// Estimated gas limit (with 20% buffer).
 	Gas uint64 `json:"gas"`
-	// Current gas price (wei, decimal string).
+	// GasPrice is the type-0 gas price (wei, decimal string). Always
+	// populated: for type-2 transactions it equals MaxFeePerGas so a
+	// legacy signer that ignores the EIP-1559 fields still has a usable
+	// value to sign with.
 	GasPrice string `json:"gas_price"`
+	// MaxFeePerGas is the EIP-1559 fee cap (wei, decimal string).
+	// Populated only on type-2 transactions.
+	MaxFeePerGas string `json:"max_fee_per_gas,omitempty"`
+	// MaxPriorityFeePerGas is the EIP-1559 miner tip (wei, decimal
+	// string). Populated only on type-2 transactions.
+	MaxPriorityFeePerGas string `json:"max_priority_fee_per_gas,omitempty"`
 	// Always "0" for precompile calls.
 	Value string `json:"value"`
 	// EIP-155 chain ID.
@@ -154,6 +177,10 @@ type PrepareAddRegistryRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Metadata    string `json:"metadata,omitempty"`
+	// PreferLegacy opts the caller back into a type-0 LegacyTx instead
+	// of the EIP-1559 default. Useful for signers that cannot produce
+	// type-2 signatures. Defaults to false (type-2 default).
+	PreferLegacy bool `json:"prefer_legacy,omitempty"`
 }
 
 // PrepareAddRecordRequest contains the parameters for preparing an
@@ -166,6 +193,8 @@ type PrepareAddRecordRequest struct {
 	ChecksumAlgo string `json:"checksum_algo"`
 	Status       string `json:"status,omitempty"`
 	Metadata     string `json:"metadata,omitempty"`
+	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
+	PreferLegacy bool `json:"prefer_legacy,omitempty"`
 }
 
 // PrepareGrantRoleRequest contains the parameters for preparing a
@@ -176,6 +205,8 @@ type PrepareGrantRoleRequest struct {
 	Checksum   string `json:"checksum,omitempty"`
 	Account    string `json:"account"` // Address receiving the role (0x...)
 	Role       string `json:"role"`    // "admin" or "editor"
+	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
+	PreferLegacy bool `json:"prefer_legacy,omitempty"`
 }
 
 // PrecompileInfo describes the anchoring precompile configuration.

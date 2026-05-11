@@ -76,6 +76,9 @@ func (m *mockEVM) PendingNonceAt(_ context.Context, _ common.Address) (uint64, e
 func (m *mockEVM) SuggestGasPrice(_ context.Context) (*big.Int, error) {
 	return big.NewInt(0), m.returnErr
 }
+func (m *mockEVM) SuggestGasTipCap(_ context.Context) (*big.Int, error) {
+	return big.NewInt(0), m.returnErr
+}
 
 //nolint:gocritic // hugeParam: matches go-ethereum's EstimateGas signature
 func (m *mockEVM) EstimateGas(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
@@ -117,7 +120,7 @@ func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRe
 func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddRecordRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
 	return m.unsignedTx, m.returnErr
 }
-func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) {
+func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
 	return m.unsignedTx, m.returnErr
 }
 

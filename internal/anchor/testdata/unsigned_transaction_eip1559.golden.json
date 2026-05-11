@@ -1,0 +1,23 @@
+{
+  "raw_tx": "0x02f86d83018f478064850ba43b74008301d4c0940000000000000000000000000000000000000a0080884cafebabe01020304c0",
+  "type": 2,
+  "to": "0x0000000000000000000000000000000000000A00",
+  "data": "0xcafebabe01020304",
+  "nonce": 100,
+  "gas": 120000,
+  "gas_price": "50000000000",
+  "max_fee_per_gas": "50000000000",
+  "max_priority_fee_per_gas": "2000000000",
+  "value": "0",
+  "chain_id": 58887,
+  "wallet_tx_request": {
+    "from": "0x0000000000000000000000000000000000000A00",
+    "to": "0x0000000000000000000000000000000000000A00",
+    "data": "0xcafebabe01020304",
+    "value": "0x0",
+    "chainId": "0xe607",
+    "gas": "0x1d4c0",
+    "maxFeePerGas": "0xba43b7400",
+    "maxPriorityFeePerGas": "0x77359400"
+  }
+}
