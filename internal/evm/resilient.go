@@ -97,14 +97,16 @@ func resilientCall[T any](
 		return zero, fmt.Errorf("%w: %w", ierrors.ErrRateLimited, err)
 	}
 
-	// Clamp MaxRetries to >= 0 before the uint cast so gosec G115 has
-	// flow-sensitive evidence the value cannot be negative. Config
-	// validation already rejects negative values, but the linter does
-	// not see across that boundary.
+	// Clamp MaxRetries to >= 0 and convert to uint in the same basic
+	// block so gosec G115 sees the bounds check immediately before the
+	// cast. Config validation already rejects negative values; the cast
+	// happens at use-site so the linter does not have to reason across
+	// the closure boundary below.
 	maxRetries := r.cfg.MaxRetries
 	if maxRetries < 0 {
 		maxRetries = 0
 	}
+	maxTries := uint(maxRetries) + 1
 
 	result, err := r.breaker.Execute(func() (any, error) {
 		b := backoff.NewExponentialBackOff()
@@ -122,7 +124,7 @@ func resilientCall[T any](
 			return res, nil
 		},
 			backoff.WithBackOff(b),
-			backoff.WithMaxTries(uint(maxRetries)+1),
+			backoff.WithMaxTries(maxTries),
 			backoff.WithMaxElapsedTime(0),
 			backoff.WithNotify(func(err error, d time.Duration) {
 				r.metrics.RPCRetryCount.Add(ctx, 1)
