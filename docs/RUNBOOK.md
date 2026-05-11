@@ -40,6 +40,34 @@ Set to `/app/abi/anchoring.json` when that file is baked into the image (see bel
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | OTLP gRPC endpoint (e.g. `otel-collector:4317`); enables trace and metric export to a collector. |
 | `OTEL_SERVICE_NAME` | `inveniam-mcp-server` | Service name in OTel resource. |
 
+### NVNM-prefixed environment variables (introduced in Phase 8)
+
+Phase 8 introduced a set of new operator-facing knobs under the `NVNM_*` prefix. These are additive to the existing `INVENIAM_*` chain configuration; a hard-cut rename of the older prefix is planned for Phase 8.9 (tracked in `docs/IMPLEMENTATION_PLAN.md`). Until that rename ships, both prefixes coexist and the two namespaces target different concerns: `INVENIAM_*` for chain/RPC config, `NVNM_*` for Phase 8 onboarding + transport hardening.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NVNM_CHAIN_ENVIRONMENT` | inferred from `INVENIAM_CHAIN_ID` | `testnet` or `mainnet`. Selects env-aware token naming (`mantraUSD`/`wmantraUSD` vs `mmUSD`/`wmmUSD`) for onboarding-tool responses. Inference falls back to `testnet` for chain IDs the server does not recognize (787111 → testnet; 1611 → mainnet). |
+| `NVNM_DOCS_URL` | _(empty)_ | Operator-facing docs URL surfaced in onboarding-tool responses (e.g., the wizard's "where to learn more" hint). Optional. |
+| `NVNM_EXPLORER_URL` | _(empty)_ | Block-explorer URL surfaced to agents in onboarding-tool responses. Optional. |
+| `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
+| `NVNM_ALLOWED_ORIGINS` | _(empty)_ → localhost-only default | Comma-separated allowlist for the HTTP transport's Origin header (DNS-rebinding defense per the MCP spec). When unset the server permits only the loopback variants (`http://localhost`, `https://localhost`, `http://127.0.0.1`, `https://127.0.0.1`, `http://[::1]`, `https://[::1]`) at any port. Production deployments must enumerate the trusted client origins. |
+
+### Origin-header validation (HTTP transport, Phase 8.5)
+
+The HTTP transport rejects requests whose `Origin` header is not on the allowlist. Requests with no `Origin` header (server-to-server, CLI, curl) pass through unchanged. The check is the outermost middleware so rejection short-circuits before auth or rate-limit work runs.
+
+**Defaults (no `NVNM_ALLOWED_ORIGINS` set):** loopback HTTP and HTTPS variants of `localhost`, `127.0.0.1`, and `[::1]`, on any port. Suitable for local development; everything else gets `403`.
+
+**Production override example:**
+
+```bash
+NVNM_ALLOWED_ORIGINS="https://claude.ai,https://mcp.nvnmchain.io"
+```
+
+Multiple origins, comma-separated, whitespace tolerated. Matching is case-insensitive and ignores surrounding whitespace. Port-stripping is only applied to loopback hosts -- general allowlist entries require exact-match including port.
+
+Rejected requests produce a structured warning log line with the origin, remote address, method, and path. Operators can audit recent rejections with their log aggregator's filter on `"rejecting request with disallowed Origin"`.
+
 ### Authentication (HTTP transport)
 
 | Variable | Default | Purpose |

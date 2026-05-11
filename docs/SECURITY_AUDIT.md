@@ -664,3 +664,23 @@ The original assessment marked 6 items as "Backlog" and 2 as "Done" in the Longe
 | CORS middleware | Backlog (Low) | Still backlog (Low) |
 
 In addition, **FusionAuth OAuth/JWT authentication** was added in Phase 6 as a second auth provider alongside API keys, and **MetaMask wallet signing support** was added in Phase 7 with a `wallet_tx_request` payload returned from every `anchor_prepare_*` tool. Neither was scoped in the original audit but both materially improve the production security posture (centralized identity, browser-wallet UX without server-side keys).
+
+## Updates since 2026-05-11 (Phase 8 in progress)
+
+Phase 8 is layering additional security and onboarding controls on top of the Phase 5–7 baseline. As of 2026-05-11 the following Phase 8 items have shipped on `main`:
+
+| Item | Phase 8 task | Commit | Notes |
+|---|---|---|---|
+| **Tool annotations on every tool** (`ReadOnlyHint` / `DestructiveHint` / `OpenWorldHint` profiles) | 8.2 | `d0cc16f` | Lets MCP clients and connector-directory reviewers tell read-only from state-changing tools without relying on spec defaults. `evm_send_raw_transaction` is the only `DestructiveHint=true` tool; `anchor_info` is the one `OpenWorldHint=false` tool. |
+| **`next_actions` envelope on every tool response** | 8.3 | `3b88f3b` | Static AST reachability test prevents stale tool-name references in hint strings. |
+| **EIP-1559 (type-2) prepare-tools by default** | 8.4 | `2e9e751` | Backwards-compat: `gas_price` field dual-populated on type-2 responses; `prefer_legacy_tx` input parameter for opt-out. Verified end-to-end against testnet for both transaction types. |
+| **Origin-header validation on HTTP transport** | 8.5 | `cc8ca80` | DNS-rebinding defense per the MCP spec. Outermost middleware so rejection short-circuits before auth or rate-limit work. Allowlist via `NVNM_ALLOWED_ORIGINS`; localhost-only default. |
+
+Phase 8 also tracks the following security items still pending:
+
+| Item | Phase 8 task | Notes |
+|---|---|---|
+| **API-key hashing at rest** with `.pre-migration` backup + atomic tmp-rename writes | 8.6 (IRREVERSIBLE) | Current `main` stores raw bearer tokens on disk in operator-managed key stores. Any earlier "stored hashed at rest" claim in this document is **not yet accurate** -- the migration in 8.6 will make it true. Until 8.6 ships, operators should treat the key store file as a high-sensitivity secret comparable to `.env`-style credentials. |
+| Constant-time auth comparison on the hash bytes | 8.7 | Defense-in-depth alongside the hash-lookup path. |
+| Server identity rename + `INVENIAM_*` → `NVNM_*` env-var hard cut with fail-loud guard | 8.9 (BREAKING) | Eliminates the dual-prefix transient state. |
+| OWASP Top-10 self-audit gate | 8.12 | Final close-out before Phase 8 marked COMPLETE. |

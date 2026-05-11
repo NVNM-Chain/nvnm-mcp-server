@@ -237,14 +237,18 @@ MCP tool registration and request handling using the official Go MCP SDK.
 
 Responsibilities:
 - Construct `mcp.Server` with tool definitions (`server.go`, `tools_evm.go`, `tools_anchor.go`, `tools_evm_write.go`, `tools_anchor_write.go`)
-- Each tool handler: validate input -> call EVM/anchor client -> return normalized result
+- Each tool handler: validate input -> call EVM/anchor client -> return normalized result wrapped in a `next_actions`-bearing envelope (`envelopes.go`, `next_actions.go`)
+- Tool annotations (`annotations.go`) -- every tool carries an MCP `ToolAnnotations` payload (ReadOnly / Destructive / OpenWorld hints) so clients can tell read-only from state-changing tools without inferring spec defaults
 - Map internal errors to MCP-safe responses (human-readable message + error flag)
+- HTTP middleware chain (outer → inner): `originGuard` → `limitRequestBody` → `AuthMiddleware` → `ClientRateLimiter` → `mcpHandler`. Origin guard sits outermost so disallowed requests short-circuit before auth/rate-limit work runs.
+- Origin-header validation (`origin.go`) -- DNS-rebinding defense per the MCP spec; allowlist via `NVNM_ALLOWED_ORIGINS`. Empty Origin (server-to-server, CLI) always passes; localhost variants accept any port.
 - HTTP authentication middleware (`auth.go`) -- delegates to `internal/auth.TokenValidator` (API key or FusionAuth JWT)
 - Per-client token-bucket rate limiting (`ratelimit.go`) -- returns HTTP `429` when exceeded
 - Per-tool role-based authorization (`rbac.go`) -- gates each handler on `reader` / `writer` / `admin` / `automation` roles
 - API key store (`keys.go`, `managed_keys.go`) -- file-backed JSON store with hot-reload semantics
 - Admin REST API (`admin.go`) -- runtime key CRUD on a separate port (`:8081`), guarded by `ADMIN_API_KEY`
 - Write approval workflow (`approval.go`) -- MCP elicitation prompt for `evm_send_raw_transaction` based on per-client + global policy
+- Onboarding-tool runtime info (`runtime.go`) -- bundles operator-config values (`ChainEnvironment`, anchor address, default URLs) passed once at server construction so handlers do not reach into `*config.Config` directly
 
 ## 3. MCP Tool Design
 
@@ -363,34 +367,41 @@ const receipt = await callMCPTool("evm_get_transaction_receipt", { tx_hash: txHa
 
 ### UnsignedTransaction type
 
-The `anchor_prepare_*` tools return an `UnsignedTransaction` with fields for both signing paths:
+The `anchor_prepare_*` tools return an `UnsignedTransaction` with fields for both signing paths. Phase 8.4 made EIP-1559 (type-2) the default; type-0 (legacy) is still produced when the caller opts in via `prefer_legacy_tx: true` on the tool input.
 
 ```go
 type UnsignedTransaction struct {
     // Local/headless signer path
-    RawTx    string `json:"raw_tx"`    // RLP-encoded unsigned tx (hex, 0x-prefixed)
-    To       string `json:"to"`        // Target address (precompile)
-    Data     string `json:"data"`      // ABI-encoded calldata (hex)
-    Nonce    uint64 `json:"nonce"`     // Sender's current nonce
-    Gas      uint64 `json:"gas"`       // Estimated gas limit (with buffer)
-    GasPrice string `json:"gas_price"` // Current gas price (wei, decimal string)
-    Value    string `json:"value"`     // Always "0" for precompile calls
-    ChainID  int64  `json:"chain_id"`  // For EIP-155 replay protection
+    RawTx                string `json:"raw_tx"`                            // RLP-encoded unsigned tx (hex, 0x-prefixed)
+    Type                 uint8  `json:"type,omitempty"`                    // EIP-2718 type: 2 (EIP-1559 default) or 0 (legacy opt-out)
+    To                   string `json:"to"`                                // Target address (precompile)
+    Data                 string `json:"data"`                              // ABI-encoded calldata (hex)
+    Nonce                uint64 `json:"nonce"`                             // Sender's current nonce
+    Gas                  uint64 `json:"gas"`                               // Estimated gas limit (with 20% buffer)
+    GasPrice             string `json:"gas_price"`                         // Wei, decimal string. On type-2 responses GasPrice equals MaxFeePerGas so legacy-only signers still have a usable value.
+    MaxFeePerGas         string `json:"max_fee_per_gas,omitempty"`         // EIP-1559 fee cap; type-2 only
+    MaxPriorityFeePerGas string `json:"max_priority_fee_per_gas,omitempty"` // EIP-1559 miner tip; type-2 only
+    Value                string `json:"value"`                             // Always "0" for precompile calls
+    ChainID              int64  `json:"chain_id"`                          // For EIP-155 replay protection
 
     // MetaMask / EIP-1193 path
     WalletTxRequest *WalletTransactionRequest `json:"wallet_tx_request,omitempty"`
 }
 
 type WalletTransactionRequest struct {
-    From     string `json:"from"`      // Sender address
-    To       string `json:"to"`        // Precompile address
-    Data     string `json:"data"`      // ABI-encoded calldata
-    Value    string `json:"value"`     // "0x0"
-    ChainID  string `json:"chainId"`   // 0x-prefixed hex (e.g. "0xe607")
-    Gas      string `json:"gas"`       // 0x-prefixed hex quantity
-    GasPrice string `json:"gasPrice"`  // 0x-prefixed hex quantity (wei)
+    From                 string `json:"from"`                              // Sender address
+    To                   string `json:"to"`                                // Precompile address
+    Data                 string `json:"data"`                              // ABI-encoded calldata
+    Value                string `json:"value"`                             // "0x0"
+    ChainID              string `json:"chainId"`                           // 0x-prefixed hex (e.g. "0xe607")
+    Gas                  string `json:"gas"`                               // 0x-prefixed hex quantity
+    GasPrice             string `json:"gasPrice,omitempty"`                // Type-0 path; omitted for EIP-1559
+    MaxFeePerGas         string `json:"maxFeePerGas,omitempty"`            // EIP-1559 path
+    MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas,omitempty"`    // EIP-1559 path
 }
 ```
+
+The type-2 path fetches the miner tip via `evm.Client.SuggestGasTipCap` (added in 8.4 alongside the existing `SuggestGasPrice`) and sets `MaxFeePerGas = 2 * SuggestGasPrice` for headroom against base-fee inflation. When the RPC does not implement `eth_maxPriorityFeePerGas` (or returns zero) the server falls back to a 1-gwei tip rather than failing the prepare call.
 
 ### Why prepare-sign-submit
 

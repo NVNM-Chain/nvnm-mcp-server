@@ -27,6 +27,54 @@ Complete schema reference for all 16 tools exposed by the Inveniam EVM MCP Serve
 
 ---
 
+## Phase 8 cross-cutting changes
+
+The following apply to every tool registered after Phase 8.2–8.5 and are not repeated per-tool below.
+
+### Tool annotations
+
+Every tool carries an MCP `ToolAnnotations` payload so clients (and connector-directory reviewers) can tell read-only tools from state-changing ones without inferring spec defaults. Three profiles cover the surface:
+
+| Profile | `ReadOnlyHint` | `DestructiveHint` | `OpenWorldHint` | Tools |
+|---|---|---|---|---|
+| `newOpenWorldReadOnly` | true | _(unset)_ | true | `evm_get_*` (8), `anchor_get_*` (3), `anchor_prepare_*` (3) |
+| `newClosedWorldReadOnly` | true | _(unset)_ | false | `anchor_info` |
+| `newDestructiveWriteTool` | false | true | true | `evm_send_raw_transaction` |
+
+`anchor_prepare_*` tools are annotated read-only because the prepare step itself only reads chain state (nonce, gas, fees); the destructive effect happens at `evm_send_raw_transaction` time after the caller signs and broadcasts. Phase 8.8 adds four additional `newClosedWorldReadOnly` tools (`nvnm_overview`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`, plus pure-compute helpers) -- this table will need a refresh then.
+
+### `next_actions` response envelope
+
+Every tool's response now carries an additive `next_actions` array. Each entry is a hint pointing at the next logical tool call:
+
+```json
+{
+  "tool": "evm_get_transaction_receipt",
+  "hint": "Wait ~one block then call this tool with tx_hash=0x... to confirm inclusion and inspect the decoded events.",
+  "when": "after broadcast lands"
+}
+```
+
+The `when` field is optional (omitted when the next call is unconditional). `tool` always names a registered MCP tool -- an AST-level reachability test enforces this. Some builders branch on response data (e.g., `evm_get_transaction_receipt` returns a different hint for `status=reverted` than for `status=success`; `evm_send_raw_transaction` echoes the tx_hash into its hint).
+
+The field is additive: existing JSON consumers that ignore unknown fields see no change. Field-level assertions (`out.ChainID`, `out.Wei`, etc.) keep working via Go's promoted-field access on the envelope structs.
+
+### EIP-1559 default on prepare tools (8.4)
+
+`anchor_prepare_add_registry`, `anchor_prepare_add_record`, and `anchor_prepare_grant_role` now build EIP-1559 (type-2) transactions by default. The response shape gains three new fields:
+
+| Field | Type | Populated when |
+|---|---|---|
+| `type` | int | Always; omitted in JSON when value is `0` |
+| `max_fee_per_gas` | string (decimal wei) | Type-2 only (omitempty) |
+| `max_priority_fee_per_gas` | string (decimal wei) | Type-2 only (omitempty) |
+
+On type-2 responses, `gas_price` is dual-populated to equal `max_fee_per_gas` so a legacy-only signer that only reads `gas_price` still has a usable value.
+
+Each prepare tool gains an optional `prefer_legacy_tx` (bool, default `false`) input. Set to `true` to opt back into a type-0 `LegacyTx` for signers that cannot produce type-2 signatures.
+
+---
+
 ## Table of Contents
 
 ### Phase 1 -- Generic EVM
