@@ -11,25 +11,26 @@ import (
 
 // Sentinel validation errors.
 var (
-	ErrMissingRPCURL          = errors.New("INVENIAM_EVM_RPC_URL is required")
-	ErrInvalidRPCURL          = errors.New("INVENIAM_EVM_RPC_URL must start with http:// or https://")
-	ErrInvalidChainID         = errors.New("INVENIAM_CHAIN_ID must be a positive integer")
-	ErrInvalidTimeout         = errors.New("REQUEST_TIMEOUT must be a positive duration")
-	ErrInvalidTransport       = errors.New("MCP_TRANSPORT must be \"stdio\" or \"http\"")
-	ErrInvalidRetries         = errors.New("RPC_MAX_RETRIES must be non-negative")
-	ErrInvalidBackoff         = errors.New("RPC_INITIAL_BACKOFF and RPC_MAX_BACKOFF must be positive durations")
-	ErrInvalidRateLimit       = errors.New("RPC_RATE_LIMIT must be positive")
-	ErrInvalidRateBurst       = errors.New("RPC_RATE_BURST must be positive")
-	ErrInvalidBreakerSettings = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
-	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
-	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
-	ErrInvalidMCPRateLimit    = errors.New("MCP_RATE_LIMIT must be positive")
-	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
-	ErrAdminKeyWithoutFile    = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
-	ErrInvalidAuthProvider    = errors.New("AUTH_PROVIDER must be \"apikey\" or \"fusionauth\"")
-	ErrMissingFusionAuthURL   = errors.New("FUSIONAUTH_URL is required when AUTH_PROVIDER is \"fusionauth\"")
-	ErrMissingFusionAuthAppID = errors.New("FUSIONAUTH_APPLICATION_ID is required when AUTH_PROVIDER is \"fusionauth\"")
-	ErrInvalidFusionAuthURL   = errors.New("FUSIONAUTH_URL must start with http:// or https://")
+	ErrMissingRPCURL           = errors.New("INVENIAM_EVM_RPC_URL is required")
+	ErrInvalidRPCURL           = errors.New("INVENIAM_EVM_RPC_URL must start with http:// or https://")
+	ErrInvalidChainID          = errors.New("INVENIAM_CHAIN_ID must be a positive integer")
+	ErrInvalidTimeout          = errors.New("REQUEST_TIMEOUT must be a positive duration")
+	ErrInvalidTransport        = errors.New("MCP_TRANSPORT must be \"stdio\" or \"http\"")
+	ErrInvalidRetries          = errors.New("RPC_MAX_RETRIES must be non-negative")
+	ErrInvalidBackoff          = errors.New("RPC_INITIAL_BACKOFF and RPC_MAX_BACKOFF must be positive durations")
+	ErrInvalidRateLimit        = errors.New("RPC_RATE_LIMIT must be positive")
+	ErrInvalidRateBurst        = errors.New("RPC_RATE_BURST must be positive")
+	ErrInvalidBreakerSettings  = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
+	ErrInvalidSampleRatio      = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
+	ErrInvalidWriteApproval    = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
+	ErrInvalidMCPRateLimit     = errors.New("MCP_RATE_LIMIT must be positive")
+	ErrInvalidMCPRateBurst     = errors.New("MCP_RATE_BURST must be positive")
+	ErrAdminKeyWithoutFile     = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
+	ErrInvalidAuthProvider     = errors.New("AUTH_PROVIDER must be \"apikey\" or \"fusionauth\"")
+	ErrMissingFusionAuthURL    = errors.New("FUSIONAUTH_URL is required when AUTH_PROVIDER is \"fusionauth\"")
+	ErrMissingFusionAuthAppID  = errors.New("FUSIONAUTH_APPLICATION_ID is required when AUTH_PROVIDER is \"fusionauth\"")
+	ErrInvalidFusionAuthURL    = errors.New("FUSIONAUTH_URL must start with http:// or https://")
+	ErrInvalidChainEnvironment = errors.New(`NVNM_CHAIN_ENVIRONMENT must be "testnet" or "mainnet" when set`)
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -88,6 +89,21 @@ type Config struct {
 	FusionAuthJWKSURL string        // FUSIONAUTH_JWKS_URL: JWKS endpoint (defaults to BaseURL/jwks.json)
 	JWTClockSkew      time.Duration // JWT_CLOCK_SKEW: leeway for token expiry checks (default 60s)
 	JWTRolesClaim     string        // JWT_ROLES_CLAIM: name of the roles claim in JWT (default "roles")
+
+	// Chain environment (NVNM-prefixed; introduced in Phase 8).
+	// ChainEnvironment selects between testnet and mainnet token naming
+	// and operator-facing URL defaults. When NVNM_CHAIN_ENVIRONMENT is
+	// unset, the value is inferred from ChainID; chain IDs the server
+	// does not recognize fall through to EnvTestnet.
+	ChainEnvironment ChainEnvironment
+
+	// DocsURL, ExplorerURL, BridgeURL are operator-facing URLs surfaced
+	// in onboarding-tool responses. Optional; empty strings are valid
+	// (consumers handle the empty case gracefully). Set via NVNM_DOCS_URL,
+	// NVNM_EXPLORER_URL, NVNM_BRIDGE_URL.
+	DocsURL     string
+	ExplorerURL string
+	BridgeURL   string
 }
 
 // Load reads configuration from environment variables and returns a validated Config.
@@ -207,11 +223,35 @@ func Load() (*Config, error) {
 	}
 	cfg.JWTClockSkew = clockSkew
 
+	cfg.loadChainEnvironment()
+	cfg.DocsURL = os.Getenv("NVNM_DOCS_URL")
+	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
+	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// loadChainEnvironment resolves c.ChainEnvironment from
+// NVNM_CHAIN_ENVIRONMENT (when set) or by inference from c.ChainID.
+// Unrecognized chain IDs fall through to EnvTestnet so the server can
+// still start; operators running against a private fork should set the
+// env var explicitly. Validate() rejects explicit values that are not
+// "testnet" or "mainnet".
+func (c *Config) loadChainEnvironment() {
+	raw := os.Getenv("NVNM_CHAIN_ENVIRONMENT")
+	if raw != "" {
+		c.ChainEnvironment = ChainEnvironment(raw)
+		return
+	}
+	if inferred := InferEnvironmentFromChainID(c.ChainID); inferred != "" {
+		c.ChainEnvironment = inferred
+		return
+	}
+	c.ChainEnvironment = EnvTestnet
 }
 
 // Validate checks that all required configuration is present and consistent.
@@ -233,6 +273,9 @@ func (c *Config) Validate() error {
 	}
 	if c.WriteApprovalDefault != "required" && c.WriteApprovalDefault != "auto" {
 		return fmt.Errorf("%w: got %q", ErrInvalidWriteApproval, c.WriteApprovalDefault)
+	}
+	if !c.ChainEnvironment.IsValid() {
+		return fmt.Errorf("%w: got %q", ErrInvalidChainEnvironment, c.ChainEnvironment)
 	}
 	if err := c.validateAuth(); err != nil {
 		return err

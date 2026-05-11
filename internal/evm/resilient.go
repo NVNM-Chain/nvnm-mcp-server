@@ -113,7 +113,7 @@ func resilientCall[T any](
 			return res, nil
 		},
 			backoff.WithBackOff(b),
-			backoff.WithMaxTries(uint(r.cfg.MaxRetries+1)), //nolint:gosec // MaxRetries validated >= 0 in config
+			backoff.WithMaxTries(uint(r.cfg.MaxRetries+1)),
 			backoff.WithMaxElapsedTime(0),
 			backoff.WithNotify(func(err error, d time.Duration) {
 				r.metrics.RPCRetryCount.Add(ctx, 1)

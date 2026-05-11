@@ -42,6 +42,10 @@ func clearEnv(t *testing.T) {
 		"FUSIONAUTH_JWKS_URL",
 		"JWT_CLOCK_SKEW",
 		"JWT_ROLES_CLAIM",
+		"NVNM_CHAIN_ENVIRONMENT",
+		"NVNM_DOCS_URL",
+		"NVNM_EXPLORER_URL",
+		"NVNM_BRIDGE_URL",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -611,5 +615,105 @@ func TestGetFusionAuthJWKSURL(t *testing.T) {
 	cfg.FusionAuthJWKSURL = "https://auth.example.com/custom-jwks"
 	if got := cfg.GetFusionAuthJWKSURL(); got != "https://auth.example.com/custom-jwks" {
 		t.Errorf("GetFusionAuthJWKSURL() = %q, want custom JWKS URL", got)
+	}
+}
+
+func TestLoad_ChainEnvironment_DefaultsToTestnetForUnknownChainID(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t) // chain ID 58887 -- the old manveniam-1, not in the recognized list
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ChainEnvironment != EnvTestnet {
+		t.Errorf("ChainEnvironment = %q, want EnvTestnet (default for unrecognized chain ID)", cfg.ChainEnvironment)
+	}
+}
+
+func TestLoad_ChainEnvironment_InferredFromTestnetChainID(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
+	t.Setenv("INVENIAM_CHAIN_ID", "787111")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ChainEnvironment != EnvTestnet {
+		t.Errorf("ChainEnvironment = %q, want EnvTestnet (inferred from 787111)", cfg.ChainEnvironment)
+	}
+}
+
+func TestLoad_ChainEnvironment_InferredFromMainnetChainID(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.nvnmchain.io")
+	t.Setenv("INVENIAM_CHAIN_ID", "1611")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ChainEnvironment != EnvMainnet {
+		t.Errorf("ChainEnvironment = %q, want EnvMainnet (inferred from 1611)", cfg.ChainEnvironment)
+	}
+}
+
+func TestLoad_ChainEnvironment_ExplicitOverridesInference(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
+	t.Setenv("INVENIAM_CHAIN_ID", "787111") // testnet by inference
+	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "mainnet")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ChainEnvironment != EnvMainnet {
+		t.Errorf("ChainEnvironment = %q, want EnvMainnet (explicit override of inference)", cfg.ChainEnvironment)
+	}
+}
+
+func TestLoad_ChainEnvironment_InvalidExplicitValue(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "prod")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid NVNM_CHAIN_ENVIRONMENT, got nil")
+	}
+	if !errors.Is(err, ErrInvalidChainEnvironment) {
+		t.Errorf("error = %v, want ErrInvalidChainEnvironment", err)
+	}
+}
+
+func TestLoad_OnboardingURLs_LoadFromEnv(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("NVNM_DOCS_URL", "https://docs.nvnmchain.io")
+	t.Setenv("NVNM_EXPLORER_URL", "https://explorer.evm.testnet.nvnmchain.io")
+	t.Setenv("NVNM_BRIDGE_URL", "https://bridge.nvnmchain.io")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DocsURL != "https://docs.nvnmchain.io" {
+		t.Errorf("DocsURL = %q, want https://docs.nvnmchain.io", cfg.DocsURL)
+	}
+	if cfg.ExplorerURL != "https://explorer.evm.testnet.nvnmchain.io" {
+		t.Errorf("ExplorerURL = %q, want https://explorer.evm.testnet.nvnmchain.io", cfg.ExplorerURL)
+	}
+	if cfg.BridgeURL != "https://bridge.nvnmchain.io" {
+		t.Errorf("BridgeURL = %q, want https://bridge.nvnmchain.io", cfg.BridgeURL)
+	}
+}
+
+func TestLoad_OnboardingURLs_EmptyByDefault(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DocsURL != "" || cfg.ExplorerURL != "" || cfg.BridgeURL != "" {
+		t.Errorf("onboarding URLs should default to empty; got docs=%q explorer=%q bridge=%q",
+			cfg.DocsURL, cfg.ExplorerURL, cfg.BridgeURL)
 	}
 }
