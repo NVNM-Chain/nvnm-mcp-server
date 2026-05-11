@@ -178,11 +178,22 @@ func run() error {
 	case "stdio":
 		return srv.RunStdio(ctx)
 	case "http":
-		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter)
+		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter, buildOriginAllowlist(cfg))
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
 			cfg.Transport, config.ErrInvalidTransport)
 	}
+}
+
+// buildOriginAllowlist returns the Origin allowlist for the HTTP
+// transport. Nil falls through to DefaultOriginAllowlist inside
+// RunHTTP (localhost-only); operators must set NVNM_ALLOWED_ORIGINS
+// to expose the server beyond localhost.
+func buildOriginAllowlist(cfg *config.Config) *mcpserver.OriginAllowlist {
+	if len(cfg.AllowedOrigins) == 0 {
+		return nil
+	}
+	return mcpserver.NewOriginAllowlist(cfg.AllowedOrigins)
 }
 
 // loadAuth creates the appropriate TokenValidator based on AUTH_PROVIDER config.

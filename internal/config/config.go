@@ -104,6 +104,13 @@ type Config struct {
 	DocsURL     string
 	ExplorerURL string
 	BridgeURL   string
+
+	// AllowedOrigins is the comma-separated NVNM_ALLOWED_ORIGINS list
+	// parsed into a slice. Empty -> the server falls back to a
+	// localhost-only default suitable for local development. Production
+	// deployments must set this; the value flows through to the Origin
+	// guard middleware on the HTTP transport.
+	AllowedOrigins []string
 }
 
 // Load reads configuration from environment variables and returns a validated Config.
@@ -227,6 +234,7 @@ func Load() (*Config, error) {
 	cfg.DocsURL = os.Getenv("NVNM_DOCS_URL")
 	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
 	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
+	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -367,4 +375,25 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseCommaSeparated splits a comma-separated string, trimming
+// whitespace and dropping empty entries. Returns nil for an empty
+// input so callers can branch on len() == 0.
+func parseCommaSeparated(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

@@ -46,6 +46,7 @@ func clearEnv(t *testing.T) {
 		"NVNM_DOCS_URL",
 		"NVNM_EXPLORER_URL",
 		"NVNM_BRIDGE_URL",
+		"NVNM_ALLOWED_ORIGINS",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -715,5 +716,37 @@ func TestLoad_OnboardingURLs_EmptyByDefault(t *testing.T) {
 	if cfg.DocsURL != "" || cfg.ExplorerURL != "" || cfg.BridgeURL != "" {
 		t.Errorf("onboarding URLs should default to empty; got docs=%q explorer=%q bridge=%q",
 			cfg.DocsURL, cfg.ExplorerURL, cfg.BridgeURL)
+	}
+}
+
+func TestLoad_AllowedOrigins_ParsesCommaSeparatedList(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("NVNM_ALLOWED_ORIGINS", "https://claude.ai, https://mcp.nvnmchain.io ,  ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"https://claude.ai", "https://mcp.nvnmchain.io"}
+	if len(cfg.AllowedOrigins) != len(want) {
+		t.Fatalf("AllowedOrigins len = %d, want %d (%v)", len(cfg.AllowedOrigins), len(want), cfg.AllowedOrigins)
+	}
+	for i, v := range want {
+		if cfg.AllowedOrigins[i] != v {
+			t.Errorf("AllowedOrigins[%d] = %q, want %q", i, cfg.AllowedOrigins[i], v)
+		}
+	}
+}
+
+func TestLoad_AllowedOrigins_NilWhenUnset(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AllowedOrigins != nil {
+		t.Errorf("AllowedOrigins = %v, want nil when NVNM_ALLOWED_ORIGINS is unset", cfg.AllowedOrigins)
 	}
 }

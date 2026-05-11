@@ -80,30 +80,45 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // When validator is non-nil, requests must include a valid
 // "Authorization: Bearer <token>" header.
 // When limiter is non-nil, per-client rate limiting is enforced.
+// When allowedOrigins is nil, DefaultOriginAllowlist() is used
+// (localhost variants only); production deployments must supply a
+// non-nil allowlist that includes the origins of trusted MCP clients.
 func (s *Server) RunHTTP(
 	ctx context.Context,
 	addr string,
 	validator auth.TokenValidator,
 	limiter *ClientRateLimiter,
+	allowedOrigins *OriginAllowlist,
 ) error {
+	if allowedOrigins == nil {
+		allowedOrigins = DefaultOriginAllowlist()
+	}
+
 	s.logger.Info("starting MCP server",
 		slog.String("transport", "http"),
 		slog.String("addr", addr),
 		slog.Bool("auth_required", validator != nil),
 		slog.Bool("rate_limiting", limiter != nil),
+		slog.Any("allowed_origins", allowedOrigins.Resolved()),
 	)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return s.mcpServer
 	}, nil)
 
-	// Chain: limitRequestBody → AuthMiddleware → ClientRateLimiter → mcpHandler
+	// Chain: originGuard → limitRequestBody → AuthMiddleware → ClientRateLimiter → mcpHandler
+	// originGuard is outermost: cheapest rejection (string lookup) short-
+	// circuits before auth or rate-limit work.
 	// Rate limiter sits inside auth so the client ID is set on context.
 	var inner http.Handler = mcpHandler
 	if limiter != nil {
 		inner = limiter.Middleware(mcpHandler, s.logger)
 	}
-	handler := limitRequestBody(AuthMiddleware(inner, validator, s.logger))
+	handler := originGuard(
+		limitRequestBody(AuthMiddleware(inner, validator, s.logger)),
+		allowedOrigins,
+		s.logger,
+	)
 
 	srv := &http.Server{
 		Addr:              addr,
