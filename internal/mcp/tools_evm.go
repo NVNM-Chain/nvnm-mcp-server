@@ -22,6 +22,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Title: "Get Chain ID",
 		Description: "Returns the chain ID and latest block number " +
 			"for the connected EVM network.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeChainIDHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -30,6 +31,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Description: "Returns a block by number or hash. " +
 			"Use block_number for numeric lookup, block_hash for hash lookup. " +
 			"Set full_transactions to true to include transaction details.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBlockHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -37,6 +39,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Title: "Get Transaction",
 		Description: "Returns transaction details by hash, " +
 			"including block inclusion info if mined.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetTransactionHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -51,6 +54,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 			"and gas was still consumed. " +
 			"If the receipt is not yet available, the transaction is still pending -- " +
 			"wait a few seconds and retry.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetReceiptHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -58,6 +62,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Title: "Get Balance",
 		Description: "Returns the balance of an address in both wei and ether. " +
 			"Optionally specify a block number.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBalanceHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -65,6 +70,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Title: "Get Code",
 		Description: "Returns the contract bytecode at an address, " +
 			"and whether a contract is deployed there.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetCodeHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -76,6 +82,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 			"(e.g. keccak256('Transfer(address,address,uint256)') = 0xddf252...). " +
 			"All filters are optional -- omitting all returns all logs in the block range. " +
 			"Useful for watching for on-chain events or auditing contract activity.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetLogsHandler(evmClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -87,6 +94,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 			"For anchor precompile reads, prefer the anchor_get_* tools which handle ABI " +
 			"encoding and decoding automatically. " +
 			"Use this tool for arbitrary contract reads not covered by specific tools.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeCallContractHandler(evmClient))
 }
 

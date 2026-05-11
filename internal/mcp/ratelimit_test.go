@@ -68,8 +68,8 @@ func TestClientRateLimiter_PerClientIsolation(t *testing.T) {
 	handler := limiter.Middleware(next, logger)
 
 	makeReqForClient := func(clientID string) int {
-		ctx := auth.ContextWithClaims(t.Context(), &auth.Claims{ClientID: clientID})
-		req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody).WithContext(ctx)
+		authCtx := auth.ContextWithClaims(t.Context(), &auth.Claims{ClientID: clientID})
+		req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody).WithContext(authCtx)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		return w.Code

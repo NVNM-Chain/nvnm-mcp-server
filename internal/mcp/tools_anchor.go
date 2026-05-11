@@ -21,6 +21,7 @@ func registerAnchorTools(
 		Title: "Anchor Precompile Info",
 		Description: "Returns configuration status of the anchoring precompile, " +
 			"including address, whether the ABI is loaded, and method count.",
+		Annotations: newClosedWorldReadOnly(),
 	}, makeAnchorInfoHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -28,6 +29,7 @@ func registerAnchorTools(
 		Title: "Get Registry",
 		Description: "Fetch a single anchoring registry by its numeric ID or unique name. " +
 			"A registry is a logical container for anchored records.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRegistryHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -35,6 +37,7 @@ func registerAnchorTools(
 		Title: "List Registries",
 		Description: "Fetch a paginated list of anchoring registries. " +
 			"Optionally filter by registry_id or name.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRegistriesHandler(anchorClient))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -46,6 +49,7 @@ func registerAnchorTools(
 			"(3) content hash via registry_id + checksum, " +
 			"(4) all latest records in a registry via registry_id, " +
 			"(5) all records matching a checksum across all registries.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRecordsHandler(anchorClient))
 }
 

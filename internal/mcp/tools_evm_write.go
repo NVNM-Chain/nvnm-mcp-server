@@ -30,6 +30,7 @@ func registerEVMWriteTools(
 			"Input is a 0x-prefixed signed transaction hex string. " +
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
+		Annotations: newDestructiveWriteTool(),
 	}, makeSendRawTxHandler(evmClient, approvalDefault, logger))
 }
 

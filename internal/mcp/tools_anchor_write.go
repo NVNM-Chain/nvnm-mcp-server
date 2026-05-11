@@ -29,6 +29,7 @@ func registerAnchorWriteTools(
 		Name:        "anchor_prepare_add_registry",
 		Title:       "Prepare Add Registry Transaction",
 		Description: "Construct an unsigned addRegistry transaction. " + walletSigningPaths,
+		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareAddRegistryHandler(anchorClient, logger))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -37,6 +38,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned addRecord transaction to anchor " +
 			"a document checksum and URI in a registry. " + walletSigningPaths +
 			" After confirming, verify with anchor_get_records.",
+		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareAddRecordHandler(anchorClient, logger))
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -45,6 +47,7 @@ func registerAnchorWriteTools(
 		Description: "Construct an unsigned grantRole transaction to assign " +
 			"admin or editor permissions on a registry or specific record. " +
 			walletSigningPaths,
+		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareGrantRoleHandler(anchorClient, logger))
 }
 
