@@ -141,43 +141,43 @@ var readRoleSet = []string{"reader", "writer", "admin", "automation"}
 
 func makeChainIDHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[chainIDInput, evm.ChainInfo] {
+) mcp.ToolHandlerFor[chainIDInput, chainIDOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, _ chainIDInput,
-	) (*mcp.CallToolResult, evm.ChainInfo, error) {
+	) (*mcp.CallToolResult, chainIDOutput, error) {
 		if err := requireRole(ctx, readRoleSet...); err != nil {
-			return nil, evm.ChainInfo{}, err
+			return nil, chainIDOutput{}, err
 		}
 		info, err := c.GetChainInfo(ctx)
 		if err != nil {
-			return nil, evm.ChainInfo{},
+			return nil, chainIDOutput{},
 				fmt.Errorf("failed to get chain info: %w", err)
 		}
-		return nil, *info, nil
+		return nil, chainIDOutput{ChainInfo: *info, NextActions: evmChainIDNext()}, nil
 	}
 }
 
 func makeGetBlockHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[getBlockInput, evm.NormalizedBlock] {
+) mcp.ToolHandlerFor[getBlockInput, blockOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBlockInput,
-	) (*mcp.CallToolResult, evm.NormalizedBlock, error) {
+	) (*mcp.CallToolResult, blockOutput, error) {
 		if err := requireRole(ctx, readRoleSet...); err != nil {
-			return nil, evm.NormalizedBlock{}, err
+			return nil, blockOutput{}, err
 		}
 		if input.BlockHash != nil {
 			hash, err := parseHash(*input.BlockHash)
 			if err != nil {
-				return nil, evm.NormalizedBlock{},
+				return nil, blockOutput{},
 					fmt.Errorf("invalid block_hash: %w", err)
 			}
 			block, err := c.BlockByHash(ctx, hash, input.FullTx)
 			if err != nil {
-				return nil, evm.NormalizedBlock{},
+				return nil, blockOutput{},
 					fmt.Errorf("block not found: %w", err)
 			}
-			return nil, *block, nil
+			return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 		}
 
 		var num *big.Int
@@ -186,71 +186,71 @@ func makeGetBlockHandler(
 		}
 		block, err := c.BlockByNumber(ctx, num, input.FullTx)
 		if err != nil {
-			return nil, evm.NormalizedBlock{},
+			return nil, blockOutput{},
 				fmt.Errorf("block not found: %w", err)
 		}
-		return nil, *block, nil
+		return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 	}
 }
 
 func makeGetTransactionHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[txHashInput, evm.NormalizedTransaction] {
+) mcp.ToolHandlerFor[txHashInput, transactionOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input txHashInput,
-	) (*mcp.CallToolResult, evm.NormalizedTransaction, error) {
+	) (*mcp.CallToolResult, transactionOutput, error) {
 		if err := requireRole(ctx, readRoleSet...); err != nil {
-			return nil, evm.NormalizedTransaction{}, err
+			return nil, transactionOutput{}, err
 		}
 		hash, err := parseHash(input.TxHash)
 		if err != nil {
-			return nil, evm.NormalizedTransaction{},
+			return nil, transactionOutput{},
 				fmt.Errorf("invalid tx_hash: %w", err)
 		}
 		tx, err := c.TransactionByHash(ctx, hash)
 		if err != nil {
-			return nil, evm.NormalizedTransaction{},
+			return nil, transactionOutput{},
 				fmt.Errorf("transaction not found: %w", err)
 		}
-		return nil, *tx, nil
+		return nil, transactionOutput{NormalizedTransaction: *tx, NextActions: evmGetTransactionNext()}, nil
 	}
 }
 
 func makeGetReceiptHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[txHashInput, evm.NormalizedReceipt] {
+) mcp.ToolHandlerFor[txHashInput, receiptOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input txHashInput,
-	) (*mcp.CallToolResult, evm.NormalizedReceipt, error) {
+	) (*mcp.CallToolResult, receiptOutput, error) {
 		if err := requireRole(ctx, readRoleSet...); err != nil {
-			return nil, evm.NormalizedReceipt{}, err
+			return nil, receiptOutput{}, err
 		}
 		hash, err := parseHash(input.TxHash)
 		if err != nil {
-			return nil, evm.NormalizedReceipt{},
+			return nil, receiptOutput{},
 				fmt.Errorf("invalid tx_hash: %w", err)
 		}
 		receipt, err := c.TransactionReceipt(ctx, hash)
 		if err != nil {
-			return nil, evm.NormalizedReceipt{},
+			return nil, receiptOutput{},
 				fmt.Errorf("receipt not found: %w", err)
 		}
-		return nil, *receipt, nil
+		return nil, receiptOutput{NormalizedReceipt: *receipt, NextActions: evmGetReceiptNext(receipt.Status)}, nil
 	}
 }
 
 func makeGetBalanceHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[getBalanceInput, evm.NormalizedBalance] {
+) mcp.ToolHandlerFor[getBalanceInput, balanceOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBalanceInput,
-	) (*mcp.CallToolResult, evm.NormalizedBalance, error) {
+	) (*mcp.CallToolResult, balanceOutput, error) {
 		if err := requireRole(ctx, readRoleSet...); err != nil {
-			return nil, evm.NormalizedBalance{}, err
+			return nil, balanceOutput{}, err
 		}
 		addr, err := parseAddress(input.Address)
 		if err != nil {
-			return nil, evm.NormalizedBalance{}, err
+			return nil, balanceOutput{}, err
 		}
 		var blockNum *big.Int
 		if input.BlockNum != nil {
@@ -258,25 +258,25 @@ func makeGetBalanceHandler(
 		}
 		balance, err := c.BalanceAt(ctx, addr, blockNum)
 		if err != nil {
-			return nil, evm.NormalizedBalance{},
+			return nil, balanceOutput{},
 				fmt.Errorf("failed to get balance: %w", err)
 		}
-		return nil, *balance, nil
+		return nil, balanceOutput{NormalizedBalance: *balance, NextActions: evmGetBalanceNext()}, nil
 	}
 }
 
 func makeGetCodeHandler(
 	c evm.Client,
-) mcp.ToolHandlerFor[getCodeInput, evm.CodeResult] {
+) mcp.ToolHandlerFor[getCodeInput, codeOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getCodeInput,
-	) (*mcp.CallToolResult, evm.CodeResult, error) {
+	) (*mcp.CallToolResult, codeOutput, error) {
 		if err := requireRole(ctx, readRoleSet...); err != nil {
-			return nil, evm.CodeResult{}, err
+			return nil, codeOutput{}, err
 		}
 		addr, err := parseAddress(input.Address)
 		if err != nil {
-			return nil, evm.CodeResult{}, err
+			return nil, codeOutput{}, err
 		}
 		var blockNum *big.Int
 		if input.BlockNum != nil {
@@ -284,10 +284,10 @@ func makeGetCodeHandler(
 		}
 		code, err := c.CodeAt(ctx, addr, blockNum)
 		if err != nil {
-			return nil, evm.CodeResult{},
+			return nil, codeOutput{},
 				fmt.Errorf("failed to get code: %w", err)
 		}
-		return nil, *code, nil
+		return nil, codeOutput{CodeResult: *code, NextActions: evmGetCodeNext(code.IsContract)}, nil
 	}
 }
 
@@ -331,17 +331,19 @@ func makeGetLogsHandler(
 		if err != nil {
 			return nil, getLogsOutput{}, fmt.Errorf("failed to filter logs: %w", err)
 		}
-		return nil, getLogsOutput{Logs: logs, Count: len(logs)}, nil
+		return nil, getLogsOutput{Logs: logs, Count: len(logs), NextActions: evmGetLogsNext()}, nil
 	}
 }
 
 type getLogsOutput struct {
-	Logs  []evm.NormalizedLog `json:"logs"`
-	Count int                 `json:"count"`
+	Logs        []evm.NormalizedLog `json:"logs"`
+	Count       int                 `json:"count"`
+	NextActions []NextAction        `json:"next_actions,omitempty"`
 }
 
 type callContractOutput struct {
-	Result string `json:"result" jsonschema:"Hex-encoded return data"`
+	Result      string       `json:"result" jsonschema:"Hex-encoded return data"`
+	NextActions []NextAction `json:"next_actions,omitempty"`
 }
 
 func makeCallContractHandler(
@@ -377,7 +379,8 @@ func makeCallContractHandler(
 				fmt.Errorf("contract call failed: %w", err)
 		}
 		return nil, callContractOutput{
-			Result: "0x" + hex.EncodeToString(result),
+			Result:      "0x" + hex.EncodeToString(result),
+			NextActions: evmCallContractNext(),
 		}, nil
 	}
 }

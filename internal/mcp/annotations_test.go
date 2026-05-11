@@ -1,6 +1,10 @@
 package mcp
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -167,4 +171,111 @@ func findTool(tools []*mcp.Tool, name string) *mcp.Tool {
 		}
 	}
 	return nil
+}
+
+// TestE2E_NextActionTargetsAreRegisteredTools is the static reachability
+// guard for the next_actions envelope pattern.
+//
+// It parses next_actions.go's AST and collects every string literal that
+// appears as the Tool field of a NextAction composite literal, then asserts
+// each is a registered tool name. The check is static (no runtime call
+// graph), so it catches typos and stale references in every branch of
+// every builder -- even branches a unit test happens not to exercise.
+//
+// When a tool is added or renamed, both this test and the builder must
+// be updated together; nothing else enforces the soft contract on hint
+// targets.
+func TestE2E_NextActionTargetsAreRegisteredTools(t *testing.T) {
+	// 1. Resolve the registered tool set via the MCP wire protocol.
+	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
+	result, err := session.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	registered := make(map[string]struct{}, len(result.Tools))
+	for _, tool := range result.Tools {
+		registered[tool.Name] = struct{}{}
+	}
+
+	// 2. Parse next_actions.go statically and collect every NextAction
+	//    composite literal's Tool field value.
+	refs := collectNextActionToolRefs(t, "next_actions.go")
+	if len(refs) == 0 {
+		t.Fatal("collected zero Tool: references from next_actions.go -- AST walker broken?")
+	}
+
+	// 3. Each reference must match a registered tool.
+	for _, ref := range refs {
+		if _, ok := registered[ref.name]; !ok {
+			t.Errorf("next_actions.go:%d references unregistered tool %q", ref.line, ref.name)
+		}
+	}
+}
+
+type toolRef struct {
+	name string
+	line int
+}
+
+// collectNextActionToolRefs parses the given file and returns every
+// string literal that appears as the Tool field of a composite literal
+// that also carries a Hint field. Pattern-matching by field shape
+// rather than by declared type lets us find NextAction literals whose
+// type is inferred (slice elements like `[]NextAction{ {Tool: "x",
+// Hint: "y"} }` have no explicit type tag on the inner literal).
+//
+// Within this package, NextAction is the only struct with both Tool
+// and Hint fields, so this pattern is unambiguous.
+func collectNextActionToolRefs(t *testing.T, path string) []toolRef {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	var refs []toolRef
+	ast.Inspect(file, func(n ast.Node) bool {
+		cl, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+
+		var toolName string
+		var toolLine int
+		hasHint := false
+
+		for _, elt := range cl.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			switch key.Name {
+			case "Tool":
+				bl, ok := kv.Value.(*ast.BasicLit)
+				if !ok || bl.Kind != token.STRING {
+					continue
+				}
+				name, err := strconv.Unquote(bl.Value)
+				if err != nil {
+					t.Errorf("could not unquote %s: %v", bl.Value, err)
+					continue
+				}
+				toolName = name
+				toolLine = fset.Position(bl.Pos()).Line
+			case "Hint":
+				hasHint = true
+			}
+		}
+
+		if toolName != "" && hasHint {
+			refs = append(refs, toolRef{name: toolName, line: toolLine})
+		}
+		return true
+	})
+	return refs
 }

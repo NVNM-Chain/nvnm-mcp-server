@@ -41,7 +41,8 @@ type sendRawTxInput struct {
 }
 
 type sendRawTxOutput struct {
-	TxHash string `json:"tx_hash"`
+	TxHash      string       `json:"tx_hash"`
+	NextActions []NextAction `json:"next_actions,omitempty"`
 }
 
 // --- Handler ---
@@ -93,6 +94,6 @@ func makeSendRawTxHandler(
 			slog.String("client_id", clientID),
 			slog.String("tx_hash", txHash),
 		)
-		return nil, sendRawTxOutput{TxHash: txHash}, nil
+		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}
 }

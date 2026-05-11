@@ -82,12 +82,12 @@ type prepareGrantRoleInput struct {
 
 func makePrepareAddRegistryHandler(
 	c anchor.Client, logger *slog.Logger,
-) mcp.ToolHandlerFor[prepareAddRegistryInput, anchor.UnsignedTransaction] {
+) mcp.ToolHandlerFor[prepareAddRegistryInput, unsignedTxOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRegistryInput,
-	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
+	) (*mcp.CallToolResult, unsignedTxOutput, error) {
 		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
-			return nil, anchor.UnsignedTransaction{}, err
+			return nil, unsignedTxOutput{}, err
 		}
 		tx, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
 			From:        input.From,
@@ -96,25 +96,25 @@ func makePrepareAddRegistryHandler(
 			Metadata:    input.Metadata,
 		})
 		if err != nil {
-			return nil, anchor.UnsignedTransaction{}, err
+			return nil, unsignedTxOutput{}, err
 		}
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_add_registry",
 			slog.String("client_id", auth.ClientIDFromContext(ctx)),
 			logging.SafeAddr("from", input.From),
 			slog.String("registry_name", input.Name),
 		)
-		return nil, *tx, nil
+		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}
 }
 
 func makePrepareAddRecordHandler(
 	c anchor.Client, logger *slog.Logger,
-) mcp.ToolHandlerFor[prepareAddRecordInput, anchor.UnsignedTransaction] {
+) mcp.ToolHandlerFor[prepareAddRecordInput, unsignedTxOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareAddRecordInput,
-	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
+	) (*mcp.CallToolResult, unsignedTxOutput, error) {
 		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
-			return nil, anchor.UnsignedTransaction{}, err
+			return nil, unsignedTxOutput{}, err
 		}
 		tx, err := c.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
 			From:         input.From,
@@ -126,7 +126,7 @@ func makePrepareAddRecordHandler(
 			Metadata:     input.Metadata,
 		})
 		if err != nil {
-			return nil, anchor.UnsignedTransaction{}, err
+			return nil, unsignedTxOutput{}, err
 		}
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_add_record",
 			slog.String("client_id", auth.ClientIDFromContext(ctx)),
@@ -134,18 +134,18 @@ func makePrepareAddRecordHandler(
 			slog.String("registry", input.Registry),
 			slog.String("uri", input.URI),
 		)
-		return nil, *tx, nil
+		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}
 }
 
 func makePrepareGrantRoleHandler(
 	c anchor.Client, logger *slog.Logger,
-) mcp.ToolHandlerFor[prepareGrantRoleInput, anchor.UnsignedTransaction] {
+) mcp.ToolHandlerFor[prepareGrantRoleInput, unsignedTxOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input prepareGrantRoleInput,
-	) (*mcp.CallToolResult, anchor.UnsignedTransaction, error) {
+	) (*mcp.CallToolResult, unsignedTxOutput, error) {
 		if err := requireRole(ctx, "admin"); err != nil {
-			return nil, anchor.UnsignedTransaction{}, err
+			return nil, unsignedTxOutput{}, err
 		}
 		tx, err := c.PrepareGrantRole(ctx, anchor.PrepareGrantRoleRequest{
 			From:       input.From,
@@ -155,7 +155,7 @@ func makePrepareGrantRoleHandler(
 			Role:       input.Role,
 		})
 		if err != nil {
-			return nil, anchor.UnsignedTransaction{}, err
+			return nil, unsignedTxOutput{}, err
 		}
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_grant_role",
 			slog.String("client_id", auth.ClientIDFromContext(ctx)),
@@ -164,6 +164,6 @@ func makePrepareGrantRoleHandler(
 			logging.SafeAddr("account", input.Account),
 			slog.String("role", input.Role),
 		)
-		return nil, *tx, nil
+		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}
 }
