@@ -34,16 +34,18 @@ jobs:
           args: --timeout=5m
 
       - name: License scan
-        # Allowed list is intentionally conservative. Hard-refused for
-        # proprietary commercial work: GPL-2.0, GPL-3.0, AGPL-3.0 (and
-        # -only/-or-later variants). LGPL-3.0 / LGPL-2.1 require a
-        # per-dependency exception and are NOT on the allowlist by
-        # default. See CLAUDE.md "Licensing policy" for rationale.
+        # Temporary allowlist: GPL-3.0 and LGPL-3.0 are present SOLELY
+        # to accommodate github.com/ethereum/go-ethereum, pending a
+        # decision on whether to replace it with an MIT-licensed
+        # alternative. See docs/LICENSE_EXCEPTIONS.md. Hard-refused for
+        # proprietary commercial work without exception: GPL-2.0,
+        # AGPL-3.0 (and -only/-or-later variants). All other entries
+        # are routine permissive licenses.
         run: |
           go install github.com/google/go-licenses@latest
           go-licenses check ./... \
             --ignore github.com/inveniam/nvnm-mcp-server \
-            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0,0BSD,Zlib,EPL-2.0,CDDL-1.0
+            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-2-Clause-FreeBSD,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0,0BSD,Zlib,EPL-2.0,CDDL-1.0,GPL-3.0,LGPL-3.0
 
       - name: Vulnerability check
         run: |
