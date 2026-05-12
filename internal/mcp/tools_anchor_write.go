@@ -23,7 +23,10 @@ func registerAnchorWriteTools(
 		"(2) raw_tx -- RLP-encoded unsigned bytes for local or headless signers; " +
 		"sign externally, then broadcast via evm_send_raw_transaction. " +
 		"Confirm either path with evm_get_transaction_receipt(tx_hash). " +
-		"The server never holds or receives private keys."
+		"The server never holds or receives private keys. " +
+		"Access control: this tool is annotated read-only (it does not modify " +
+		"server or chain state by itself) but requires the writer, admin, or " +
+		"automation role because the output is a signing-ready payload."
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "anchor_prepare_add_registry",
@@ -105,10 +108,14 @@ func makePrepareAddRegistryHandler(
 		if err != nil {
 			return nil, unsignedTxOutput{}, err
 		}
-		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_add_registry",
-			slog.String("client_id", auth.ClientIDFromContext(ctx)),
-			logging.SafeAddr("from", input.From),
-			slog.String("registry_name", input.Name),
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+			slog.Group("audit",
+				slog.String("tool", "anchor_prepare_add_registry"),
+				slog.String("phase", "prepared"),
+				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+				logging.SafeAddr("from", input.From),
+				slog.String("registry_name", input.Name),
+			),
 		)
 		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}
@@ -136,11 +143,15 @@ func makePrepareAddRecordHandler(
 		if err != nil {
 			return nil, unsignedTxOutput{}, err
 		}
-		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_add_record",
-			slog.String("client_id", auth.ClientIDFromContext(ctx)),
-			logging.SafeAddr("from", input.From),
-			slog.String("registry", input.Registry),
-			slog.String("uri", input.URI),
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+			slog.Group("audit",
+				slog.String("tool", "anchor_prepare_add_record"),
+				slog.String("phase", "prepared"),
+				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+				logging.SafeAddr("from", input.From),
+				slog.String("registry", input.Registry),
+				slog.String("uri", input.URI),
+			),
 		)
 		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}
@@ -166,12 +177,16 @@ func makePrepareGrantRoleHandler(
 		if err != nil {
 			return nil, unsignedTxOutput{}, err
 		}
-		logger.LogAttrs(ctx, slog.LevelInfo, "audit: prepare_grant_role",
-			slog.String("client_id", auth.ClientIDFromContext(ctx)),
-			logging.SafeAddr("from", input.From),
-			slog.Uint64("registry_id", input.RegistryID),
-			logging.SafeAddr("account", input.Account),
-			slog.String("role", input.Role),
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+			slog.Group("audit",
+				slog.String("tool", "anchor_prepare_grant_role"),
+				slog.String("phase", "prepared"),
+				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+				logging.SafeAddr("from", input.From),
+				slog.Uint64("registry_id", input.RegistryID),
+				logging.SafeAddr("account", input.Account),
+				slog.String("role", input.Role),
+			),
 		)
 		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}

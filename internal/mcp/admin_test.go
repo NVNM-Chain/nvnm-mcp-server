@@ -82,8 +82,10 @@ func TestAdmin_Auth_InvalidToken(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
 	resp := adminRequest(t, ts, "GET", "/admin/keys", "wrong-key", nil)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("got status %d, want 403", resp.StatusCode)
+	// 401 per RFC 7235: an invalid bearer is an authentication failure,
+	// not an authorization failure. The caller must (re)authenticate.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want 401", resp.StatusCode)
 	}
 }
 

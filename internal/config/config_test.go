@@ -57,6 +57,11 @@ func setMinimalEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
 	t.Setenv("INVENIAM_CHAIN_ID", "58887")
+	// Chain ID 58887 (the old manveniam-1) is intentionally not in the
+	// recognized list. Set NVNM_CHAIN_ENVIRONMENT explicitly so Load()
+	// has a fail-safe answer for non-recognized chain IDs. Tests that
+	// exercise unrecognized-chain fail-fast unset this themselves.
+	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "testnet")
 }
 
 func TestLoad_Minimal(t *testing.T) {
@@ -106,6 +111,9 @@ func TestLoad_AllFields(t *testing.T) {
 	t.Setenv("MCP_TRANSPORT", "http")
 	t.Setenv("MCP_HTTP_ADDR", ":9090")
 	t.Setenv("ENABLE_WRITE_TOOLS", "true")
+	// Chain ID 1 is not a recognized NVNM chain; supply an explicit
+	// environment so Load() does not fail-fast on unrecognized chain.
+	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "testnet")
 
 	cfg, err := Load()
 	if err != nil {
@@ -619,15 +627,32 @@ func TestGetFusionAuthJWKSURL(t *testing.T) {
 	}
 }
 
-func TestLoad_ChainEnvironment_DefaultsToTestnetForUnknownChainID(t *testing.T) {
+func TestLoad_ChainEnvironment_FailsFastForUnknownChainID(t *testing.T) {
 	clearEnv(t)
-	setMinimalEnv(t) // chain ID 58887 -- the old manveniam-1, not in the recognized list
+	// Set the minimal env BUT explicitly unset NVNM_CHAIN_ENVIRONMENT
+	// so this test exercises the "unrecognized chain ID + no operator
+	// override" path. The previous behavior silently fell back to
+	// testnet; the new behavior is fail-fast.
+	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
+	t.Setenv("INVENIAM_CHAIN_ID", "58887")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for unrecognized chain ID with no explicit NVNM_CHAIN_ENVIRONMENT, got nil")
+	}
+	if !errors.Is(err, ErrInvalidChainEnvironment) {
+		t.Errorf("error = %v, want ErrInvalidChainEnvironment", err)
+	}
+}
+
+func TestLoad_ChainEnvironment_ExplicitTestnetWithUnrecognizedChainID(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t) // sets NVNM_CHAIN_ENVIRONMENT=testnet; chain ID 58887 unrecognized
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.ChainEnvironment != EnvTestnet {
-		t.Errorf("ChainEnvironment = %q, want EnvTestnet (default for unrecognized chain ID)", cfg.ChainEnvironment)
+		t.Errorf("ChainEnvironment = %q, want EnvTestnet from explicit override", cfg.ChainEnvironment)
 	}
 }
 

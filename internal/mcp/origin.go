@@ -3,6 +3,7 @@ package mcp
 import (
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -99,13 +100,7 @@ func (a *OriginAllowlist) Resolved() []string {
 	for o := range a.allowed {
 		out = append(out, o)
 	}
-	// Stable order for deterministic log output. Sort by ascending
-	// lexicographic order; small list, cheap.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j-1] > out[j]; j-- {
-			out[j-1], out[j] = out[j], out[j-1]
-		}
-	}
+	sort.Strings(out)
 	return out
 }
 

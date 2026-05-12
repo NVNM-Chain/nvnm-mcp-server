@@ -16,6 +16,7 @@ func registerEVMWriteTools(
 	srv *mcp.Server,
 	evmClient evm.Client,
 	approvalDefault string,
+	chainEnvironment string,
 	logger *slog.Logger,
 ) {
 	mcp.AddTool(srv, &mcp.Tool{
@@ -31,7 +32,7 @@ func registerEVMWriteTools(
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
 		Annotations: newDestructiveWriteTool(),
-	}, makeSendRawTxHandler(evmClient, approvalDefault, logger))
+	}, makeSendRawTxHandler(evmClient, approvalDefault, chainEnvironment, logger))
 }
 
 // --- Input/output types ---
@@ -48,7 +49,7 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, approvalDefault string, logger *slog.Logger,
+	c evm.Client, approvalDefault, chainEnvironment string, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context,
@@ -69,30 +70,40 @@ func makeSendRawTxHandler(
 		clientID := auth.ClientIDFromContext(ctx)
 
 		if err := CheckWriteApproval(
-			ctx, req.Session, input.SignedTxHex, approvalDefault,
+			ctx, req.Session, input.SignedTxHex, approvalDefault, chainEnvironment,
 		); err != nil {
-			logger.LogAttrs(ctx, slog.LevelWarn,
-				"audit: send_raw_transaction approval check",
-				slog.String("client_id", clientID),
-				slog.String("result", err.Error()),
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit",
+				slog.Group("audit",
+					slog.String("tool", "evm_send_raw_transaction"),
+					slog.String("phase", "approval_denied"),
+					slog.String("client_id", clientID),
+					slog.String("error", err.Error()),
+				),
 			)
 			return nil, sendRawTxOutput{}, err
 		}
 
 		txHash, err := c.SendRawTransaction(ctx, input.SignedTxHex)
 		if err != nil {
-			logger.LogAttrs(ctx, slog.LevelWarn,
-				"audit: send_raw_transaction failed",
-				slog.String("client_id", clientID),
-				slog.Int("signed_tx_len", len(input.SignedTxHex)),
-				slog.String("error", err.Error()),
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit",
+				slog.Group("audit",
+					slog.String("tool", "evm_send_raw_transaction"),
+					slog.String("phase", "broadcast_failed"),
+					slog.String("client_id", clientID),
+					slog.Int("signed_tx_len", len(input.SignedTxHex)),
+					slog.String("error", err.Error()),
+				),
 			)
 			return nil, sendRawTxOutput{}, err
 		}
 
-		logger.LogAttrs(ctx, slog.LevelInfo, "audit: send_raw_transaction",
-			slog.String("client_id", clientID),
-			slog.String("tx_hash", txHash),
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+			slog.Group("audit",
+				slog.String("tool", "evm_send_raw_transaction"),
+				slog.String("phase", "broadcast_ok"),
+				slog.String("client_id", clientID),
+				slog.String("tx_hash", txHash),
+			),
 		)
 		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}

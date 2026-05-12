@@ -155,11 +155,27 @@ func run() error {
 
 	// --- Per-client MCP rate limiter (HTTP only) ---
 	var mcpLimiter *mcpserver.ClientRateLimiter
+	var failLimiter *mcpserver.IPFailRateLimiter
 	if cfg.Transport == "http" {
 		mcpLimiter = mcpserver.NewClientRateLimiter(cfg.MCPRateLimit, cfg.MCPRateBurst)
+		mcpLimiter.Start()
+		defer mcpLimiter.Stop()
 		logger.Info("MCP per-client rate limiter enabled",
 			slog.Float64("rps", cfg.MCPRateLimit),
 			slog.Int("burst", cfg.MCPRateBurst),
+		)
+
+		failLimiter = mcpserver.NewIPFailRateLimiter(
+			mcpserver.DefaultFailRatePerSec,
+			mcpserver.DefaultFailBurst,
+			cfg.TrustProxyHeaders,
+		)
+		failLimiter.Start()
+		defer failLimiter.Stop()
+		logger.Info("MCP pre-auth IP failure-rate limiter enabled",
+			slog.Float64("rps", mcpserver.DefaultFailRatePerSec),
+			slog.Int("burst", mcpserver.DefaultFailBurst),
+			slog.Bool("trust_proxy_headers", cfg.TrustProxyHeaders),
 		)
 	}
 
@@ -171,6 +187,7 @@ func run() error {
 	srv := mcpserver.NewServer(
 		evmClient, anchorClient,
 		cfg.EnableWriteTools, cfg.WriteApprovalDefault,
+		string(cfg.ChainEnvironment),
 		middleware, logger,
 	)
 
@@ -178,7 +195,7 @@ func run() error {
 	case "stdio":
 		return srv.RunStdio(ctx)
 	case "http":
-		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter, buildOriginAllowlist(cfg))
+		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter, failLimiter, buildOriginAllowlist(cfg))
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
 			cfg.Transport, config.ErrInvalidTransport)
@@ -254,16 +271,14 @@ func loadAPIKeys(
 			return nil, nil, nil, fmt.Errorf("load API keys file: %w", err)
 		}
 		if mks.Empty() && cfg.Transport == "http" {
-			logger.Warn("API keys file has no enabled keys; HTTP transport has no authentication",
-				slog.String("file", cfg.APIKeysFile),
-			)
-		} else {
-			logger.Info("loaded API keys",
-				slog.String("file", cfg.APIKeysFile),
-				slog.Int("total", mks.TotalCount()),
-				slog.Int("enabled", mks.ActiveCount()),
-			)
+			return nil, nil, nil, fmt.Errorf("%w: file %q has no enabled keys",
+				config.ErrHTTPAuthRequired, cfg.APIKeysFile)
 		}
+		logger.Info("loaded API keys",
+			slog.String("file", cfg.APIKeysFile),
+			slog.Int("total", mks.TotalCount()),
+			slog.Int("enabled", mks.ActiveCount()),
+		)
 		managedKeys = mks
 	case cfg.APIKey != "":
 		logger.Info("using single API key from MCP_API_KEY")
@@ -275,8 +290,10 @@ func loadAPIKeys(
 		managedKeys = mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry})
 	default:
 		if cfg.Transport == "http" {
-			logger.Warn("no API keys configured; HTTP transport has no authentication")
+			return nil, nil, nil, config.ErrHTTPAuthRequired
 		}
+		// stdio transport: unauthenticated is fine -- the transport itself
+		// is local-only and operator-controlled.
 		return nil, nil, nil, nil
 	}
 

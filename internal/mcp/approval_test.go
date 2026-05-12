@@ -36,7 +36,7 @@ func TestResolveWriteApproval(t *testing.T) {
 
 func TestCheckWriteApproval_AutoSkipsElicitation(t *testing.T) {
 	tCtx := context.Background()
-	err := CheckWriteApproval(tCtx, nil, "0xdeadbeef", ApprovalAuto)
+	err := CheckWriteApproval(tCtx, nil, "0xdeadbeef", ApprovalAuto, "testnet")
 	if err != nil {
 		t.Fatalf("expected nil error for auto approval, got: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestCheckWriteApproval_PerClientAutoOverridesGlobal(t *testing.T) {
 	authCtx := auth.ContextWithClaims(context.Background(), &auth.Claims{
 		WriteApproval: ApprovalAuto,
 	})
-	err := CheckWriteApproval(authCtx, nil, "0xdeadbeef", ApprovalRequired)
+	err := CheckWriteApproval(authCtx, nil, "0xdeadbeef", ApprovalRequired, "testnet")
 	if err != nil {
 		t.Fatalf("expected nil error when per-client is auto, got: %v", err)
 	}

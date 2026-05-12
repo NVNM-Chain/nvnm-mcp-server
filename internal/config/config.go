@@ -11,21 +11,25 @@ import (
 
 // Sentinel validation errors.
 var (
-	ErrMissingRPCURL           = errors.New("INVENIAM_EVM_RPC_URL is required")
-	ErrInvalidRPCURL           = errors.New("INVENIAM_EVM_RPC_URL must start with http:// or https://")
-	ErrInvalidChainID          = errors.New("INVENIAM_CHAIN_ID must be a positive integer")
-	ErrInvalidTimeout          = errors.New("REQUEST_TIMEOUT must be a positive duration")
-	ErrInvalidTransport        = errors.New("MCP_TRANSPORT must be \"stdio\" or \"http\"")
-	ErrInvalidRetries          = errors.New("RPC_MAX_RETRIES must be non-negative")
-	ErrInvalidBackoff          = errors.New("RPC_INITIAL_BACKOFF and RPC_MAX_BACKOFF must be positive durations")
-	ErrInvalidRateLimit        = errors.New("RPC_RATE_LIMIT must be positive")
-	ErrInvalidRateBurst        = errors.New("RPC_RATE_BURST must be positive")
-	ErrInvalidBreakerSettings  = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
-	ErrInvalidSampleRatio      = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
-	ErrInvalidWriteApproval    = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
-	ErrInvalidMCPRateLimit     = errors.New("MCP_RATE_LIMIT must be positive")
-	ErrInvalidMCPRateBurst     = errors.New("MCP_RATE_BURST must be positive")
-	ErrAdminKeyWithoutFile     = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
+	ErrMissingRPCURL          = errors.New("INVENIAM_EVM_RPC_URL is required")
+	ErrInvalidRPCURL          = errors.New("INVENIAM_EVM_RPC_URL must start with http:// or https://")
+	ErrInvalidChainID         = errors.New("INVENIAM_CHAIN_ID must be a positive integer")
+	ErrInvalidTimeout         = errors.New("REQUEST_TIMEOUT must be a positive duration")
+	ErrInvalidTransport       = errors.New("MCP_TRANSPORT must be \"stdio\" or \"http\"")
+	ErrInvalidRetries         = errors.New("RPC_MAX_RETRIES must be non-negative")
+	ErrInvalidBackoff         = errors.New("RPC_INITIAL_BACKOFF and RPC_MAX_BACKOFF must be positive durations")
+	ErrInvalidRateLimit       = errors.New("RPC_RATE_LIMIT must be positive")
+	ErrInvalidRateBurst       = errors.New("RPC_RATE_BURST must be positive")
+	ErrInvalidBreakerSettings = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
+	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
+	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
+	ErrInvalidMCPRateLimit    = errors.New("MCP_RATE_LIMIT must be positive")
+	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
+	ErrAdminKeyWithoutFile    = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
+	ErrHTTPAuthRequired       = errors.New(
+		"HTTP transport requires an authentication provider; " +
+			"set MCP_API_KEYS_FILE, MCP_API_KEY, or AUTH_PROVIDER=fusionauth",
+	)
 	ErrInvalidAuthProvider     = errors.New("AUTH_PROVIDER must be \"apikey\" or \"fusionauth\"")
 	ErrMissingFusionAuthURL    = errors.New("FUSIONAUTH_URL is required when AUTH_PROVIDER is \"fusionauth\"")
 	ErrMissingFusionAuthAppID  = errors.New("FUSIONAUTH_APPLICATION_ID is required when AUTH_PROVIDER is \"fusionauth\"")
@@ -111,6 +115,14 @@ type Config struct {
 	// deployments must set this; the value flows through to the Origin
 	// guard middleware on the HTTP transport.
 	AllowedOrigins []string
+
+	// TrustProxyHeaders controls whether the pre-auth failure-rate
+	// limiter derives the source IP from X-Forwarded-For. Enable only
+	// when the server sits behind a reverse proxy that strips
+	// client-supplied XFF entries; otherwise an attacker can spoof the
+	// header to dodge the limiter. NVNM_TRUST_PROXY_HEADERS env var,
+	// default false.
+	TrustProxyHeaders bool
 }
 
 // Load reads configuration from environment variables and returns a validated Config.
@@ -145,13 +157,23 @@ func Load() (*Config, error) {
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
-	cfg.AdminAPIAddr = envOrDefault("ADMIN_API_ADDR", ":8081")
+	// Default to loopback-only. The admin key is the master key (creates
+	// API keys, sets WriteApproval=auto, assigns admin roles), so
+	// exposing :8081 cluster-wide is a privilege-escalation foot-gun.
+	// Operators that need cluster-internal access set ADMIN_API_ADDR
+	// explicitly (e.g. ":8081") and pair it with a NetworkPolicy.
+	cfg.AdminAPIAddr = envOrDefault("ADMIN_API_ADDR", "127.0.0.1:8081")
 
 	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "inveniam-mcp-server")
 	cfg.EnablePrometheus = envOrDefault("ENABLE_PROMETHEUS", "true") == "true"
 	cfg.EnableStdoutTel = envOrDefault("ENABLE_STDOUT_TELEMETRY", "false") == "true"
-	cfg.OTLPInsecure = envOrDefault("OTLP_INSECURE", "true") == "true"
+	// Secure-by-default: OTLP gRPC connects with TLS unless the
+	// operator explicitly opts into insecure (typical for a sidecar
+	// collector on localhost). Spans carry pre-sanitization error text
+	// and tool-call patterns; an insecure default leaks them on any
+	// non-loopback collector path.
+	cfg.OTLPInsecure = envOrDefault("OTLP_INSECURE", "false") == "true"
 	cfg.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
 
 	retryStr := envOrDefault("RPC_MAX_RETRIES", "3")
@@ -235,6 +257,7 @@ func Load() (*Config, error) {
 	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
 	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
+	cfg.TrustProxyHeaders = os.Getenv("NVNM_TRUST_PROXY_HEADERS") == "true"
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -245,10 +268,13 @@ func Load() (*Config, error) {
 
 // loadChainEnvironment resolves c.ChainEnvironment from
 // NVNM_CHAIN_ENVIRONMENT (when set) or by inference from c.ChainID.
-// Unrecognized chain IDs fall through to EnvTestnet so the server can
-// still start; operators running against a private fork should set the
-// env var explicitly. Validate() rejects explicit values that are not
-// "testnet" or "mainnet".
+// Validate() rejects explicit values that are not "testnet" or
+// "mainnet". When the env var is unset and the chain ID is one we
+// recognize, the inferred value wins; when neither path resolves an
+// environment (operator running against a private fork without
+// explicit config), Validate() refuses to start so the operator does
+// not unknowingly run against a misclassified chain. Set
+// NVNM_CHAIN_ENVIRONMENT explicitly for forks.
 func (c *Config) loadChainEnvironment() {
 	raw := os.Getenv("NVNM_CHAIN_ENVIRONMENT")
 	if raw != "" {
@@ -259,7 +285,8 @@ func (c *Config) loadChainEnvironment() {
 		c.ChainEnvironment = inferred
 		return
 	}
-	c.ChainEnvironment = EnvTestnet
+	// Leave ChainEnvironment as the zero value -- Validate() will
+	// surface the missing config as an explicit, fail-fast error.
 }
 
 // Validate checks that all required configuration is present and consistent.

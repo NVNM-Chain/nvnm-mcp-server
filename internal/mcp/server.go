@@ -27,12 +27,16 @@ type Server struct {
 // NewServer creates a new MCP server and registers all tools.
 // When enableWriteTools is true, prepare-sign-submit tools and
 // evm_send_raw_transaction are registered, gated by writeApprovalDefault.
+// chainEnvironment is the operator-facing chain label
+// ("testnet"/"mainnet") rendered in approval prompts so the user does
+// not have to memorize numeric chain IDs.
 // Middleware (if any) is registered via AddReceivingMiddleware.
 func NewServer(
 	evmClient evm.Client,
 	anchorClient anchor.Client,
 	enableWriteTools bool,
 	writeApprovalDefault string,
+	chainEnvironment string,
 	middleware []mcp.Middleware,
 	logger *slog.Logger,
 ) *Server {
@@ -57,10 +61,11 @@ func NewServer(
 	registerAnchorTools(mcpSrv, anchorClient, logger)
 
 	if enableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, writeApprovalDefault, logger)
+		registerEVMWriteTools(mcpSrv, evmClient, writeApprovalDefault, chainEnvironment, logger)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)",
 			slog.String("write_approval_default", writeApprovalDefault),
+			slog.String("chain_environment", chainEnvironment),
 		)
 	}
 
@@ -80,6 +85,8 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // When validator is non-nil, requests must include a valid
 // "Authorization: Bearer <token>" header.
 // When limiter is non-nil, per-client rate limiting is enforced.
+// When failLimiter is non-nil, pre-auth failure-rate limiting per
+// source IP is enforced (defeats credential stuffing).
 // When allowedOrigins is nil, DefaultOriginAllowlist() is used
 // (localhost variants only); production deployments must supply a
 // non-nil allowlist that includes the origins of trusted MCP clients.
@@ -88,6 +95,7 @@ func (s *Server) RunHTTP(
 	addr string,
 	validator auth.TokenValidator,
 	limiter *ClientRateLimiter,
+	failLimiter *IPFailRateLimiter,
 	allowedOrigins *OriginAllowlist,
 ) error {
 	if allowedOrigins == nil {
@@ -99,6 +107,7 @@ func (s *Server) RunHTTP(
 		slog.String("addr", addr),
 		slog.Bool("auth_required", validator != nil),
 		slog.Bool("rate_limiting", limiter != nil),
+		slog.Bool("fail_rate_limiting", failLimiter != nil),
 		slog.Any("allowed_origins", allowedOrigins.Resolved()),
 	)
 
@@ -106,19 +115,24 @@ func (s *Server) RunHTTP(
 		return s.mcpServer
 	}, nil)
 
-	// Chain: originGuard → limitRequestBody → AuthMiddleware → ClientRateLimiter → mcpHandler
-	// originGuard is outermost: cheapest rejection (string lookup) short-
-	// circuits before auth or rate-limit work.
-	// Rate limiter sits inside auth so the client ID is set on context.
+	// Chain (outermost first):
+	//   originGuard          → cheap string lookup, DNS-rebinding defense
+	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
+	//   limitRequestBody     → cap body before any parser sees it
+	//   AuthMiddleware       → validates bearer; penalizes failLimiter on miss
+	//   ClientRateLimiter    → per-client bucket, requires identity from Auth
+	//   mcpHandler           → MCP SDK
 	var inner http.Handler = mcpHandler
 	if limiter != nil {
 		inner = limiter.Middleware(mcpHandler, s.logger)
 	}
-	handler := originGuard(
-		limitRequestBody(AuthMiddleware(inner, validator, s.logger)),
-		allowedOrigins,
-		s.logger,
-	)
+	authed := AuthMiddleware(inner, validator, failLimiter, s.logger)
+	bodyLimited := limitRequestBody(authed)
+	failGuarded := bodyLimited
+	if failLimiter != nil {
+		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
+	}
+	handler := originGuard(failGuarded, allowedOrigins, s.logger)
 
 	srv := &http.Server{
 		Addr:              addr,

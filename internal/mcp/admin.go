@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -256,8 +257,18 @@ func (a *AdminServer) writeError(w http.ResponseWriter, status int, msg string) 
 
 // --- Middleware ---
 
+// adminAuth gates the admin REST API behind a Bearer-token check.
+//
+// The token comparison hashes both sides with SHA-256 and compares
+// fixed-length digests. subtle.ConstantTimeCompare returns 0 fast on
+// length mismatch -- comparing raw tokens directly would leak the
+// admin-key length to a length-probing attacker. Hashing equalizes
+// lengths so the constant-time guarantee is meaningful.
+//
+// All failures return 401 per RFC 7235: a missing/wrong-scheme/wrong
+// bearer is an authentication failure, not an authorization failure.
 func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Handler {
-	keyBytes := []byte(adminKey)
+	want := sha256.Sum256([]byte(adminKey))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
@@ -280,14 +291,14 @@ func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Han
 			return
 		}
 
-		token := []byte(strings.TrimPrefix(authHeader, prefix))
-		if subtle.ConstantTimeCompare(token, keyBytes) != 1 {
+		got := sha256.Sum256([]byte(strings.TrimPrefix(authHeader, prefix)))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
 			logger.Warn("admin: rejected request with invalid admin key",
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 			)
-			http.Error(w, `{"error":"invalid admin key"}`, http.StatusForbidden)
+			http.Error(w, `{"error":"invalid admin key"}`, http.StatusUnauthorized)
 			return
 		}
 

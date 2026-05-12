@@ -91,7 +91,7 @@ func startTestServerWithConfig(
 		approval = ApprovalRequired
 	}
 
-	srv := NewServer(cfg.evmClient, anchorClient, true, approval, nil, testLogger())
+	srv := NewServer(cfg.evmClient, anchorClient, true, approval, "testnet", nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -298,7 +298,7 @@ func TestE2E_SendRawTx_AutoApproval_RPCError(t *testing.T) {
 
 func TestDecodeTxSummary_ValidSignedTx(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
-	summary, err := DecodeTxSummary(signedTx, "test-client")
+	summary, err := DecodeTxSummary(signedTx, "test-client", "testnet")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestDecodeTxSummary_ValidSignedTx(t *testing.T) {
 }
 
 func TestDecodeTxSummary_InvalidHex(t *testing.T) {
-	_, err := DecodeTxSummary("0xZZZZ", "client")
+	_, err := DecodeTxSummary("0xZZZZ", "client", "testnet")
 	if err == nil {
 		t.Fatal("expected error for invalid hex")
 	}
@@ -458,13 +458,13 @@ func startAuthTestServer(
 		validator = auth.NewAPIKeyValidator(adapter)
 	}
 
-	srv := NewServer(evmClient, anchorClient, true, approval, nil, logger)
+	srv := NewServer(evmClient, anchorClient, true, approval, "testnet", nil, logger)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
-	handler := AuthMiddleware(mcpHandler, validator, logger)
+	handler := AuthMiddleware(mcpHandler, validator, nil, logger)
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
@@ -773,7 +773,7 @@ func TestE2E_Auth_ValidKey_SendTx_WithElicitation(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected success, got error: %v", result.Content)
 	}
-	if !strings.Contains(capturedMessage, "Client:   write-client") {
+	if !strings.Contains(capturedMessage, "Submitted by:       write-client") {
 		t.Errorf("approval prompt should contain client identity, got:\n%s", capturedMessage)
 	}
 }

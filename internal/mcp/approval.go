@@ -34,19 +34,28 @@ func ResolveWriteApproval(perClient, globalDefault string) string {
 }
 
 // TxSummary holds decoded transaction fields for the approval prompt.
+// The Signer field is the address recovered from the signature, NOT
+// the auth-context client ID -- the user is approving the on-chain
+// actor, which may differ from the API-key identity that submitted
+// the broadcast call.
 type TxSummary struct {
-	To       string
-	Value    *big.Int
-	Gas      uint64
-	Nonce    uint64
-	ChainID  *big.Int
-	DataLen  int
-	ClientID string
+	To               string
+	Value            *big.Int
+	Gas              uint64
+	Nonce            uint64
+	ChainID          *big.Int
+	DataLen          int
+	MethodSelector   string // first 4 bytes of Data() as "0x..."; empty if Data is short
+	Signer           string // recovered from signature; "(recovery failed)" on error
+	ClientID         string
+	ChainEnvironment string // "testnet" / "mainnet" / "" if unknown
 }
 
-// DecodeTxSummary decodes a 0x-prefixed signed transaction hex string into
-// a TxSummary for display in the approval prompt.
-func DecodeTxSummary(signedTxHex, clientID string) (*TxSummary, error) {
+// DecodeTxSummary decodes a 0x-prefixed signed transaction hex string
+// into a TxSummary for display in the approval prompt. chainEnv is
+// a human label ("testnet", "mainnet") shown alongside the chain ID
+// so the user does not have to memorize numeric chain IDs.
+func DecodeTxSummary(signedTxHex, clientID, chainEnv string) (*TxSummary, error) {
 	raw := strings.TrimPrefix(signedTxHex, "0x")
 	txBytes, err := hex.DecodeString(raw)
 	if err != nil {
@@ -63,29 +72,110 @@ func DecodeTxSummary(signedTxHex, clientID string) (*TxSummary, error) {
 		to = tx.To().Hex()
 	}
 
+	selector := ""
+	data := tx.Data()
+	if len(data) >= 4 {
+		selector = "0x" + hex.EncodeToString(data[:4])
+	}
+
+	// Signature recovery. tx.ChainId() returns the chain ID embedded
+	// in the signature (EIP-155 for legacy, the access-list field for
+	// dynamic-fee). We need a Signer keyed to that chain ID to recover
+	// From. NewLondonSigner handles type-0, type-1, and type-2.
+	signer := "(recovery failed)"
+	chainID := tx.ChainId()
+	if chainID != nil && chainID.Sign() > 0 {
+		from, sigErr := types.Sender(types.NewLondonSigner(chainID), tx)
+		if sigErr == nil {
+			signer = from.Hex()
+		}
+	}
+
 	return &TxSummary{
-		To:       to,
-		Value:    tx.Value(),
-		Gas:      tx.Gas(),
-		Nonce:    tx.Nonce(),
-		ChainID:  tx.ChainId(),
-		DataLen:  len(tx.Data()),
-		ClientID: clientID,
+		To:               to,
+		Value:            tx.Value(),
+		Gas:              tx.Gas(),
+		Nonce:            tx.Nonce(),
+		ChainID:          chainID,
+		DataLen:          len(data),
+		MethodSelector:   selector,
+		Signer:           signer,
+		ClientID:         clientID,
+		ChainEnvironment: chainEnv,
 	}, nil
 }
 
+// formatWei converts a wei integer to a human-readable string showing
+// both the wei integer (with thousand separators) and the equivalent
+// ETH-unit value to 6 decimal places. The ETH-unit conversion is for
+// readability only -- the wei integer is the source of truth.
+func formatWei(wei *big.Int) string {
+	if wei == nil {
+		return "0"
+	}
+	weiStr := withThousands(wei.String())
+	// 1 ETH = 1e18 wei. We compute the truncated ETH integer and
+	// 6-digit micro-ETH fraction to avoid float drift on large values.
+	ether := new(big.Int).Quo(wei, big.NewInt(1_000_000_000_000_000_000))
+	microRem := new(big.Int).Mod(wei, big.NewInt(1_000_000_000_000_000_000))
+	micro := new(big.Int).Quo(microRem, big.NewInt(1_000_000_000_000))
+	return fmt.Sprintf("%s wei (≈ %s.%06d ETH)", weiStr, ether.String(), micro.Int64())
+}
+
+// withThousands inserts comma separators every 3 digits, right-to-left.
+// "1234567890" -> "1,234,567,890". Negative-sign safe.
+func withThousands(s string) string {
+	if s == "" {
+		return s
+	}
+	sign := ""
+	if s[0] == '-' {
+		sign = "-"
+		s = s[1:]
+	}
+	n := len(s)
+	if n <= 3 {
+		return sign + s
+	}
+	// Number of commas to insert.
+	commas := (n - 1) / 3
+	out := make([]byte, 0, n+commas)
+	first := n - 3*((n-1)/3+1) + 3 // first chunk length, 1..3
+	if first <= 0 {
+		first += 3
+	}
+	out = append(out, s[:first]...)
+	for i := first; i < n; i += 3 {
+		out = append(out, ',')
+		out = append(out, s[i:i+3]...)
+	}
+	return sign + string(out)
+}
+
 func formatApprovalMessage(s *TxSummary) string {
+	chainLabel := s.ChainID.String()
+	if s.ChainEnvironment != "" {
+		chainLabel = fmt.Sprintf("%s (%s)", s.ChainID.String(), s.ChainEnvironment)
+	}
+	selectorLine := s.MethodSelector
+	if selectorLine == "" {
+		selectorLine = "(no calldata)"
+	}
 	return fmt.Sprintf(
 		"Approve transaction broadcast?\n\n"+
-			"  To:       %s\n"+
-			"  Value:    %s wei\n"+
-			"  Gas:      %d\n"+
-			"  Nonce:    %d\n"+
-			"  Chain ID: %s\n"+
-			"  Data:     %d bytes\n"+
-			"  Client:   %s\n\n"+
-			"This is irreversible. The signed transaction will be broadcast to the chain.",
-		s.To, s.Value.String(), s.Gas, s.Nonce, s.ChainID.String(), s.DataLen, s.ClientID,
+			"  Signer (recovered): %s\n"+
+			"  To:                 %s\n"+
+			"  Method selector:    %s\n"+
+			"  Value:              %s\n"+
+			"  Gas:                %d\n"+
+			"  Nonce:              %d\n"+
+			"  Chain ID:           %s\n"+
+			"  Data:               %d bytes\n"+
+			"  Submitted by:       %s\n\n"+
+			"This is irreversible. The signed transaction will be broadcast to the chain. "+
+			"Verify the signer matches your wallet and the method selector matches the operation you intended.",
+		s.Signer, s.To, selectorLine, formatWei(s.Value),
+		s.Gas, s.Nonce, chainLabel, s.DataLen, s.ClientID,
 	)
 }
 
@@ -119,12 +209,15 @@ func RequestWriteApproval(
 
 // CheckWriteApproval resolves the approval policy from context and config,
 // and if approval is required, sends an elicitation to the human user.
+// chainEnv is the operator-facing chain label ("testnet"/"mainnet")
+// rendered in the approval prompt alongside the numeric chain ID.
 // Returns nil if the write should proceed.
 func CheckWriteApproval(
 	ctx context.Context,
 	session *mcp.ServerSession,
 	signedTxHex string,
 	globalDefault string,
+	chainEnv string,
 ) error {
 	perClient := auth.WriteApprovalFromContext(ctx)
 	policy := ResolveWriteApproval(perClient, globalDefault)
@@ -134,7 +227,7 @@ func CheckWriteApproval(
 	}
 
 	clientID := auth.ClientIDFromContext(ctx)
-	summary, err := DecodeTxSummary(signedTxHex, clientID)
+	summary, err := DecodeTxSummary(signedTxHex, clientID, chainEnv)
 	if err != nil {
 		return err
 	}

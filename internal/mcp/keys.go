@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
@@ -76,13 +77,51 @@ func LoadKeysFile(path string) ([]KeyEntry, error) {
 	return entries, nil
 }
 
-// SaveKeysFile writes a JSON array of KeyEntry to the given path.
+// SaveKeysFile writes a JSON array of KeyEntry to the given path
+// atomically. The new contents are written to a sibling temp file,
+// fsync'd, and renamed over the target. A mid-write crash leaves either
+// the previous file intact or the temp file orphaned -- never a
+// truncated target.
 func SaveKeysFile(path string, entries []KeyEntry) error {
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal keys: %w", err)
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp keys file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// Best-effort cleanup if anything below fails before the rename.
+	defer func() {
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp keys file: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp keys file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("fsync temp keys file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp keys file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp keys file: %w", err)
+	}
+	tmpPath = "" // committed; suppress the deferred cleanup
+	return nil
 }
 
 // GenerateKey produces a cryptographically random 32-byte base64url key.

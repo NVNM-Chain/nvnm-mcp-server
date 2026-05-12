@@ -30,10 +30,14 @@ func RequestIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-// NewMCPMiddleware returns MCP receiving middleware that creates an OTel span
-// and records metrics for every incoming method call.
+// NewMCPMiddleware returns MCP receiving middleware that creates an
+// OTel span and records metrics for every incoming method call.
 //
-// Privacy: tool arguments, return values, and error messages are never recorded.
+// Privacy: tool arguments and return values are never recorded. Errors
+// are attached to span events for internal debugging only; the error
+// returned to the MCP client is passed through apperrors.SafeForClient
+// so URLs, hostnames, and other internal details do not leak across
+// the trust boundary.
 func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 	tracer := otel.Tracer(tracerName)
 
