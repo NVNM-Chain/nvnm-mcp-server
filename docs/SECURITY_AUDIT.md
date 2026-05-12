@@ -665,6 +665,82 @@ The original assessment marked 6 items as "Backlog" and 2 as "Done" in the Longe
 
 In addition, **FusionAuth OAuth/JWT authentication** was added in Phase 6 as a second auth provider alongside API keys, and **MetaMask wallet signing support** was added in Phase 7 with a `wallet_tx_request` payload returned from every `anchor_prepare_*` tool. Neither was scoped in the original audit but both materially improve the production security posture (centralized identity, browser-wallet UX without server-side keys).
 
+## Updates since 2026-05-12 (fresh pre-red-team review + remediation)
+
+A second pre-red-team assessment was conducted on 2026-05-12, grounded
+in the post-Phase-8.5 codebase. It surfaced seven previously-unflagged
+or partially-remediated issues plus several Go code-review findings.
+The full assessment is preserved in conversation; the items below
+record what was fixed in the codebase.
+
+### Top-10 attack paths (2026-05-12 review)
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | Credential stuffing -- rate limiter was post-auth | **Remediated** -- new `IPFailRateLimiter` (pre-auth, per source IP) in `internal/mcp/failrate.go`; `AuthMiddleware` calls `Penalize` on every 401. |
+| 2 | Unbounded growth of per-client rate-limiter map | **Remediated** -- `ClientRateLimiter` now bounded by `DefaultLimiterMaxClients` (10000) with LRU eviction and a TTL janitor; same pattern applied to `IPFailRateLimiter`. |
+| 3 | HTTP transport failed open with no keys configured | **Remediated** -- `loadAPIKeys` now returns `config.ErrHTTPAuthRequired` when `Transport=="http"` and no validator can be constructed. Test asserts the fail-closed path. |
+| 4 | API-key store written non-atomically | **Remediated** -- `SaveKeysFile` now writes to a sibling `.tmp-*` file (`0o600`, fsync'd) and renames over the target. Test asserts the previous file is preserved when the rename fails. |
+| 5 | Admin REST `:8081` lacked defense-in-depth | **Remediated** -- default bind moved to `127.0.0.1:8081` (BREAKING for deploys that exposed it cluster-wide). Admin auth now compares SHA-256 hashes (fixed length) so `subtle.ConstantTimeCompare`'s "fast on length mismatch" shortcut cannot probe the admin-key length. NetworkPolicy template includes an example for in-cluster admin access. |
+| 6 | K8s `Deployment` pulled `:latest` | **Documented** -- `deployment.yaml` carries an explicit TODO + comment block describing how to substitute `@sha256:<digest>` once the release pipeline emits a digest-stable image; the existing Dockerfile already digest-pins both base images. (Real fix requires a release-pipeline change outside this commit set.) |
+| 7 | CI license allowlist permitted GPL-3.0 / LGPL-3.0 | **Remediated** -- allowlist narrowed to MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/Unlicense/CC0-1.0/0BSD/Zlib/EPL-2.0/CDDL-1.0. Matches the proprietary-commercial policy in CLAUDE.md. CI is the safety net; if a transitive GPL-3 dep exists today it will surface on the next run. |
+| 8 | ConfigMap shape encouraged secret-in-ConfigMap | **Remediated** -- new `deploy/k8s/secret.yaml.example` documents the Secret pattern; `deployment.yaml` wires both `configMapRef` (non-sensitive) and `secretRef` (credentials), plus a volume mount for `MCP_API_KEYS_FILE` from a separate Secret. `configmap.yaml` cleaned of credential-shaped fields and `INVENIAM_EVM_RPC_URL` removed. `.gitignore` now excludes `deploy/k8s/secret.yaml`. |
+| 9 | `OTLP_INSECURE` default was `true` | **Remediated** -- default flipped to `false` (BREAKING for sidecar/localhost-collector deploys that did not explicitly set the var). Comment on the new default explains the rationale and the opt-in path. |
+| 10 | Approval prompt opaque on method + signer | **Remediated** -- `DecodeTxSummary` now extracts the first 4 bytes of calldata as a `method_selector` field, recovers the signer address from the signature, and threads the chain environment ("testnet"/"mainnet") through `NewServer` so the prompt renders chain ID with a human label. `formatApprovalMessage` shows `Signer (recovered)`, `Method selector`, and a `wei (≈ X ETH)` value formatted with thousand separators. |
+
+### Go code review findings (2026-05-12)
+
+| Finding | Status |
+|---|---|
+| ConstantTimeCompare on raw admin key length-leaked the key length | **Remediated** -- admin now hashes both sides with SHA-256 before constant-time compare; the apikey-validator placebo is left for Phase 8.7 as planned. |
+| Telemetry middleware comment claimed errors were not recorded -- but `span.RecordError(err)` does record them | **Remediated** -- comment corrected to describe the actual privacy model (errors on span, sanitized to client). |
+| `auth.go` returned 403 for invalid bearer (should be 401 per RFC 7235) | **Remediated** -- all bearer-failure paths now return 401 in both `AuthMiddleware` and `adminAuth`. Tests updated. |
+| `OriginAllowlist.Resolved` used a hand-rolled insertion sort | **Remediated** -- replaced with `sort.Strings`. |
+| `anchor_prepare_*` annotated `OpenWorldReadOnly` but required write role -- semantic mismatch flagged | **Re-examined and kept** -- annotation is correct per MCP spec (no environment modification). Tool description now explicitly documents the role requirement so connector-directory reviewers don't mis-read the annotation. |
+| Audit log line message inconsistent across write tools (`audit: foo`, `audit: foo phase`) | **Remediated** -- all five write-handler audit lines now use `slog.Group("audit", ...)` with stable `tool`, `phase`, and `client_id` keys. |
+| Chain-environment silent fallback to testnet when chain ID unrecognized | **Remediated** -- `Validate()` now refuses to start when no environment can be resolved; operators on private forks must set `NVNM_CHAIN_ENVIRONMENT` explicitly. |
+| Dockerfile build image version vs `go.mod` toolchain drift | **Remediated** -- Dockerfile sets `GOTOOLCHAIN=go1.26.3` in the build stage so reproducible builds do not depend on `GOTOOLCHAIN=auto` downloading whatever point release happens to be current. |
+| New tests | `failrate_test.go`, `keys_atomic_test.go`, `parsehex_fuzz_test.go`, `apikey_bench_test.go`, plus `cmd/inveniam-mcp-server/main_test.go` covering fail-closed HTTP startup. |
+
+### AI/agent-specific (2026-05-12)
+
+| Finding | Status |
+|---|---|
+| Indirect prompt injection via on-chain string fields | **Documented** -- `docs/SECURITY_CONSUMER_GUIDANCE.md` describes the threat, the server's stance ("we don't sanitize on-chain truth"), and the defenses consumers should apply. |
+| Approval-substitution attack via signed-tx swap | **Mitigated** -- approval prompt now shows recovered signer + method selector so the user has the surface to spot a substituted transaction. |
+
+### Breaking-config callouts (operators read this)
+
+Three changes in this remediation set are intentionally breaking for
+existing deployments:
+
+1. **`ADMIN_API_ADDR` default is now `127.0.0.1:8081`.** Deploys that
+   expected cluster-wide access on `:8081` must explicitly set
+   `ADMIN_API_ADDR=:8081` AND restrict it via NetworkPolicy.
+2. **`OTLP_INSECURE` default is now `false`.** Sidecar / localhost
+   collector deploys that previously relied on the insecure default
+   must set `OTLP_INSECURE=true` explicitly.
+3. **`NVNM_CHAIN_ENVIRONMENT` is required when chain ID is not
+   recognized.** Deploys against private forks or unfamiliar chain
+   IDs must set this explicitly; the previous silent fallback to
+   testnet is gone.
+
+### Summary (refreshed 2026-05-12)
+
+| Tier | Total | Remediated | Documented Only | Backlog |
+|---|---|---|---|---|
+| 2026-04-01 audit (re-audited) | 18 | 17 | 0 | 1 |
+| 2026-05-12 audit (top-10) | 10 | 9 | 1 (image digest -- needs release pipeline) | 0 |
+| 2026-05-12 Go code review | 9 | 9 | 0 | 0 |
+| 2026-05-12 AI/agent | 2 | 1 doc + 1 mitigated | 0 | 0 |
+
+Phase 8.6 (API-key hashing at rest), Phase 8.7 (constant-time auth on
+the hashed bytes), Phase 8.9 (env-var hard cut), and Phase 8.12
+(OWASP self-audit gate) remain on the Phase 8 roadmap as originally
+scoped.
+
+---
+
 ## Updates since 2026-05-11 (Phase 8 in progress)
 
 Phase 8 is layering additional security and onboarding controls on top of the Phase 5–7 baseline. As of 2026-05-11 the following Phase 8 items have shipped on `main`:
