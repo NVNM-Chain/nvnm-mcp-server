@@ -2,6 +2,11 @@ FROM golang:1.26.2-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739
 
 ARG TARGETARCH
 
+# Pin the toolchain to the version in go.mod for reproducible builds.
+# Without this, GOTOOLCHAIN=auto would silently download whatever
+# point release happens to be current at build time.
+ENV GOTOOLCHAIN=go1.26.3
+
 WORKDIR /build
 
 COPY go.mod go.sum ./
