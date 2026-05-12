@@ -29,6 +29,23 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+    # Admin REST (port 8081) is INTENTIONALLY OMITTED. The admin key
+    # creates API keys, sets WriteApproval=auto, and assigns admin
+    # roles -- it is the master key. The server binds the admin
+    # listener to 127.0.0.1 by default; operators that flip
+    # ADMIN_API_ADDR=:8081 for in-cluster admin access should add a
+    # narrow ingress rule here scoped to ops tooling, NOT "from: []".
+    # Example:
+    #   - from:
+    #       - namespaceSelector:
+    #           matchLabels:
+    #             kubernetes.io/metadata.name: ops-tooling
+    #         podSelector:
+    #           matchLabels:
+    #             app.kubernetes.io/name: inveniam-keymgmt
+    #     ports:
+    #       - protocol: TCP
+    #         port: 8081
   egress:
     # Outbound to EVM RPC (HTTPS)
     - to: []

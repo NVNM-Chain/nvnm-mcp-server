@@ -25,6 +25,15 @@ spec:
         runAsGroup: 65532
       containers:
         - name: inveniam-mcp-server
+          # Pin to an immutable digest in production. ":latest" is a
+          # mutable tag; a registry-side overwrite or supply-chain push
+          # silently propagates on every pod restart. Generate the
+          # digest from the signed release image and substitute below:
+          #   image: ghcr.io/inveniamcapital/inveniam-mcp-server@sha256:<digest>
+          # The Dockerfile already digest-pins both base images; the
+          # deployment is the missing link in the chain. CI does not
+          # yet push a digest-stable image, so :latest is left here
+          # explicitly as a TODO for the release pipeline (#image-pin).
           image: ghcr.io/inveniamcapital/inveniam-mcp-server:latest
           imagePullPolicy: IfNotPresent
           args:
@@ -36,8 +45,24 @@ spec:
             - name: metrics
               containerPort: 9090
           envFrom:
+            # Non-sensitive values: chain ID, addresses, ports, timeouts.
             - configMapRef:
                 name: inveniam-mcp-server-config
+            # Sensitive values: RPC URL, MCP_API_KEY*, ADMIN_API_KEY,
+            # FusionAuth IDs. See secret.yaml.example. Operators that
+            # use FusionAuth instead of file-backed API keys can omit
+            # the keys-volume mount below.
+            - secretRef:
+                name: inveniam-mcp-server-secret
+                optional: true
+          volumeMounts:
+            # The API keys file is mounted read-only from a separate
+            # Secret. The mount path matches MCP_API_KEYS_FILE in the
+            # Secret. Optional so deployments using AUTH_PROVIDER=
+            # fusionauth do not need the keys Secret.
+            - name: api-keys
+              mountPath: /var/run/secrets/inveniam
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /healthz
@@ -63,3 +88,9 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: api-keys
+          secret:
+            secretName: inveniam-mcp-server-keys # pragma: allowlist secret -- K8s API field name, not a credential value
+            optional: true
+            defaultMode: 256 # 0o400 decimal: read-only for owner only

@@ -36,6 +36,9 @@ Thumbs.db
 .mcp-keys.json
 test_oauth.sh
 
+# Operator-local K8s secrets (the .example file IS committed)
+deploy/k8s/secret.yaml
+
 # Lint cache
 .golangci-lint-cache/
 
