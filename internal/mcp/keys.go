@@ -213,12 +213,23 @@ func withExclusiveLock(path string, fn func() error) error {
 	}
 	defer f.Close()
 
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	// int(f.Fd()) is the standard Go pattern for passing a file
+	// descriptor to syscall wrappers; the uintptr->int conversion
+	// cannot meaningfully overflow on any supported platform since
+	// file descriptors are small non-negative integers from the
+	// kernel.
+	//
+	// Local golangci-lint (v2.12) does not fire gosec G115 here,
+	// but CI runs v2.11 which does. The "nolintlint" suppression
+	// hides the "unused directive" complaint from the local
+	// version so both can be satisfied with the same source.
+	fd := int(f.Fd()) //nolint:gosec,nolintlint // fd pattern; CI/local lint skew
+	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("acquire exclusive lock on keys file (another process holds it?): %w", err)
 	}
 	// Unlock failure on shutdown is not actionable; the OS releases
 	// the lock when the fd closes via the deferred Close above.
-	defer func() { _ = unix.Flock(int(f.Fd()), unix.LOCK_UN) }() //nolint:errcheck // see comment
+	defer func() { _ = unix.Flock(fd, unix.LOCK_UN) }() //nolint:errcheck // see comment
 
 	return fn()
 }
