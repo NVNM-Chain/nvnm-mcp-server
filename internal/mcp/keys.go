@@ -4,18 +4,41 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
 )
 
+// keyPrefixLen is the number of raw-key characters captured as
+// KeyPrefix at creation time, for operator-visible listings. 8 chars
+// of a 43-char base64url-encoded 32-byte key keeps enough information
+// for visual recognition without leaking the digest's preimage to a
+// reasonable degree (43 chars * 6 bits = 258 bits of entropy; the
+// prefix discloses 8*6 = 48 bits, leaving ~210 unknown).
+const keyPrefixLen = 8
+
 // KeyEntry represents a single API key with its associated client identity.
+//
+// Phase 8.6 changed the on-disk and in-memory representation:
+//   - KeyHash (sha256 hex) is the primary identifier and the index key.
+//   - KeyPrefix (first 8 chars of the raw key at creation) supports
+//     operator-visible listings.
+//   - Key is retained ONLY as a load-only legacy field for one-shot
+//     migration of pre-8.6 key stores. After migration runs it is
+//     cleared and never written back. New code (in production, not
+//     tests-of-migration) must not set this field; use NewKeyEntry.
 type KeyEntry struct {
 	ID            string    `json:"id"`
-	Key           string    `json:"key"`
+	Key           string    `json:"key,omitempty"`
+	KeyHash       string    `json:"key_hash,omitempty"`
+	KeyPrefix     string    `json:"key_prefix,omitempty"`
 	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 	WriteApproval string    `json:"write_approval,omitempty"`
@@ -24,48 +47,120 @@ type KeyEntry struct {
 	Roles []string `json:"roles,omitempty"`
 }
 
-// KeyStore holds a set of API keys indexed by the raw key string for O(1) lookup.
-type KeyStore struct {
-	byKey map[string]*KeyEntry
+// NewKeyEntry is the only constructor for KeyEntry in production code.
+// It computes the hash and prefix once and never retains the raw key.
+// Direct KeyEntry literals with Key: set are reserved for the migration
+// helper in this file and the migration regression tests; CI should
+// grep-enforce that constraint.
+func NewKeyEntry(id, rawKey, writeApproval string, roles []string) KeyEntry {
+	return KeyEntry{
+		ID:            id,
+		KeyHash:       auth.HashKey(rawKey),
+		KeyPrefix:     keyPrefixOf(rawKey),
+		Enabled:       true,
+		CreatedAt:     time.Now().UTC(),
+		WriteApproval: writeApproval,
+		Roles:         roles,
+	}
 }
 
-// NewKeyStore builds a KeyStore from a slice of key entries.
-// Only enabled keys are indexed.
+func keyPrefixOf(rawKey string) string {
+	if len(rawKey) <= keyPrefixLen {
+		return rawKey
+	}
+	return rawKey[:keyPrefixLen] + "..."
+}
+
+// KeyStore indexes enabled keys by their sha256-hex hash for O(1)
+// lookup. Lookup callers pass the raw token; the store hashes it
+// internally before probing the map. Raw key bytes are not retained.
+type KeyStore struct {
+	byHash map[string]*KeyEntry
+}
+
+// NewKeyStore builds a KeyStore from a slice of key entries. Entries
+// with a raw Key field but no KeyHash (the pre-8.6 on-disk shape) are
+// normalized in place via migrateLegacyEntries before indexing; the
+// returned KeyStore is always hash-indexed.
+//
+// Only enabled entries are indexed.
 func NewKeyStore(entries []KeyEntry) *KeyStore {
-	ks := &KeyStore{byKey: make(map[string]*KeyEntry, len(entries))}
+	_, _ = migrateLegacyEntries(entries) // normalizes in place
+	ks := &KeyStore{byHash: make(map[string]*KeyEntry, len(entries))}
 	for i := range entries {
-		if entries[i].Enabled {
-			ks.byKey[entries[i].Key] = &entries[i]
+		if entries[i].Enabled && entries[i].KeyHash != "" {
+			ks.byHash[entries[i].KeyHash] = &entries[i]
 		}
 	}
 	return ks
 }
 
-// NewSingleKeyStore creates a KeyStore from a single legacy MCP_API_KEY value.
-// The client identity is "static-key".
-func NewSingleKeyStore(apiKey string) *KeyStore {
-	entry := KeyEntry{
-		ID:        "static-key",
-		Key:       apiKey,
-		Enabled:   true,
-		CreatedAt: time.Now(),
+// migrateLegacyEntries normalizes any pre-8.6 entries in place: it
+// computes KeyHash and KeyPrefix from the raw Key, then clears Key.
+// Returns (true, count) when at least one entry was rewritten so the
+// caller can decide whether to opportunistically re-save the file.
+//
+// Entries that already have KeyHash set are left untouched (including
+// their Key field -- a no-op on the re-load path keeps idempotence
+// even if a partially-migrated file makes it to disk).
+func migrateLegacyEntries(entries []KeyEntry) (changed bool, count int) {
+	for i := range entries {
+		if entries[i].KeyHash != "" {
+			continue
+		}
+		if entries[i].Key == "" {
+			// Entry has neither hash nor raw key. It cannot
+			// authenticate anything; leave it for the operator to
+			// notice and clean up rather than silently dropping it.
+			continue
+		}
+		entries[i].KeyHash = auth.HashKey(entries[i].Key)
+		if entries[i].KeyPrefix == "" {
+			entries[i].KeyPrefix = keyPrefixOf(entries[i].Key)
+		}
+		entries[i].Key = ""
+		changed = true
+		count++
 	}
-	return NewKeyStore([]KeyEntry{entry})
+	return changed, count
 }
 
-// Lookup returns the KeyEntry for the given raw API key, or nil if not found
-// (or disabled).
+// Lookup returns the KeyEntry whose KeyHash matches sha256(rawKey),
+// or nil if no enabled entry matches. The raw key is hashed once per
+// call; the input string is otherwise not retained.
 func (ks *KeyStore) Lookup(rawKey string) *KeyEntry {
-	return ks.byKey[rawKey]
+	return ks.byHash[auth.HashKey(rawKey)]
 }
 
 // Empty returns true if the store has no active keys.
 func (ks *KeyStore) Empty() bool {
-	return len(ks.byKey) == 0
+	return len(ks.byHash) == 0
 }
 
-// LoadKeysFile reads a JSON array of KeyEntry from the given path.
+// LoadKeysFile reads a JSON array of KeyEntry from the given path. If
+// the primary file is unparseable, it falls back to reading
+// <path>.tmp -- a remnant of an interrupted SaveKeysFile rename --
+// before returning the original parse error. This is best-effort
+// recovery; nothing is mutated.
 func LoadKeysFile(path string) ([]KeyEntry, error) {
+	entries, primaryErr := loadKeysFromPath(path)
+	if primaryErr == nil {
+		return entries, nil
+	}
+
+	// The primary file may be a malformed leftover of an interrupted
+	// SaveKeysFile (write to .tmp, fsync, rename). The .tmp side
+	// would have the *new* contents in that scenario.
+	tmpPath := path + ".tmp"
+	if _, statErr := os.Stat(tmpPath); statErr == nil {
+		if tmpEntries, tmpErr := loadKeysFromPath(tmpPath); tmpErr == nil {
+			return tmpEntries, nil
+		}
+	}
+	return nil, primaryErr
+}
+
+func loadKeysFromPath(path string) ([]KeyEntry, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is operator-controlled config value
 	if err != nil {
 		return nil, fmt.Errorf("read keys file: %w", err)
@@ -78,16 +173,57 @@ func LoadKeysFile(path string) ([]KeyEntry, error) {
 }
 
 // SaveKeysFile writes a JSON array of KeyEntry to the given path
-// atomically. The new contents are written to a sibling temp file,
-// fsync'd, and renamed over the target. A mid-write crash leaves either
-// the previous file intact or the temp file orphaned -- never a
-// truncated target.
+// atomically and with an advisory exclusive lock held during the
+// write. The atomic write path is tmp file -> fsync -> rename; a
+// mid-write crash leaves either the previous file intact or the temp
+// file orphaned. The flock guards against two cooperating processes
+// (admin CLI + running server) overwriting each other when both
+// honor the lock; a non-cooperating process can still race.
+//
+// The advisory lock is taken on the target file when it exists
+// (LOCK_EX | LOCK_NB so a stuck holder fails fast rather than
+// indefinitely blocking startup) and released when the function
+// returns. If the target file does not exist (first write), the
+// caller's filesystem isolation is the only serialization.
 func SaveKeysFile(path string, entries []KeyEntry) error {
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal keys: %w", err)
 	}
 
+	if lockErr := withExclusiveLock(path, func() error {
+		return writeKeysAtomic(path, data)
+	}); lockErr != nil {
+		return lockErr
+	}
+	return nil
+}
+
+// withExclusiveLock acquires LOCK_EX | LOCK_NB on path (if it exists)
+// for the duration of fn. If path does not exist, fn runs unguarded.
+func withExclusiveLock(path string, fn func() error) error {
+	// path is the operator-supplied MCP_API_KEYS_FILE; not user input.
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600) //nolint:gosec // operator-controlled config path
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// First write; no existing file to lock against.
+			return fn()
+		}
+		return fmt.Errorf("open keys file for lock: %w", err)
+	}
+	defer f.Close()
+
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		return fmt.Errorf("acquire exclusive lock on keys file (another process holds it?): %w", err)
+	}
+	// Unlock failure on shutdown is not actionable; the OS releases
+	// the lock when the fd closes via the deferred Close above.
+	defer func() { _ = unix.Flock(int(f.Fd()), unix.LOCK_UN) }() //nolint:errcheck // see comment
+
+	return fn()
+}
+
+func writeKeysAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -124,6 +260,14 @@ func SaveKeysFile(path string, entries []KeyEntry) error {
 	return nil
 }
 
+// preMigrationBackupSuffix is the suffix appended to the keys-file
+// path when NewManagedKeyStore detects a pre-8.6 file and is about to
+// rewrite it in hashed form. The backup is written ONCE: if a file
+// with this suffix already exists from a prior migration, it is left
+// alone so the truest "what did we have before hashing ever ran"
+// record is preserved across multiple restart cycles.
+const preMigrationBackupSuffix = ".pre-migration"
+
 // GenerateKey produces a cryptographically random 32-byte base64url key.
 func GenerateKey() (string, error) {
 	b := make([]byte, 32)
@@ -143,7 +287,9 @@ func NewKeyLookupAdapter(store *ManagedKeyStore) *KeyLookupAdapter {
 	return &KeyLookupAdapter{store: store}
 }
 
-// Lookup returns a KeyResult for the given raw API key, or nil if not found.
+// Lookup returns a KeyResult for the given raw API key, or nil if not
+// found. The raw key is hashed by the underlying KeyStore; this
+// adapter does not retain the input.
 func (a *KeyLookupAdapter) Lookup(rawKey string) *auth.KeyResult {
 	entry := a.store.Lookup(rawKey)
 	if entry == nil {
@@ -151,7 +297,7 @@ func (a *KeyLookupAdapter) Lookup(rawKey string) *auth.KeyResult {
 	}
 	return &auth.KeyResult{
 		ID:            entry.ID,
-		Key:           entry.Key,
+		KeyHash:       entry.KeyHash,
 		WriteApproval: entry.WriteApproval,
 		Roles:         entry.Roles,
 	}

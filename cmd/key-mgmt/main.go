@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	mcpkeys "github.com/inveniam/nvnm-mcp-server/internal/mcp"
 )
@@ -186,8 +185,8 @@ func createKey(path, clientID, writeApproval string, roles []string) error {
 		return err
 	}
 
-	for _, e := range entries {
-		if e.ID == clientID {
+	for i := range entries {
+		if entries[i].ID == clientID {
 			return fmt.Errorf(
 				"client %q (use 'enable' to re-activate a disabled key): %w",
 				clientID, errClientExists,
@@ -200,14 +199,7 @@ func createKey(path, clientID, writeApproval string, roles []string) error {
 		return err
 	}
 
-	entries = append(entries, mcpkeys.KeyEntry{
-		ID:            clientID,
-		Key:           key,
-		Enabled:       true,
-		CreatedAt:     time.Now().UTC(),
-		WriteApproval: writeApproval,
-		Roles:         roles,
-	})
+	entries = append(entries, mcpkeys.NewKeyEntry(clientID, key, writeApproval, roles))
 
 	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
 		return err
@@ -330,14 +322,21 @@ func listKeys(path string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(w, "CLIENT ID\tSTATUS\tWRITE APPROVAL\tROLES\tCREATED\tKEY PREFIX\n")
 	fmt.Fprintf(w, "---------\t------\t--------------\t-----\t-------\t----------\n")
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		status := "enabled"
 		if !e.Enabled {
 			status = "disabled"
 		}
-		prefix := e.Key
-		if len(prefix) > 8 {
-			prefix = prefix[:8] + "..."
+		prefix := e.KeyPrefix
+		if prefix == "" && e.Key != "" {
+			// Pre-8.6 entry that has not yet been migrated. Render a
+			// best-effort prefix from the raw key so listings remain
+			// useful before the next migration cycle.
+			prefix = e.Key
+			if len(prefix) > 8 {
+				prefix = prefix[:8] + "..."
+			}
 		}
 		approval := e.WriteApproval
 		if approval == "" {

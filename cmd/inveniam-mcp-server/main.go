@@ -266,7 +266,7 @@ func loadAPIKeys(
 
 	switch {
 	case cfg.APIKeysFile != "":
-		mks, err := mcpserver.NewManagedKeyStore(cfg.APIKeysFile)
+		mks, err := mcpserver.NewManagedKeyStore(cfg.APIKeysFile, logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("load API keys file: %w", err)
 		}
@@ -282,11 +282,7 @@ func loadAPIKeys(
 		managedKeys = mks
 	case cfg.APIKey != "":
 		logger.Info("using single API key from MCP_API_KEY")
-		entry := mcpserver.KeyEntry{
-			ID:      "static-key",
-			Key:     cfg.APIKey,
-			Enabled: true,
-		}
+		entry := mcpserver.NewKeyEntry("static-key", cfg.APIKey, "", nil)
 		managedKeys = mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry})
 	default:
 		if cfg.Transport == "http" {

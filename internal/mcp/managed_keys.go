@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -48,9 +50,31 @@ type ManagedKeyStore struct {
 	path    string
 }
 
-// NewManagedKeyStore loads keys from path (creating an empty store if the file
-// does not exist) and returns a thread-safe managed store.
-func NewManagedKeyStore(path string) (*ManagedKeyStore, error) {
+// NewManagedKeyStore loads keys from path (creating an empty store if
+// the file does not exist) and returns a thread-safe managed store.
+//
+// If the on-disk file contains pre-8.6 entries (raw Key set,
+// KeyHash empty), the store performs a one-shot migration:
+//
+//  1. Write <path>.pre-migration as a verbatim copy of the original
+//     file IF that backup does not already exist. The backup is the
+//     truest "what did we have before any hashing ran" record and is
+//     never overwritten by subsequent migrations.
+//  2. Normalize the in-memory entries (compute KeyHash + KeyPrefix
+//     from raw Key, clear raw Key) via migrateLegacyEntries.
+//  3. Opportunistically re-save the file in the new hashed form.
+//
+// The opportunistic re-save is best-effort: on save failure we log
+// at WARN level and continue startup. The next admin CRUD will
+// re-persist; in the meantime the in-memory state is correct.
+//
+// The logger argument may be nil; nil-safe via slog's discard
+// handler. Production callers should pass a real logger so the
+// migration INFO/WARN lines reach the operator.
+func NewManagedKeyStore(path string, logger *slog.Logger) (*ManagedKeyStore, error) {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	entries, err := LoadKeysFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -60,11 +84,67 @@ func NewManagedKeyStore(path string) (*ManagedKeyStore, error) {
 		}
 	}
 
+	migrated, count := migrateLegacyEntries(entries)
+	if migrated {
+		if backupErr := writePreMigrationBackup(path); backupErr != nil {
+			// Backup is part of the migration's safety contract;
+			// if we cannot write it, refuse to mutate the live
+			// file. The in-memory state is normalized so auth
+			// keeps working, but disk stays in the pre-migration
+			// shape until the operator clears the issue.
+			logger.Warn("legacy keys file detected but pre-migration backup write failed; "+
+				"skipping disk re-save to preserve the original file",
+				slog.String("path", path),
+				slog.String("backup", path+preMigrationBackupSuffix),
+				slog.String("error", backupErr.Error()),
+				slog.Int("entries", count),
+			)
+		} else if saveErr := SaveKeysFile(path, entries); saveErr != nil {
+			// Backup exists; the live file is still in legacy
+			// shape. In-memory state is normalized so the server
+			// keeps working; next admin CRUD will re-persist.
+			logger.Warn("legacy keys migrated in memory but failed to persist; "+
+				"next admin CRUD will re-save",
+				slog.String("path", path),
+				slog.String("error", saveErr.Error()),
+				slog.Int("entries", count),
+			)
+		} else {
+			logger.Info("legacy keys file migrated to hashed format",
+				slog.String("path", path),
+				slog.String("backup", path+preMigrationBackupSuffix),
+				slog.Int("entries", count),
+			)
+		}
+	}
+
 	return &ManagedKeyStore{
 		store:   NewKeyStore(entries),
 		entries: entries,
 		path:    path,
 	}, nil
+}
+
+// writePreMigrationBackup copies path verbatim to
+// path+preMigrationBackupSuffix IF the backup does not already exist.
+// One-shot: a backup from a prior migration is preserved as the
+// truest pre-hashing record.
+func writePreMigrationBackup(path string) error {
+	backupPath := path + preMigrationBackupSuffix
+	if _, err := os.Stat(backupPath); err == nil {
+		// Backup already exists from a previous migration; leave it alone.
+		return nil
+	}
+	original, err := os.ReadFile(path) //nolint:gosec // operator-controlled path
+	if err != nil {
+		return fmt.Errorf("read original for backup: %w", err)
+	}
+	// backupPath = path + ".pre-migration"; not a separately-tainted input.
+	//nolint:gosec // backupPath is derived from operator-controlled path
+	if err := os.WriteFile(backupPath, original, 0o600); err != nil {
+		return fmt.Errorf("write backup: %w", err)
+	}
+	return nil
 }
 
 // NewManagedKeyStoreFromEntries builds a ManagedKeyStore from pre-loaded entries.
@@ -109,8 +189,8 @@ func (m *ManagedKeyStore) Create(clientID, writeApproval string, roles []string)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for _, e := range m.entries {
-		if e.ID == clientID {
+	for i := range m.entries {
+		if m.entries[i].ID == clientID {
 			return nil, fmt.Errorf("client %q: %w", clientID, ErrClientExists)
 		}
 	}
@@ -120,14 +200,10 @@ func (m *ManagedKeyStore) Create(clientID, writeApproval string, roles []string)
 		return nil, err
 	}
 
-	entry := KeyEntry{
-		ID:            clientID,
-		Key:           rawKey,
-		Enabled:       true,
-		CreatedAt:     time.Now().UTC(),
-		WriteApproval: writeApproval,
-		Roles:         roles,
-	}
+	entry := NewKeyEntry(clientID, rawKey, writeApproval, roles)
+	// NewKeyEntry captures KeyPrefix from the raw key once; the raw
+	// key is returned exactly once via KeyCreateResult.Key and never
+	// retained on the entry.
 
 	updated := append(copyEntries(m.entries), entry)
 	if err := SaveKeysFile(m.path, updated); err != nil {
@@ -216,8 +292,8 @@ func (m *ManagedKeyStore) ActiveCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	count := 0
-	for _, e := range m.entries {
-		if e.Enabled {
+	for i := range m.entries {
+		if m.entries[i].Enabled {
 			count++
 		}
 	}
@@ -232,17 +308,13 @@ func (m *ManagedKeyStore) TotalCount() int {
 }
 
 func summarize(e *KeyEntry) KeySummary {
-	prefix := e.Key
-	if len(prefix) > 8 {
-		prefix = prefix[:8] + "..."
-	}
 	return KeySummary{
 		ID:            e.ID,
 		Enabled:       e.Enabled,
 		CreatedAt:     e.CreatedAt,
 		WriteApproval: e.WriteApproval,
 		Roles:         e.Roles,
-		KeyPrefix:     prefix,
+		KeyPrefix:     e.KeyPrefix,
 	}
 }
 

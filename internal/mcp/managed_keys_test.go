@@ -13,7 +13,7 @@ func tempKeysFile(t *testing.T) string {
 
 func TestManagedKeyStore_CreateAndLookup(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestManagedKeyStore_CreateAndLookup(t *testing.T) {
 
 func TestManagedKeyStore_CreateDuplicate(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestManagedKeyStore_CreateDuplicate(t *testing.T) {
 
 func TestManagedKeyStore_List(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestManagedKeyStore_List(t *testing.T) {
 
 func TestManagedKeyStore_UpdateEnabled(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestManagedKeyStore_UpdateEnabled(t *testing.T) {
 
 func TestManagedKeyStore_UpdateApproval(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestManagedKeyStore_UpdateApproval(t *testing.T) {
 
 func TestManagedKeyStore_UpdateMissing(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestManagedKeyStore_UpdateMissing(t *testing.T) {
 
 func TestManagedKeyStore_Delete(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestManagedKeyStore_Delete(t *testing.T) {
 
 func TestManagedKeyStore_DeleteMissing(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestManagedKeyStore_DeleteMissing(t *testing.T) {
 func TestManagedKeyStore_PersistenceAcrossReloads(t *testing.T) {
 	path := tempKeysFile(t)
 
-	mks1, err := NewManagedKeyStore(path)
+	mks1, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestManagedKeyStore_PersistenceAcrossReloads(t *testing.T) {
 	}
 	rawKey := result.Key
 
-	mks2, err := NewManagedKeyStore(path)
+	mks2, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestManagedKeyStore_PersistenceAcrossReloads(t *testing.T) {
 
 func TestManagedKeyStore_Counters(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestManagedKeyStore_Counters(t *testing.T) {
 
 func TestManagedKeyStore_EmptyOnNewFile(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestManagedKeyStore_EmptyOnNewFile(t *testing.T) {
 
 func TestManagedKeyStore_FilePermissions(t *testing.T) {
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

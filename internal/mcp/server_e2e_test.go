@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	defitypes "github.com/defiweb/go-eth/types"
 	defiwallet "github.com/defiweb/go-eth/wallet"
@@ -367,17 +366,29 @@ func TestSafeForClient_PassesThroughApprovalErrors(t *testing.T) {
 // API key authentication E2E tests
 // ---------------------------------------------------------------------------
 
-// testKeyLookup adapts a slice of KeyEntry to auth.KeyLookup for tests.
+// testKeyLookup adapts a slice of KeyEntry to auth.KeyLookup for
+// tests. Fixtures are expected to be built via NewKeyEntry so each
+// entry's KeyHash is populated; legacy entries with only the raw Key
+// field are also tolerated and hashed on the fly so the migration
+// regression tests can exercise both shapes.
 type testKeyLookup struct {
 	entries []KeyEntry
 }
 
 func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
+	wantHash := auth.HashKey(rawKey)
 	for i := range t.entries {
-		if t.entries[i].Enabled && t.entries[i].Key == rawKey {
+		if !t.entries[i].Enabled {
+			continue
+		}
+		entryHash := t.entries[i].KeyHash
+		if entryHash == "" && t.entries[i].Key != "" {
+			entryHash = auth.HashKey(t.entries[i].Key)
+		}
+		if entryHash == wantHash {
 			return &auth.KeyResult{
 				ID:            t.entries[i].ID,
-				Key:           t.entries[i].Key,
+				KeyHash:       entryHash,
 				WriteApproval: t.entries[i].WriteApproval,
 				Roles:         t.entries[i].Roles,
 			}
@@ -387,8 +398,8 @@ func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
 }
 
 func (t *testKeyLookup) Empty() bool {
-	for _, e := range t.entries {
-		if e.Enabled {
+	for i := range t.entries {
+		if t.entries[i].Enabled {
 			return false
 		}
 	}
@@ -485,9 +496,7 @@ func startAuthTestServer(
 }
 
 func TestE2E_Auth_ValidKey_ToolCallSucceeds(t *testing.T) {
-	keys := []KeyEntry{
-		{ID: "test-client", Key: "valid-key-123", Enabled: true, CreatedAt: time.Now()},
-	}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{keys: keys, approvalDefault: ApprovalAuto}, "valid-key-123", nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -506,9 +515,7 @@ func TestE2E_Auth_ValidKey_ToolCallSucceeds(t *testing.T) {
 }
 
 func TestE2E_Auth_InvalidKey_ConnectionFails(t *testing.T) {
-	keys := []KeyEntry{
-		{ID: "test-client", Key: "valid-key-123", Enabled: true, CreatedAt: time.Now()},
-	}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
 	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "wrong-key-456", nil)
 	if err == nil {
 		t.Fatal("expected connection to fail with invalid key")
@@ -516,9 +523,7 @@ func TestE2E_Auth_InvalidKey_ConnectionFails(t *testing.T) {
 }
 
 func TestE2E_Auth_MissingKey_ConnectionFails(t *testing.T) {
-	keys := []KeyEntry{
-		{ID: "test-client", Key: "valid-key-123", Enabled: true, CreatedAt: time.Now()},
-	}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
 	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "", nil)
 	if err == nil {
 		t.Fatal("expected connection to fail with missing key")
@@ -526,9 +531,11 @@ func TestE2E_Auth_MissingKey_ConnectionFails(t *testing.T) {
 }
 
 func TestE2E_Auth_DisabledKey_ConnectionFails(t *testing.T) {
+	disabled := NewKeyEntry("disabled-client", "disabled-key", "", nil)
+	disabled.Enabled = false
 	keys := []KeyEntry{
-		{ID: "active-client", Key: "active-key", Enabled: true, CreatedAt: time.Now()},
-		{ID: "disabled-client", Key: "disabled-key", Enabled: false, CreatedAt: time.Now()},
+		NewKeyEntry("active-client", "active-key", "", nil),
+		disabled,
 	}
 	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "disabled-key", nil)
 	if err == nil {
@@ -537,14 +544,7 @@ func TestE2E_Auth_DisabledKey_ConnectionFails(t *testing.T) {
 }
 
 func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
-	keys := []KeyEntry{
-		{
-			ID:      "reader-only",
-			Key:     "reader-key-123",
-			Enabled: true,
-			Roles:   []string{"reader"},
-		},
-	}
+	keys := []KeyEntry{NewKeyEntry("reader-only", "reader-key-123", "", []string{"reader"})}
 	session, err := startAuthTestServer(t, authE2EConfig{
 		keys:            keys,
 		approvalDefault: ApprovalAuto,
@@ -583,15 +583,8 @@ func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
 }
 
 func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
-	// API key with no roles should have no RBAC enforcement
-	keys := []KeyEntry{
-		{
-			ID:      "no-role-client",
-			Key:     "no-role-key",
-			Enabled: true,
-			// Roles intentionally omitted
-		},
-	}
+	// API key with no roles should have no RBAC enforcement.
+	keys := []KeyEntry{NewKeyEntry("no-role-client", "no-role-key", "", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
 		keys:            keys,
 		approvalDefault: ApprovalAuto,
@@ -614,14 +607,7 @@ func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
 }
 
 func TestE2E_RBAC_GrantRoleRequiresAdmin(t *testing.T) {
-	keys := []KeyEntry{
-		{
-			ID:      "writer-client",
-			Key:     "writer-key",
-			Enabled: true,
-			Roles:   []string{"writer"},
-		},
-	}
+	keys := []KeyEntry{NewKeyEntry("writer-client", "writer-key", "", []string{"writer"})}
 	session, err := startAuthTestServer(t, authE2EConfig{
 		keys:            keys,
 		approvalDefault: ApprovalAuto,
@@ -672,12 +658,7 @@ func TestE2E_Auth_NoKeysConfigured_NoAuthRequired(t *testing.T) {
 func TestE2E_PerClientApproval_AutoOverridesGlobalRequired(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
-	keys := []KeyEntry{
-		{
-			ID: "auto-client", Key: "auto-key-123", Enabled: true,
-			CreatedAt: time.Now(), WriteApproval: ApprovalAuto,
-		},
-	}
+	keys := []KeyEntry{NewKeyEntry("auto-client", "auto-key-123", ApprovalAuto, nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
 		keys:            keys,
 		approvalDefault: ApprovalRequired,
@@ -701,12 +682,7 @@ func TestE2E_PerClientApproval_AutoOverridesGlobalRequired(t *testing.T) {
 func TestE2E_PerClientApproval_RequiredOverridesGlobalAuto(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
-	keys := []KeyEntry{
-		{
-			ID: "strict-client", Key: "strict-key-123", Enabled: true,
-			CreatedAt: time.Now(), WriteApproval: ApprovalRequired,
-		},
-	}
+	keys := []KeyEntry{NewKeyEntry("strict-client", "strict-key-123", ApprovalRequired, nil)}
 
 	elicitCalled := false
 	session, err := startAuthTestServer(t, authE2EConfig{
@@ -740,9 +716,7 @@ func TestE2E_PerClientApproval_RequiredOverridesGlobalAuto(t *testing.T) {
 func TestE2E_Auth_ValidKey_SendTx_WithElicitation(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
-	keys := []KeyEntry{
-		{ID: "write-client", Key: "write-key-789", Enabled: true, CreatedAt: time.Now()},
-	}
+	keys := []KeyEntry{NewKeyEntry("write-client", "write-key-789", "", nil)}
 
 	var capturedMessage string
 	session, err := startAuthTestServer(t, authE2EConfig{

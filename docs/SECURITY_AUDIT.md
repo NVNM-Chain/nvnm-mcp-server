@@ -812,12 +812,101 @@ existing deployments:
 | 2026-05-12 Go code review | 9 | 9 | 0 | 0 |
 | 2026-05-12 AI/agent | 2 | 1 doc + 1 mitigated | 0 | 0 |
 
-Phase 8.6 (API-key hashing at rest), Phase 8.7 (constant-time auth on
-the hashed bytes), Phase 8.9 (env-var hard cut), and Phase 8.12
-(OWASP self-audit gate) remain on the Phase 8 roadmap as originally
-scoped.
+Phase 8.6 (API-key hashing at rest) and Phase 8.7 (constant-time auth
+on the hashed bytes) shipped together on 2026-05-13 -- see the entry
+below. Phase 8.9 (env-var hard cut) and Phase 8.12 (OWASP self-audit
+gate) remain on the Phase 8 roadmap as originally scoped.
 
 ---
+
+## Updates since 2026-05-13 (Phase 8.6 + 8.7: hashed-at-rest + constant-time auth)
+
+API keys are now stored hashed at rest, indexed by hash in memory,
+and compared by hash bytes under constant time. The earlier
+"hashed at rest" claim in this document was inaccurate until this
+commit -- it now reflects what `main` actually does.
+
+### What changed
+
+| Surface | Before | After |
+|---|---|---|
+| `KeyEntry` on disk | `{id, key (raw), enabled, ...}` | `{id, key_hash (sha256 hex), key_prefix (first 8 chars), enabled, ...}` -- `key` retained only as a load-only legacy field for one-shot migration. |
+| `KeyEntry` in memory | raw `Key` field populated | `Key` field empty post-migration; never re-populated. |
+| `KeyStore` index | `map[rawKey]*KeyEntry` | `map[keyHashHex]*KeyEntry`. `Lookup(rawKey)` hashes the input before probing. |
+| `KeyResult` (auth-package interface) | included raw `Key` field | `Key` removed; `KeyHash` added. The validator never sees a raw key beyond the initial token argument. |
+| `APIKeyValidator.Validate` | `subtle.ConstantTimeCompare(token, entry.Key)` (placebo since map lookup used the same raw bytes) | `subtle.ConstantTimeCompare(HashKey(token), entry.KeyHash)`. Both sides are fixed-length sha256 hex digests, so `ConstantTimeCompare`'s length-mismatch shortcut cannot leak. Miss path burns a placeholder compare to flatten hit/miss timing. |
+| `SaveKeysFile` | atomic tmp+fsync+rename (from 2026-05-12 audit work) | unchanged, plus advisory `flock(LOCK_EX \| LOCK_NB)` while writing, so a key-mgmt CLI and a running server cannot race when both honor the lock. |
+| `LoadKeysFile` | single-path read | on parse failure, falls back to `<path>.tmp` for recovery from an interrupted write (best-effort). |
+| Migration trigger | n/a | `NewManagedKeyStore` detects pre-8.6 entries on first load; writes a one-shot `<path>.pre-migration` backup (never overwritten by subsequent migrations); rewrites the primary file in hashed form; logs INFO on success, WARN on save failure but continues startup. |
+| `KeyEntry` constructor for new keys | direct struct literal with raw `Key` set | `NewKeyEntry(id, rawKey, writeApproval, roles)` -- hashes once, captures prefix, never retains raw key. Production callers (`main.go` single-key path, `Create`, `cmd/key-mgmt`) all routed through this constructor. Direct `KeyEntry{... Key: ...}` literals are confined to `internal/mcp/keys.go` (migration helper) and `internal/mcp/keys_migration_test.go` (migration regression tests). |
+| `summarize` (admin REST `List`) | derived prefix from `e.Key` | reads `e.KeyPrefix` directly; raw-key fallback removed. |
+
+### Migration behavior on first startup against a legacy file
+
+1. `LoadKeysFile` returns entries with raw `Key` populated, no `KeyHash`.
+2. `migrateLegacyEntries` walks the slice in place: for each entry
+   with `Key != "" && KeyHash == ""`, compute hash + prefix, clear
+   `Key`. Returns `(true, count)` so the caller can persist.
+3. `NewManagedKeyStore` writes `<path>.pre-migration` as a verbatim
+   copy of the original file. **One-shot**: if the backup already
+   exists from a prior migration cycle, it is left untouched -- the
+   first backup is the truest "what did we have before hashing ever
+   ran" record.
+4. `SaveKeysFile` rewrites the primary file in hashed form. On
+   failure (read-only FS, permission, etc.), the in-memory state is
+   still normalized so auth keeps working; next admin CRUD will
+   re-persist. Server startup is not failed by a save error.
+5. Subsequent restarts find `KeyHash` already populated; migration
+   is a no-op and no backup is written.
+
+### Migration regression test coverage (`internal/mcp/keys_migration_test.go`)
+
+- `LegacyFileMigratedAndBackedUp` -- a pre-8.6 file is migrated; the
+  one-shot backup contains the original bytes; the primary file
+  contains no raw bearer tokens after the migration; Lookup works
+  post-migration with the raw key as input.
+- `ReloadIsNoop` -- a second `NewManagedKeyStore` on the same path
+  does not overwrite the backup (a sentinel byte string written into
+  the backup file survives) and does not rewrite the primary file.
+- `AlreadyHashedFileUntouched` -- a file written via `NewKeyEntry`
+  produces no backup on load.
+- `InterruptedWriteRecoveredFromTmp` -- a malformed primary + a
+  well-formed `.tmp` produces a recovered load.
+- `LegacyEntryWithoutKeyOrHashSkipped` -- entries with neither raw
+  Key nor KeyHash are preserved in memory (with no way to
+  authenticate) so an operator notices rather than silently losing
+  the entry.
+
+### Constant-time defense detail
+
+The previous `subtle.ConstantTimeCompare(token, entry.Key)` was a
+placebo because the preceding map probe used the same raw bytes as
+the comparison input -- if Lookup returned non-nil, `entry.Key`
+equaled `token` by construction and the compare always returned 1.
+The new path is meaningful: the map probe is by hash, and the
+post-lookup compare is also by hash. Both arguments to
+`ConstantTimeCompare` are fixed-length sha256 hex digests, so the
+"length mismatch returns 0 immediately" shortcut cannot be used to
+probe the digest.
+
+Miss-path timing: the validator now invokes a placeholder constant-
+time compare on the miss path so unknown-key and
+known-key-with-wrong-digest paths spend roughly the same CPU,
+defeating timing-based distinction by a remote attacker.
+
+### Operational notes for operators upgrading
+
+- **Back up `MCP_API_KEYS_FILE` before the first restart on the new
+  binary.** The server writes a `.pre-migration` backup
+  automatically, but an out-of-band copy is cheap insurance.
+- The migration runs once on first restart. After that, the file is
+  in the new hashed shape and the `.pre-migration` backup is left
+  alone forever.
+- If the server logs `legacy keys migrated in memory but failed to
+  persist`, the in-memory state is correct but the disk file is
+  still in the legacy shape. The next admin CRUD will re-persist;
+  if no admin CRUD is expected, fix the underlying filesystem issue
+  and restart the server.
 
 ## Updates since 2026-05-11 (Phase 8 in progress)
 

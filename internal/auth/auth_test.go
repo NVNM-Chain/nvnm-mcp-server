@@ -104,12 +104,26 @@ func TestWriteApprovalFromContext_BackwardCompat(t *testing.T) {
 // APIKeyValidator tests
 // ---------------------------------------------------------------------------
 
+// fakeKeyLookup indexes entries by raw key for test ergonomics. The
+// validator expects KeyResult.KeyHash to be populated and to match
+// HashKey(rawKey); fakeKeyLookup synthesizes it from the map key on
+// each call so test setups don't have to compute hashes manually.
 type fakeKeyLookup struct {
 	entries map[string]*KeyResult
 }
 
 func (f *fakeKeyLookup) Lookup(rawKey string) *KeyResult {
-	return f.entries[rawKey]
+	e, ok := f.entries[rawKey]
+	if !ok {
+		return nil
+	}
+	// Defensive copy with KeyHash synthesized from the raw key.
+	return &KeyResult{
+		ID:            e.ID,
+		KeyHash:       HashKey(rawKey),
+		WriteApproval: e.WriteApproval,
+		Roles:         e.Roles,
+	}
 }
 
 func (f *fakeKeyLookup) Empty() bool {
@@ -118,7 +132,7 @@ func (f *fakeKeyLookup) Empty() bool {
 
 func TestAPIKeyValidator_ValidKey(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
-		"test-key-123": {ID: "client-a", Key: "test-key-123", WriteApproval: "auto"},
+		"test-key-123": {ID: "client-a", WriteApproval: "auto"},
 	}}
 	v := NewAPIKeyValidator(lookup)
 	if v == nil {
@@ -139,7 +153,7 @@ func TestAPIKeyValidator_ValidKey(t *testing.T) {
 
 func TestAPIKeyValidator_InvalidKey(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
-		"real-key": {ID: "client-a", Key: "real-key"},
+		"real-key": {ID: "client-a"},
 	}}
 	v := NewAPIKeyValidator(lookup)
 
@@ -169,7 +183,7 @@ func TestAPIKeyValidator_EmptyLookup(t *testing.T) {
 
 func TestAPIKeyValidator_RolesPropagated(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
-		"key": {ID: "agent", Key: "key", Roles: []string{"writer", "automation"}},
+		"key": {ID: "agent", Roles: []string{"writer", "automation"}},
 	}}
 	v := NewAPIKeyValidator(lookup)
 
@@ -184,7 +198,7 @@ func TestAPIKeyValidator_RolesPropagated(t *testing.T) {
 
 func TestAPIKeyValidator_EmptyRolesNoEnforcement(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
-		"key": {ID: "agent", Key: "key", Roles: nil},
+		"key": {ID: "agent", Roles: nil},
 	}}
 	v := NewAPIKeyValidator(lookup)
 
@@ -199,7 +213,7 @@ func TestAPIKeyValidator_EmptyRolesNoEnforcement(t *testing.T) {
 
 func TestAPIKeyValidator_Close(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
-		"k": {ID: "c", Key: "k"},
+		"k": {ID: "c"},
 	}}
 	v := NewAPIKeyValidator(lookup)
 	if err := v.Close(); err != nil {

@@ -16,7 +16,7 @@ func startAdminTestServer(t *testing.T) (*httptest.Server, *ManagedKeyStore) {
 	t.Helper()
 
 	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path)
+	mks, err := NewManagedKeyStore(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
