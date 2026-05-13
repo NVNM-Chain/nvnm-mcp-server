@@ -29,6 +29,7 @@ type mockEVM struct {
 	logs        []evm.NormalizedLog
 	callResult  []byte
 	sendTxHash  string
+	nonce       uint64 // returned by PendingNonceAt; default 0
 	returnErr   error
 	lastAddress defitypes.Address
 	lastHash    defitypes.Hash
@@ -71,7 +72,7 @@ func (m *mockEVM) FilterLogs(_ context.Context, _ defitypes.FilterLogsQuery) ([]
 	return m.logs, m.returnErr
 }
 func (m *mockEVM) PendingNonceAt(_ context.Context, _ defitypes.Address) (uint64, error) {
-	return 0, m.returnErr
+	return m.nonce, m.returnErr
 }
 func (m *mockEVM) SuggestGasPrice(_ context.Context) (*big.Int, error) {
 	return big.NewInt(0), m.returnErr

@@ -9,6 +9,8 @@ var (
 	ErrInvalidTxHash     = errors.New("invalid transaction hash")
 	ErrInvalidTopics     = errors.New("invalid log topics")
 	ErrInvalidABI        = errors.New("invalid ABI fragment")
+	ErrInvalidSignature  = errors.New("invalid signature")
+	ErrInvalidHash       = errors.New("invalid hash")
 	ErrMissingRequired   = errors.New("missing required parameter")
 	ErrInvalidRegistryID = errors.New("invalid registry ID")
 	ErrInvalidRecordID   = errors.New("invalid record ID")
@@ -61,6 +63,8 @@ func IsInputError(err error) bool {
 		errors.Is(err, ErrInvalidTxHash) ||
 		errors.Is(err, ErrInvalidTopics) ||
 		errors.Is(err, ErrInvalidABI) ||
+		errors.Is(err, ErrInvalidSignature) ||
+		errors.Is(err, ErrInvalidHash) ||
 		errors.Is(err, ErrMissingRequired) ||
 		errors.Is(err, ErrInvalidRegistryID) ||
 		errors.Is(err, ErrInvalidRecordID) ||

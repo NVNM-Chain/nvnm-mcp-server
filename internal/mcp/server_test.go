@@ -34,7 +34,7 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 		},
 	}
 
-	srv := NewServer(evmClient, anchorClient, true, ApprovalRequired, "testnet", nil, testLogger())
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true, ApprovalRequired), nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -58,7 +58,7 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 	return session
 }
 
-func TestE2E_ListTools_Returns16(t *testing.T) {
+func TestE2E_ListTools_Returns21(t *testing.T) {
 	session := startTestServer(t)
 
 	result, err := session.ListTools(ctx, nil)
@@ -66,12 +66,14 @@ func TestE2E_ListTools_Returns16(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	if len(result.Tools) != 16 {
+	// 16 pre-8.8 tools + 5 onboarding tools registered by Phase 8.8.
+	const want = 21
+	if len(result.Tools) != want {
 		names := make([]string, len(result.Tools))
 		for i, tool := range result.Tools {
 			names[i] = tool.Name
 		}
-		t.Errorf("got %d tools, want 16: %v", len(result.Tools), names)
+		t.Errorf("got %d tools, want %d: %v", len(result.Tools), want, names)
 	}
 }
 
@@ -84,6 +86,13 @@ func TestE2E_ListTools_ContainsExpectedNames(t *testing.T) {
 	}
 
 	expected := map[string]bool{
+		// Phase 8.8 onboarding tools.
+		"nvnm_overview":               false,
+		"wallet_status":               false,
+		"nvnm_setup_wizard":           false,
+		"nvnm_setup_verify_hash":      false,
+		"nvnm_setup_verify_signature": false,
+		// EVM reads.
 		"evm_get_chain_id":            false,
 		"evm_get_block":               false,
 		"evm_get_transaction":         false,
@@ -92,11 +101,14 @@ func TestE2E_ListTools_ContainsExpectedNames(t *testing.T) {
 		"evm_get_code":                false,
 		"evm_get_logs":                false,
 		"evm_call_contract":           false,
-		"evm_send_raw_transaction":    false,
-		"anchor_info":                 false,
-		"anchor_get_registry":         false,
-		"anchor_get_registries":       false,
-		"anchor_get_records":          false,
+		// EVM write.
+		"evm_send_raw_transaction": false,
+		// Anchor reads.
+		"anchor_info":           false,
+		"anchor_get_registry":   false,
+		"anchor_get_registries": false,
+		"anchor_get_records":    false,
+		// Anchor writes.
 		"anchor_prepare_add_registry": false,
 		"anchor_prepare_add_record":   false,
 		"anchor_prepare_grant_role":   false,

@@ -85,7 +85,7 @@ func startTestServerWithConfig(
 		approval = ApprovalRequired
 	}
 
-	srv := NewServer(cfg.evmClient, anchorClient, true, approval, "testnet", nil, testLogger())
+	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true, approval), nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -464,7 +464,7 @@ func startAuthTestServer(
 		validator = auth.NewAPIKeyValidator(adapter)
 	}
 
-	srv := NewServer(evmClient, anchorClient, true, approval, "testnet", nil, logger)
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true, approval), nil, logger)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer

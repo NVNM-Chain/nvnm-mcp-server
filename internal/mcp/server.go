@@ -12,6 +12,7 @@ import (
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/inveniam/nvnm-mcp-server/internal/config"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 	"github.com/inveniam/nvnm-mcp-server/internal/version"
 )
@@ -25,18 +26,29 @@ type Server struct {
 }
 
 // NewServer creates a new MCP server and registers all tools.
+// cfg is the full server configuration. The Phase 8.8 onboarding tools
+// (nvnm_overview, wallet_status, nvnm_setup_wizard, the two verify
+// helpers) read several fields off cfg (chain ID, environment label,
+// anchor address, explorer/docs/bridge URLs) so passing the typed
+// struct beats threading individual scalars.
+//
 // When enableWriteTools is true, prepare-sign-submit tools and
-// evm_send_raw_transaction are registered, gated by writeApprovalDefault.
-// chainEnvironment is the operator-facing chain label
-// ("testnet"/"mainnet") rendered in approval prompts so the user does
-// not have to memorize numeric chain IDs.
+// evm_send_raw_transaction are registered, gated by
+// cfg.WriteApprovalDefault. The Phase 8.8 onboarding tools and the
+// read tools register regardless of write-tool gating.
+//
 // Middleware (if any) is registered via AddReceivingMiddleware.
+//
+// Tool-registration order below reflects the conceptual grouping
+// onboarding → reads → writes. tools/list responses are sorted
+// alphabetically by the SDK, so this order is not user-visible today;
+// it is preserved here so a future SDK that respects registration
+// order, or a consumer that reads the source, sees the intended
+// hierarchy.
 func NewServer(
 	evmClient evm.Client,
 	anchorClient anchor.Client,
-	enableWriteTools bool,
-	writeApprovalDefault string,
-	chainEnvironment string,
+	cfg *config.Config,
 	middleware []mcp.Middleware,
 	logger *slog.Logger,
 ) *Server {
@@ -57,14 +69,24 @@ func NewServer(
 		logger:    logger,
 	}
 
+	// 1. Onboarding tools first so they appear at the top of tools/list.
+	registerOverviewTool(mcpSrv, cfg)
+	registerWalletTool(mcpSrv, evmClient, cfg)
+	registerSetupWizardTool(mcpSrv, evmClient, cfg)
+	registerVerifyHashTool(mcpSrv)
+	registerVerifySignatureTool(mcpSrv)
+
+	// 2-3. Existing read tools.
 	registerEVMTools(mcpSrv, evmClient, logger)
 	registerAnchorTools(mcpSrv, anchorClient, logger)
 
-	if enableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, writeApprovalDefault, chainEnvironment, logger)
+	// 4. Write tools, gated.
+	if cfg.EnableWriteTools {
+		chainEnvironment := string(cfg.ChainEnvironment)
+		registerEVMWriteTools(mcpSrv, evmClient, cfg.WriteApprovalDefault, chainEnvironment, logger)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)",
-			slog.String("write_approval_default", writeApprovalDefault),
+			slog.String("write_approval_default", cfg.WriteApprovalDefault),
 			slog.String("chain_environment", chainEnvironment),
 		)
 	}

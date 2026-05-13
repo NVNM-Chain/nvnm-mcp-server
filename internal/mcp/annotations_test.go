@@ -4,7 +4,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -81,7 +83,8 @@ func TestConstructorsReturnDistinctPointers(t *testing.T) {
 
 // expectedToolCount is the number of tools registered when
 // enableWriteTools=true on current main. Bump when adding tools.
-const expectedToolCount = 16
+// 16 pre-8.8 tools + 5 onboarding tools registered by Phase 8.8.
+const expectedToolCount = 21
 
 func TestE2E_AllToolsAreAnnotated(t *testing.T) {
 	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
@@ -176,15 +179,16 @@ func findTool(tools []*mcp.Tool, name string) *mcp.Tool {
 // TestE2E_NextActionTargetsAreRegisteredTools is the static reachability
 // guard for the next_actions envelope pattern.
 //
-// It parses next_actions.go's AST and collects every string literal that
-// appears as the Tool field of a NextAction composite literal, then asserts
-// each is a registered tool name. The check is static (no runtime call
-// graph), so it catches typos and stale references in every branch of
-// every builder -- even branches a unit test happens not to exercise.
+// It parses every non-test .go file in this package, collects every
+// string literal that appears as the Tool field of a NextAction
+// composite literal, then asserts each is a registered tool name. The
+// check is static (no runtime call graph), so it catches typos and
+// stale references in every branch of every hint builder -- even
+// branches no unit test exercises.
 //
-// When a tool is added or renamed, both this test and the builder must
-// be updated together; nothing else enforces the soft contract on hint
-// targets.
+// When a tool is added or renamed, the registered set updates
+// automatically via the live ListTools call; this test will then catch
+// any in-source hint that still points at the old name.
 func TestE2E_NextActionTargetsAreRegisteredTools(t *testing.T) {
 	// 1. Resolve the registered tool set via the MCP wire protocol.
 	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
@@ -197,23 +201,43 @@ func TestE2E_NextActionTargetsAreRegisteredTools(t *testing.T) {
 		registered[tool.Name] = struct{}{}
 	}
 
-	// 2. Parse next_actions.go statically and collect every NextAction
-	//    composite literal's Tool field value.
-	refs := collectNextActionToolRefs(t, "next_actions.go")
+	// 2. Walk every non-test .go file in this package and collect
+	//    NextAction Tool refs from all of them. Hints used to live
+	//    only in next_actions.go; the Phase 8.8 onboarding tools each
+	//    carry their own next_actions inline, so the scan has to be
+	//    package-wide.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var refs []toolRef
+	scanned := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		refs = append(refs, collectNextActionToolRefs(t, name)...)
+		scanned++
+	}
+	if scanned == 0 {
+		t.Fatal("scanned zero .go files -- working dir wrong?")
+	}
 	if len(refs) == 0 {
-		t.Fatal("collected zero Tool: references from next_actions.go -- AST walker broken?")
+		t.Fatal("collected zero Tool: references across the package -- AST walker broken?")
 	}
 
 	// 3. Each reference must match a registered tool.
 	for _, ref := range refs {
 		if _, ok := registered[ref.name]; !ok {
-			t.Errorf("next_actions.go:%d references unregistered tool %q", ref.line, ref.name)
+			t.Errorf("%s:%d references unregistered tool %q", ref.file, ref.line, ref.name)
 		}
 	}
 }
 
 type toolRef struct {
 	name string
+	file string
 	line int
 }
 
@@ -273,7 +297,7 @@ func collectNextActionToolRefs(t *testing.T, path string) []toolRef {
 		}
 
 		if toolName != "" && hasHint {
-			refs = append(refs, toolRef{name: toolName, line: toolLine})
+			refs = append(refs, toolRef{name: toolName, file: path, line: toolLine})
 		}
 		return true
 	})

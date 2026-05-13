@@ -186,8 +186,7 @@ func run() error {
 
 	srv := mcpserver.NewServer(
 		evmClient, anchorClient,
-		cfg.EnableWriteTools, cfg.WriteApprovalDefault,
-		string(cfg.ChainEnvironment),
+		cfg,
 		middleware, logger,
 	)
 
