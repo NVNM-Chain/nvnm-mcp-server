@@ -601,6 +601,93 @@ OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric 
 - Connects to `http://localhost:8545` or equivalent local RPC
 - Minimal latency for anchor queries
 
+### Multi-chain (testnet + mainnet): two instances, not per-session
+
+Once mainnet is live alongside testnet, the server supports **both** by
+**running two independent instances**, one per chain. Each instance is
+pinned to its chain at startup via `INVENIAM_EVM_RPC_URL`,
+`INVENIAM_CHAIN_ID`, and `NVNM_CHAIN_ENVIRONMENT` (the env-var prefix
+moves to `NVNM_*` in Phase 8.9 -- the model stays the same).
+
+```
+                    ┌── [server-testnet] ─── HTTPS ──► [testnet RPC]
+[MCP Client] ──HTTPS┤
+                    └── [server-mainnet] ─── HTTPS ──► [mainnet RPC]
+```
+
+Per-session chain selection inside a single instance was **considered
+and rejected** for v1. The decision and reasoning are recorded here so
+future contributors don't relitigate it.
+
+#### Why two instances
+
+1. **Blast-radius isolation.** A mainnet write is real provenance and
+   real money; a testnet write is disposable. A single server that
+   can do either has more attack surface and more chances for an
+   operator or agent to accidentally broadcast to the wrong chain.
+   Per-instance means the chain choice is decided at deploy time by
+   an operator, not at request time by an agent. The chain selection
+   is encoded in *which URL the client connects to*, which is the
+   simplest possible invariant.
+2. **Audit trail is implicit.** "Which chain did this write go to?"
+   is answered by "which server received the call." No per-call
+   chain dimension to forget on a log line. Forensic reconstruction
+   stays cleanly partitioned.
+3. **Per-chain RBAC is natural.** A testnet-only API key is just a
+   key on the testnet server. A mainnet-only operator role lives in
+   the mainnet auth provider. The same identity surfacing on both
+   chains would require either per-chain role scoping (`writer.testnet`
+   vs `writer.mainnet` in every role check) or a global role that
+   spans both -- both options are surface-area we don't need to
+   maintain.
+4. **Different operational tiers.** Mainnet probably wants stricter
+   rate limits, separate alerting, a different on-call rotation,
+   maybe a different Grafana dashboard. Per-instance lets all of
+   these be independent config; per-session would force conditional
+   logic at every observability seam.
+5. **Existing config model already supports it.** Chain identity is
+   already startup-bound via three env vars. Two instances = two env
+   sets. **Zero code change** to go multi-chain.
+6. **Agent UX cost is small.** Clients configure one MCP endpoint
+   per chain, mirroring how every other blockchain tool works.
+   Workflows that want to "promote from testnet to mainnet" land on
+   the client side (their MCP manifest knows both URLs), not on the
+   server.
+
+#### What per-session selection would have required (rejected design)
+
+For the record, here is what would have changed if we'd taken the
+per-session path:
+
+| Surface | Currently | Per-session would need |
+|---|---|---|
+| EVM RPC client | one, built in `main.go` | a map keyed by chain, picked from request context |
+| Anchor client + ABI | one | one per chain |
+| `NewServer(..., chainEnvironment, ...)` | one chain label | resolved per call |
+| Approval prompt | one chain ID | per-call chain ID |
+| Audit logs | one chain implicit | every line carries an explicit `chain=` dimension |
+| Auth / RBAC | one role set | per-chain role scoping (e.g. `writer:mainnet` ≠ `writer:testnet`) |
+| Approval policy (`write_approval`) | per-key | per-key-per-chain |
+| Resilient client (retry/breaker) | one set of state | one set per chain (testnet flakes must not trip the mainnet breaker) |
+
+Effort estimate: ~1–2 weeks. Not large in LOC; large in design
+decisions (RBAC scoping dominates). Rejected because the operational
+benefits of per-instance isolation outweigh the marginal client-side
+convenience.
+
+#### Revisit triggers
+
+Reconsider per-session selection only if:
+- A concrete agent workflow needs to bounce between testnet and
+  mainnet in a single user-level interaction (and that workflow
+  cannot route through two MCP client configurations on the agent
+  side).
+- A new auth provider arrives where per-chain role scoping is
+  cheap (e.g. JWT claims that include a `chain` field natively).
+
+In the absence of either trigger, the two-instances model is the
+intended long-term shape.
+
 ## 9. Graceful Shutdown
 
 The server handles `SIGINT` and `SIGTERM`:
