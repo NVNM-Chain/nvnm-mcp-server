@@ -397,7 +397,92 @@ Set `OTEL_TRACE_SAMPLE_RATIO=0.1` to sample 10% of root traces, or use collector
 
 ---
 
-## 9. Disaster recovery
+## 9. Upgrading across the Phase 8.6 API-key migration
+
+The 2026-05-13 release migrates the API-keys file from raw bearer
+tokens to sha256-hashed-at-rest entries. The migration is automatic
+on first restart of the new binary against an existing legacy file
+and is **irreversible** in the sense that the new binary no longer
+reads the raw `key` field as authoritative.
+
+### Before the upgrade
+
+1. **Back up `MCP_API_KEYS_FILE` out-of-band.** The server writes
+   a one-shot `<path>.pre-migration` backup automatically before
+   any mutation, but an independent copy stored in your operator
+   secrets system (Vault, External Secrets, S3, etc.) is cheap
+   insurance against a filesystem failure during the upgrade.
+2. Confirm `MCP_API_KEYS_FILE` is mode `0o600` and owned by the
+   server's run user.
+3. Note: the rolling-back path is to redeploy the **previous**
+   binary against the `<path>.pre-migration` file (renamed back
+   to the primary). The new binary writes the primary file in
+   hashed form, which the previous binary cannot read.
+
+### What the server does on first restart
+
+| Step | Behavior |
+|---|---|
+| 1 | `LoadKeysFile` reads the existing file; entries arrive with raw `key` populated and no `key_hash`. |
+| 2 | `migrateLegacyEntries` walks the slice in place: compute `key_hash` (sha256 hex) and `key_prefix` (first 8 chars of the raw key), clear `key`. |
+| 3 | **One-shot backup**: if `<path>.pre-migration` does not already exist, write a verbatim copy of the original file with mode `0o600`. The backup is written **before** any mutation of the primary file. If a backup from a prior migration already exists, leave it untouched -- the first backup is the truest "what did we have before hashing ever ran" record. |
+| 4 | `SaveKeysFile` rewrites the primary file in hashed form via atomic `tmp + fsync + rename` while holding `flock(LOCK_EX \| LOCK_NB)` on the existing file. |
+| 5 | The server logs `legacy keys file migrated to hashed format` at INFO with the path, backup path, and entry count, then continues startup. |
+
+### Log signals to expect
+
+| Severity | Message | Meaning |
+|---|---|---|
+| INFO | `legacy keys file migrated to hashed format` | Migration succeeded. The primary file is now in hashed shape; the backup exists at `<path>.pre-migration`. |
+| WARN | `legacy keys migrated in memory but failed to persist; next admin CRUD will re-save` | In-memory entries are normalized so auth works; the primary file is still in legacy shape. Most likely cause: a transient filesystem issue (read-only mount, permission, quota). Fix and restart, or let the next admin Create / Update / Delete re-persist. |
+| WARN | `legacy keys file detected but pre-migration backup write failed; skipping disk re-save to preserve the original file` | Backup write failed. The primary file is **deliberately not mutated** to preserve recoverability; in-memory state is normalized so auth works. Fix the underlying issue (likely a write-permission or quota problem on the directory containing the keys file) and restart. |
+
+### After the upgrade
+
+- `<path>.pre-migration` is the immutable historical record. The
+  server will never overwrite it on subsequent migrations. You
+  should treat it with the same secret-handling care as the
+  active keys file (`0o600`, off-host backups, etc.) and consider
+  deleting it after you have verified the new file is healthy.
+- The keys file is now safe to share among operators reading via
+  the admin REST API (`GET /admin/keys`), since the response
+  carries `key_prefix` for visual recognition but never the raw
+  key or the hash.
+- Existing API keys continue to work unchanged for callers --
+  raw bearer tokens are still what clients present, and the
+  server hashes them at the validator boundary.
+
+### Multi-process safety during the upgrade
+
+`SaveKeysFile` takes an advisory `flock(LOCK_EX | LOCK_NB)` on the
+existing file. If the lock is already held (e.g. another process
+is mid-migration), the call returns immediately with an error
+rather than blocking indefinitely. Coordinate the upgrade so that
+only one process touches `MCP_API_KEYS_FILE` at a time:
+
+- For Kubernetes: a rolling deploy is safe because each pod
+  reads the file independently and any concurrent writer (e.g.
+  the `key-mgmt` CLI on a sidecar) honors the same lock.
+- For bare-metal: do not run `key-mgmt create/update/delete`
+  during the first restart of the new binary.
+
+### Rollback
+
+The new binary cannot read the migrated file via the legacy path
+(raw `key` is empty post-migration). To roll back:
+
+1. Stop the new binary.
+2. `mv "$KEYS_FILE.pre-migration" "$KEYS_FILE"` to restore the
+   original.
+3. Redeploy the previous binary.
+
+This loses any keys created **after** the migration on the new
+binary; coordinate with whoever has been issuing keys to confirm
+no admin CRUD happened post-migration before rolling back.
+
+---
+
+## 10. Disaster recovery
 
 ### Stateless service
 
