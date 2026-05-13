@@ -195,8 +195,8 @@ import (
     "github.com/modelcontextprotocol/go-sdk/mcp"
 
     // Local
-    "github.com/inveniamcapital/inveniam-mcp-server/internal/anchor"
-    "github.com/inveniamcapital/inveniam-mcp-server/internal/evm"
+    "github.com/inveniamcapital/nvnm-mcp-server/internal/anchor"
+    "github.com/inveniamcapital/nvnm-mcp-server/internal/evm"
 )
 ```
 
@@ -231,7 +231,7 @@ func (c *Client) AnchorRecord(ctx context.Context, hash common.Hash) (*AnchorDat
 
 | Package | Responsibility |
 |---|---|
-| `cmd/inveniam-mcp-server` | Entrypoint; wire dependencies; configure transports |
+| `cmd/nvnm-mcp-server` | Entrypoint; wire dependencies; configure transports |
 | `internal/config` | Load and validate environment configuration |
 | `internal/logging` | Structured `slog`-based logger; redaction utilities |
 | `internal/errors` | Shared sentinel errors |

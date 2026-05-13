@@ -6,6 +6,6 @@ kind: Namespace
 metadata:
   name: inveniam-mcp
   labels:
-    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
     app.kubernetes.io/part-of: inveniam

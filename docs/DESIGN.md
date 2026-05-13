@@ -73,7 +73,7 @@ NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set t
 ### Package Dependency Graph
 
 ```
-cmd/inveniam-mcp-server/main.go
+cmd/nvnm-mcp-server/main.go
     │
     ├── internal/config      (env loading, validation)
     ├── internal/logging     (slog wrapper, redaction helpers)
@@ -98,7 +98,7 @@ Key constraint: `internal/evm` knows nothing about anchors. `internal/anchor` kn
 
 ### Package Responsibilities
 
-#### `cmd/inveniam-mcp-server`
+#### `cmd/nvnm-mcp-server`
 
 Application entrypoint. Responsibilities:
 - Parse CLI flags (`--transport`)
@@ -591,13 +591,13 @@ OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric 
 ### Local Development
 
 ```
-[Developer Mac] ─── stdio ──► [inveniam-mcp-server] ─── HTTPS ──► [Inveniam EVM RPC]
+[Developer Mac] ─── stdio ──► [nvnm-mcp-server] ─── HTTPS ──► [Inveniam EVM RPC]
 ```
 
 ### AWS (ECS/Fargate)
 
 ```
-[MCP Client] ─── HTTPS ──► [ALB] ──► [ECS Task: inveniam-mcp-server] ─── HTTPS ──► [Inveniam EVM RPC]
+[MCP Client] ─── HTTPS ──► [ALB] ──► [ECS Task: nvnm-mcp-server] ─── HTTPS ──► [Inveniam EVM RPC]
 ```
 
 - Docker image based on `gcr.io/distroless/static-debian12`
@@ -607,7 +607,7 @@ OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric 
 ### MANTRA Validator Node
 
 ```
-[MCP Client] ─── HTTP ──► [inveniam-mcp-server] ─── localhost ──► [Local EVM RPC]
+[MCP Client] ─── HTTP ──► [nvnm-mcp-server] ─── localhost ──► [Local EVM RPC]
 ```
 
 - Binary runs directly on the node (or in a container)

@@ -110,7 +110,7 @@ Layered Go packages: `cmd/` -> `config`, `logging`, `telemetry`, `evm`, `anchor`
 | Input validation (addresses, hashes, hex) | **Observed** | `parseAddress`, `parseHash`, `parseHexData` in `internal/mcp/tools_evm.go` lines 337-363 |
 | Write tools off by default | **Observed** | `internal/config/config.go` line 90 |
 | No private keys on server | **Observed** | `internal/config/config.go` lines 27-29 |
-| Log redaction (`SafeURL`) | **Observed** | `internal/logging/redact.go`; used in `cmd/inveniam-mcp-server/main.go` line 81 |
+| Log redaction (`SafeURL`) | **Observed** | `internal/logging/redact.go`; used in `cmd/nvnm-mcp-server/main.go` line 81 |
 | `gosec` linter enabled | **Observed** | `.golangci.yml` line 19 |
 | `detect-secrets` pre-commit hook | **Observed** | `.pre-commit-config.yaml` lines 29-32 |
 | Distroless runtime image | **Observed** | `Dockerfile` line 13 |
@@ -541,7 +541,7 @@ All "Immediate Fixes" and "Before Red Team" items have been implemented. Each fi
 | Aspect | Detail |
 |---|---|
 | Fix | Multi-key Bearer token authentication middleware |
-| Files | `internal/mcp/auth.go` (new), `internal/mcp/keys.go` (new), `internal/auth/context.go` (new), `internal/config/config.go`, `internal/mcp/server.go`, `cmd/inveniam-mcp-server/main.go` |
+| Files | `internal/mcp/auth.go` (new), `internal/mcp/keys.go` (new), `internal/auth/context.go` (new), `internal/config/config.go`, `internal/mcp/server.go`, `cmd/nvnm-mcp-server/main.go` |
 | Config | `MCP_API_KEYS_FILE` (path to JSON key store, preferred) or `MCP_API_KEY` (single key fallback) |
 | Behavior | When configured, all HTTP requests must include `Authorization: Bearer <key>`. Each key maps to a client ID that flows through to audit logs and OTel spans. Server warns at startup if HTTP transport runs with no keys configured. |
 | Key management | `cmd/key-mgmt/` CLI tool; Makefile targets `key-create`, `key-disable`, `key-enable`, `key-list` |
@@ -599,7 +599,7 @@ All "Immediate Fixes" and "Before Red Team" items have been implemented. Each fi
 | Aspect | Detail |
 |---|---|
 | Fix | Made OTLP insecure mode configurable |
-| Files | `internal/telemetry/telemetry.go`, `internal/config/config.go`, `cmd/inveniam-mcp-server/main.go` |
+| Files | `internal/telemetry/telemetry.go`, `internal/config/config.go`, `cmd/nvnm-mcp-server/main.go` |
 | Changes | New `OTLP_INSECURE` env var (default `true` for backward compatibility). When set to `false`, OTLP gRPC trace and metric exporters connect with TLS instead of `WithInsecure()`. Insecure mode is logged at startup for visibility. |
 | Residual risk | Default remains insecure; operator must explicitly opt in to TLS. Documented as an operational requirement. |
 
@@ -785,7 +785,7 @@ record what was fixed in the codebase.
 | Audit log line message inconsistent across write tools (`audit: foo`, `audit: foo phase`) | **Remediated** -- all five write-handler audit lines now use `slog.Group("audit", ...)` with stable `tool`, `phase`, and `client_id` keys. |
 | Chain-environment silent fallback to testnet when chain ID unrecognized | **Remediated** -- `Validate()` now refuses to start when no environment can be resolved; operators on private forks must set `NVNM_CHAIN_ENVIRONMENT` explicitly. |
 | Dockerfile build image version vs `go.mod` toolchain drift | **Remediated** -- Dockerfile sets `GOTOOLCHAIN=go1.26.3` in the build stage so reproducible builds do not depend on `GOTOOLCHAIN=auto` downloading whatever point release happens to be current. |
-| New tests | `failrate_test.go`, `keys_atomic_test.go`, `parsehex_fuzz_test.go`, `apikey_bench_test.go`, plus `cmd/inveniam-mcp-server/main_test.go` covering fail-closed HTTP startup. |
+| New tests | `failrate_test.go`, `keys_atomic_test.go`, `parsehex_fuzz_test.go`, `apikey_bench_test.go`, plus `cmd/nvnm-mcp-server/main_test.go` covering fail-closed HTTP startup. |
 
 ### AI/agent-specific (2026-05-12)
 

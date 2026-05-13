@@ -1,16 +1,16 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: inveniam-mcp-server
+  name: nvnm-mcp-server
   labels:
-    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
     app.kubernetes.io/part-of: inveniam
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: inveniam-mcp-server
+    name: nvnm-mcp-server
   minReplicas: 2
   maxReplicas: 10
   metrics:

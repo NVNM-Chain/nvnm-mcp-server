@@ -49,25 +49,80 @@ BREAKING change.
   flowing, just under different labels.
 - Helm chart directory: `deploy/helm/inveniam-mcp-server/` ->
   `deploy/helm/nvnm-mcp-server/`. `Chart.yaml` `name` field +
-  every template-helper include updated to match. Image repository
-  in `values.yaml` is intentionally left at
-  `ghcr.io/inveniamcapital/inveniam-mcp-server` -- the published
-  Docker artifact path is tied to CI/release infrastructure and is
-  outside the scope of this commit.
+  every template-helper include updated to match. (The image
+  repository in `values.yaml` was carried in this Phase 8.9 commit
+  as a deferred item and renamed in 8.13 below as part of the
+  atomic binary + Docker artifact rename.)
 - Kubernetes ConfigMap (`deploy/k8s/configmap.yaml`) and Helm
   `values.yaml` migrated to `NVNM_*` keys; ConfigMap chain ID stays
   at `787111` (current testnet, `nvnm-testnet-1`).
 - `Makefile` `run-local`, `docker-run`, and `docker-smoke` targets
   updated to set `NVNM_*` env vars.
 
+#### Binary + Docker artifact identity rename (Phase 8.13)
+
+- `cmd/inveniam-mcp-server/` -> `cmd/nvnm-mcp-server/`. The Go
+  module path (`github.com/inveniam/nvnm-mcp-server`) already
+  matched the new name, so no import-path edits were needed.
+- Binary name: `Makefile` `BINARY_NAME` / `CMD_DIR` / `DOCKER_IMAGE`,
+  `Dockerfile` build output + `ENTRYPOINT`, and CI build paths now
+  produce `nvnm-mcp-server`. Release artifacts published from
+  `.github/workflows/release.yml` use the new name template
+  (`nvnm-mcp-server-${TAG}-<os>-<arch>`), with matching cosign
+  verification instructions in the release-notes body.
+- Published Docker image path: Helm `values.yaml` `image.repository`
+  is now `ghcr.io/inveniamcapital/nvnm-mcp-server`. The first
+  release tag pushed after this commit publishes to the new path;
+  the old `inveniamcapital/inveniam-mcp-server` image stays in
+  ghcr but receives no further updates. Operators pinning to the
+  old image must either flip `image.repository` (Helm) or update
+  the `image:` field in their K8s `Deployment` manifest.
+- K8s manifests (`deploy/k8s/*.yaml`): every
+  `app.kubernetes.io/name` label, container name, and resource
+  `metadata.name` (Deployment / Service / HPA / ServiceMonitor /
+  NetworkPolicy / Namespace label) renamed; image reference flipped
+  to the new ghcr path; ConfigMap and Secret references renamed
+  (`inveniam-mcp-server-config` -> `nvnm-mcp-server-config`,
+  `inveniam-mcp-server-keys` -> `nvnm-mcp-server-keys`,
+  `inveniam-mcp-server-secret` -> `nvnm-mcp-server-secret`).
+- Prometheus alerts (`deploy/prometheus/alerts.yaml`): alert group
+  name, every `app:` label, the scrape job filter
+  (`up{job="..."} == 0`), and the descriptive prose all renamed.
+- Grafana dashboard (`deploy/grafana/dashboard.json`): `title` and
+  `uid` updated. **Operator action:** the dashboard `uid` change
+  breaks existing direct URLs (`/d/inveniam-mcp-server/...`) --
+  re-import the dashboard (or update the panel `uid` in your
+  provisioning files) to pick up the new identifier.
+- Internal: `internal/evm/tracing.go` `evmTracerName` constant;
+  startup log line in `cmd/nvnm-mcp-server/main.go`.
+
 ### Migration
 
-Operators must rename `INVENIAM_*` to `NVNM_*` in every layer that
-sets chain config -- ConfigMaps, Helm overlays, `.env` files,
-systemd units, Compose files, Terraform, shell wrappers. **Don't
-keep the old key alongside the new one** -- the server refuses to
-start when it sees both. Migration table and worked example in
-`docs/RUNBOOK.md#env-var-migration`.
+**Env vars (8.9).** Operators must rename `INVENIAM_*` to `NVNM_*`
+in every layer that sets chain config -- ConfigMaps, Helm overlays,
+`.env` files, systemd units, Compose files, Terraform, shell
+wrappers. **Don't keep the old key alongside the new one** -- the
+server refuses to start when it sees both. Migration table and
+worked example in `docs/RUNBOOK.md#env-var-migration`.
+
+**Binary + Docker image (8.13).** No automatic detection, just
+path changes:
+
+- Binary on PATH: `inveniam-mcp-server` -> `nvnm-mcp-server`
+  (wrapper scripts, systemd `ExecStart`, MCP client launchers,
+  CI invocations).
+- Docker image: `ghcr.io/inveniamcapital/inveniam-mcp-server:*` ->
+  `ghcr.io/inveniamcapital/nvnm-mcp-server:*`. The old path stops
+  receiving updates after this release; pin by digest if you need
+  the pre-rename image for rollback testing.
+- K8s resources: if you applied the previous `deploy/k8s/*.yaml`
+  manifests, the renamed `metadata.name` fields mean a
+  `kubectl apply -k deploy/k8s/` will create new resources rather
+  than mutating the old ones. Plan a deliberate cutover (parallel
+  deploy + traffic shift, or scheduled downtime + delete + apply).
+- Grafana: re-import or update provisioning to pick up the new
+  dashboard `uid` (`nvnm-mcp-server`); direct `/d/inveniam-mcp-server/`
+  URLs will 404.
 
 ---
 

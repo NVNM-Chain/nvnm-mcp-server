@@ -69,7 +69,7 @@ make run-http
 {
   "mcpServers": {
     "nvnm-chain": {
-      "command": "/path/to/inveniam-mcp-server",
+      "command": "/path/to/nvnm-mcp-server",
       "args": ["--transport", "stdio"]
     }
   }
@@ -80,7 +80,7 @@ make run-http
 ```bash
 # Server runs on :8080 by default
 export MCP_HTTP_ADDR=:8080
-./inveniam-mcp-server --transport http
+./nvnm-mcp-server --transport http
 ```
 
 ### Authentication (HTTP transport)
@@ -383,7 +383,7 @@ docker run --rm \
   -e MCP_TRANSPORT=http \
   -p 8080:8080 \
   -p 9090:9090 \
-  inveniam-mcp-server
+  nvnm-mcp-server
 ```
 
 ### Kubernetes
@@ -420,7 +420,7 @@ The server can run directly on MANTRA validator nodes, connecting to `localhost`
 
 ```
 cmd/
-  inveniam-mcp-server/       Entrypoint
+  nvnm-mcp-server/       Entrypoint
   key-mgmt/                  API key management CLI
 internal/
   auth/                      Client identity context propagation

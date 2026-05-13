@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: inveniam-mcp-server
+  name: nvnm-mcp-server
   labels:
-    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
     app.kubernetes.io/part-of: inveniam
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: inveniam-mcp-server
+      app.kubernetes.io/name: nvnm-mcp-server
       app.kubernetes.io/component: mcp-server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: inveniam-mcp-server
+        app.kubernetes.io/name: nvnm-mcp-server
         app.kubernetes.io/component: mcp-server
         app.kubernetes.io/part-of: inveniam
     spec:
@@ -24,17 +24,17 @@ spec:
         runAsUser: 65532
         runAsGroup: 65532
       containers:
-        - name: inveniam-mcp-server
+        - name: nvnm-mcp-server
           # Pin to an immutable digest in production. ":latest" is a
           # mutable tag; a registry-side overwrite or supply-chain push
           # silently propagates on every pod restart. Generate the
           # digest from the signed release image and substitute below:
-          #   image: ghcr.io/inveniamcapital/inveniam-mcp-server@sha256:<digest>
+          #   image: ghcr.io/inveniamcapital/nvnm-mcp-server@sha256:<digest>
           # The Dockerfile already digest-pins both base images; the
           # deployment is the missing link in the chain. CI does not
           # yet push a digest-stable image, so :latest is left here
           # explicitly as a TODO for the release pipeline (#image-pin).
-          image: ghcr.io/inveniamcapital/inveniam-mcp-server:latest
+          image: ghcr.io/inveniamcapital/nvnm-mcp-server:latest
           imagePullPolicy: IfNotPresent
           args:
             - "--transport"
@@ -47,13 +47,13 @@ spec:
           envFrom:
             # Non-sensitive values: chain ID, addresses, ports, timeouts.
             - configMapRef:
-                name: inveniam-mcp-server-config
+                name: nvnm-mcp-server-config
             # Sensitive values: RPC URL, MCP_API_KEY*, ADMIN_API_KEY,
             # FusionAuth IDs. See secret.yaml.example. Operators that
             # use FusionAuth instead of file-backed API keys can omit
             # the keys-volume mount below.
             - secretRef:
-                name: inveniam-mcp-server-secret
+                name: nvnm-mcp-server-secret
                 optional: true
           volumeMounts:
             # The API keys file is mounted read-only from a separate
@@ -91,6 +91,6 @@ spec:
       volumes:
         - name: api-keys
           secret:
-            secretName: inveniam-mcp-server-keys # pragma: allowlist secret -- K8s API field name, not a credential value
+            secretName: nvnm-mcp-server-keys # pragma: allowlist secret -- K8s API field name, not a credential value
             optional: true
             defaultMode: 256 # 0o400 decimal: read-only for owner only

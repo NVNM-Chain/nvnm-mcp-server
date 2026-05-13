@@ -12,14 +12,14 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: inveniam-mcp-server-alerts
+  name: nvnm-mcp-server-alerts
   namespace: monitoring
   labels:
-    app: inveniam-mcp-server
+    app: nvnm-mcp-server
     prometheus: kube-prometheus
 spec:
   groups:
-    - name: inveniam-mcp-server
+    - name: nvnm-mcp-server
       rules:
         - alert: InveniamMCPHighErrorRate
           expr: |
@@ -31,7 +31,7 @@ spec:
           for: 5m
           labels:
             severity: warning
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server tool error ratio is elevated"
             description: "The ratio of tool errors to tool calls has exceeded 5% for 5 minutes (current value: {{ $value | humanizePercentage }})."
@@ -47,7 +47,7 @@ spec:
           for: 5m
           labels:
             severity: critical
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server tool error ratio is critically high"
             description: "The ratio of tool errors to tool calls has exceeded 15% for 5 minutes (current value: {{ $value | humanizePercentage }})."
@@ -62,21 +62,21 @@ spec:
           for: 5m
           labels:
             severity: warning
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server tool p99 latency exceeds 5s"
             description: "The 99th percentile of mcp_server_tool_duration_milliseconds has been above 5000ms for 5 minutes (current value: {{ $value }}ms)."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-p99-latency"
 
         - alert: InveniamMCPHealthCheckFailing
-          expr: up{job="inveniam-mcp-server"} == 0
+          expr: up{job="nvnm-mcp-server"} == 0
           for: 2m
           labels:
             severity: critical
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server scrape target is down"
-            description: "Prometheus cannot scrape the inveniam-mcp-server job (up == 0) for 2 minutes. Verify pods, Service, ServiceMonitor scrape config, and metrics port. Health probes: /healthz and /readyz on port 9090."
+            description: "Prometheus cannot scrape the nvnm-mcp-server job (up == 0) for 2 minutes. Verify pods, Service, ServiceMonitor scrape config, and metrics port. Health probes: /healthz and /readyz on port 9090."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-health-check-failing"
 
         - alert: InveniamMCPCircuitBreakerOpen
@@ -84,7 +84,7 @@ spec:
           for: 1m
           labels:
             severity: critical
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server EVM RPC circuit breaker is open"
             description: "evm_rpc_circuit_breaker_state is 2 (open) for at least 1 minute. RPC calls are failing fast; investigate upstream EVM availability and backoff settings."
@@ -100,7 +100,7 @@ spec:
           for: 5m
           labels:
             severity: warning
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server EVM RPC retry rate is high vs tool calls"
             description: "The ratio of EVM RPC retries to MCP tool calls has exceeded 20% for 5 minutes (current value: {{ $value | humanizePercentage }})."
@@ -111,7 +111,7 @@ spec:
           for: 5m
           labels:
             severity: warning
-            app: inveniam-mcp-server
+            app: nvnm-mcp-server
           annotations:
             summary: "Inveniam MCP server is being EVM RPC rate limited"
             description: "evm_rpc_rate_limited_total is increasing over 5 minutes. Reduce request volume or raise RPC quota/limits with the provider."

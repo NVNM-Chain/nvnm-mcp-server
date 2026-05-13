@@ -77,7 +77,7 @@ func run() error {
 		}
 	}()
 
-	logger.Info("starting inveniam-mcp-server",
+	logger.Info("starting nvnm-mcp-server",
 		slog.String("transport", cfg.Transport),
 		slog.Int64("chain_id", cfg.ChainID),
 		logging.SafeURL("rpc_url", cfg.EVMRPCURL),

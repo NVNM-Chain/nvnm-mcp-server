@@ -57,7 +57,7 @@ jobs:
         run: go test -mod=vendor -race -coverprofile=coverage.out ./...
 
       - name: Build
-        run: go build -mod=vendor -o bin/inveniam-mcp-server ./cmd/inveniam-mcp-server
+        run: go build -mod=vendor -o bin/nvnm-mcp-server ./cmd/nvnm-mcp-server
 
       - name: Upload coverage
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -80,4 +80,4 @@ jobs:
 
       - name: Sign binary
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: cosign sign-blob --yes bin/inveniam-mcp-server
+        run: cosign sign-blob --yes bin/nvnm-mcp-server

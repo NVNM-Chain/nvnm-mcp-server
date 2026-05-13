@@ -700,8 +700,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Inveniam MCP Server",
-  "uid": "inveniam-mcp-server",
+  "title": "NVNM Chain MCP Server",
+  "uid": "nvnm-mcp-server",
   "version": 1,
   "weekStart": ""
 }

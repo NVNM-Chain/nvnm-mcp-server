@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const evmTracerName = "inveniam-mcp-server/evm"
+const evmTracerName = "nvnm-mcp-server/evm"
 
 // TracingMetrics holds the metric instruments used by the tracing wrapper.
 type TracingMetrics struct {

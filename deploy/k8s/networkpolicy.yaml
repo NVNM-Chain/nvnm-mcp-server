@@ -1,15 +1,15 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: inveniam-mcp-server
+  name: nvnm-mcp-server
   labels:
-    app.kubernetes.io/name: inveniam-mcp-server
+    app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
     app.kubernetes.io/part-of: inveniam
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: inveniam-mcp-server
+      app.kubernetes.io/name: nvnm-mcp-server
       app.kubernetes.io/component: mcp-server
   policyTypes:
     - Ingress

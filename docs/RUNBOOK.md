@@ -41,9 +41,9 @@ Phase 8.9 also renamed three operator-visible identity strings to match the chai
 | Identifier | Pre-8.9 | Phase 8.9 |
 |------------|---------|-----------|
 | MCP server name (`initialize` response) | `inveniam-evm` | `nvnm-chain` |
-| OTel `OTEL_SERVICE_NAME` default | `inveniam-mcp-server` | `nvnm-mcp-server` |
-| OTel Tracer / Meter name (internal) | `inveniam-mcp-server` | `nvnm-mcp-server` |
-| Helm chart name (`deploy/helm/.../Chart.yaml`) | `inveniam-mcp-server` | `nvnm-mcp-server` |
+| OTel `OTEL_SERVICE_NAME` default | `nvnm-mcp-server` | `nvnm-mcp-server` |
+| OTel Tracer / Meter name (internal) | `nvnm-mcp-server` | `nvnm-mcp-server` |
+| Helm chart name (`deploy/helm/.../Chart.yaml`) | `nvnm-mcp-server` | `nvnm-mcp-server` |
 
 Dashboards that filter by `service.name`, `tracer`, or `meter` will need their queries updated. Dashboard updates can lag the deploy — the metrics keep flowing, they're just labeled differently — but plan for the cutover in the same change window.
 
@@ -205,7 +205,7 @@ Container image exposes 8080 and 9090. Map both in Kubernetes Services, ECS task
 Production typically runs:
 
 ```bash
-/inveniam-mcp-server --transport http
+/nvnm-mcp-server --transport http
 ```
 
 Ensure `MCP_TRANSPORT=http` (or the CLI flag) so the server listens for MCP on the HTTP address.

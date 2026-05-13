@@ -43,12 +43,12 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          BIN="dist/inveniam-mcp-server-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}"
+          BIN="dist/nvnm-mcp-server-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}"
           go build \
             -trimpath \
             -ldflags "-s -w -X github.com/inveniam/nvnm-mcp-server/internal/version.Version=${{ steps.version.outputs.version }}" \
             -o "$BIN" \
-            ./cmd/inveniam-mcp-server
+            ./cmd/nvnm-mcp-server
           echo "bin=$BIN" >> "$GITHUB_ENV"
 
       - name: Generate SBOM for binary
@@ -137,15 +137,15 @@ jobs:
             echo ""
             echo '```bash'
             echo "# Verify checksum"
-            echo "shasum -a 256 -c inveniam-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.sha256"
+            echo "shasum -a 256 -c nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.sha256"
             echo ""
             echo "# Verify Cosign signature"
             echo "cosign verify-blob \\"
-            echo "  --certificate inveniam-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.cert.pem \\"
-            echo "  --signature inveniam-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.sig \\"
+            echo "  --certificate nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.cert.pem \\"
+            echo "  --signature nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.sig \\"
             echo "  --certificate-identity-regexp 'https://github.com/inveniamcapital/NVNM_MCP_Server/.*' \\"
             echo "  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \\"
-            echo "  inveniam-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>"
+            echo "  nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>"
             echo '```'
           } >> "$NOTES_FILE"
 

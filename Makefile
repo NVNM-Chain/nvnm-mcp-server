@@ -1,7 +1,7 @@
-BINARY_NAME := inveniam-mcp-server
+BINARY_NAME := nvnm-mcp-server
 BUILD_DIR := bin
-CMD_DIR := cmd/inveniam-mcp-server
-DOCKER_IMAGE := inveniam-mcp-server
+CMD_DIR := cmd/nvnm-mcp-server
+DOCKER_IMAGE := nvnm-mcp-server
 
 GO := go
 GOFLAGS := -v
