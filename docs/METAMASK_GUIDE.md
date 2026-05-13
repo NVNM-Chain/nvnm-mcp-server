@@ -1,6 +1,6 @@
 # MetaMask Quick Start Guide
 
-How to sign and submit anchor write operations using MetaMask and the Inveniam EVM MCP Server.
+How to sign and submit anchor write operations using MetaMask and the NVNM Chain MCP Server.
 
 ---
 

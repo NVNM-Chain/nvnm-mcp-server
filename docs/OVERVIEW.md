@@ -1,8 +1,8 @@
-# Inveniam EVM MCP Server -- Capabilities Overview
+# NVNM Chain MCP Server -- Capabilities Overview
 
 ## What It Is
 
-A production-grade [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents, LLMs, and developer tools native access to the Inveniam NVNM blockchain -- the purpose-built L2 for AI Agent and document anchoring and provenance verification, secured by MANTRA's validator set.
+A production-grade [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents, LLMs, and developer tools native access to the NVNM Chain -- Inveniam's purpose-built L2 for AI-agent and document anchoring and provenance verification, secured by MANTRA's validator set.
 
 This is not a raw JSON-RPC passthrough. It exposes **21 curated, typed tools** with normalized responses designed for both human comprehension and LLM consumption. All blockchain complexity -- ABI encoding, gas estimation, nonce management, transaction construction -- is handled server-side. Callers pass plain parameters and get structured JSON back.
 
@@ -12,7 +12,7 @@ This is not a raw JSON-RPC passthrough. It exposes **21 curated, typed tools** w
 |---|---|
 | **21** MCP tools | 5 onboarding, 8 chain reads, 4 anchor reads, 4 writes |
 | **0** private keys on the server | Prepare-sign-submit by design |
-| **271+** automated tests | Unit, E2E, integration, load, golden |
+| **469** automated tests | 333 top-level + 136 subtests across 45 files; unit, E2E, integration, load, golden |
 | **<2ms** p95 latency | Under sustained 75-VU load |
 
 ---

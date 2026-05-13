@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-Complete schema reference for all 21 tools exposed by the Inveniam EVM MCP Server.
+Complete schema reference for all 21 tools exposed by the NVNM Chain MCP Server.
 
 > **Write tools require `ENABLE_WRITE_TOOLS=true`.**
 > The four write tools (`anchor_prepare_add_registry`, `anchor_prepare_add_record`,

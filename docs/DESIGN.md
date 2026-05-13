@@ -1,8 +1,8 @@
-# Inveniam EVM MCP Server -- Design & Architecture
+# NVNM Chain MCP Server -- Design & Architecture
 
 ## 1. System Context
 
-The Inveniam EVM MCP Server sits between MCP-capable clients (LLMs, developer tools, agents) and the Inveniam EVM chain (NVNM). It translates high-level tool calls into EVM JSON-RPC requests, normalizes the responses, and returns structured, typed JSON.
+The NVNM Chain MCP Server sits between MCP-capable clients (LLMs, developer tools, agents) and the NVNM Chain (Inveniam's L2 on MANTRA). It translates high-level tool calls into EVM JSON-RPC requests, normalizes the responses, and returns structured, typed JSON.
 
 For write operations, the server constructs unsigned transactions but never holds private keys. Signing is the caller's responsibility.
 
@@ -45,7 +45,7 @@ NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set t
                                               JSON-RPC (HTTPS)
                                                     │
                                           ┌─────────▼───────────┐
-                                          │  Inveniam EVM Chain │
+                                          │  NVNM Chain (EVM) │
                                           │  (RPC + Precompile) │
                                           └─────────────────────┘
 ```
@@ -591,13 +591,13 @@ OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric 
 ### Local Development
 
 ```
-[Developer Mac] ─── stdio ──► [nvnm-mcp-server] ─── HTTPS ──► [Inveniam EVM RPC]
+[Developer Mac] ─── stdio ──► [nvnm-mcp-server] ─── HTTPS ──► [NVNM Chain RPC]
 ```
 
 ### AWS (ECS/Fargate)
 
 ```
-[MCP Client] ─── HTTPS ──► [ALB] ──► [ECS Task: nvnm-mcp-server] ─── HTTPS ──► [Inveniam EVM RPC]
+[MCP Client] ─── HTTPS ──► [ALB] ──► [ECS Task: nvnm-mcp-server] ─── HTTPS ──► [NVNM Chain RPC]
 ```
 
 - Docker image based on `gcr.io/distroless/static-debian12`

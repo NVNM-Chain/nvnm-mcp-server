@@ -1,10 +1,10 @@
-# Inveniam EVM MCP Server — Coding Standards & Development Guide (Go)
+# NVNM Chain MCP Server — Coding Standards & Development Guide (Go)
 
 **Last Updated:** April 28, 2026
 
 ## Overview
 
-This guide provides coding standards and best practices for the Inveniam EVM MCP Server. All contributors should follow these standards to ensure consistency, maintainability, and quality across the codebase.
+This guide provides coding standards and best practices for the NVNM Chain MCP Server. All contributors should follow these standards to ensure consistency, maintainability, and quality across the codebase.
 
 ## Table of Contents
 

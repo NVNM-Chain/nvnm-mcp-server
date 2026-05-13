@@ -1,4 +1,4 @@
-# Pre-Red-Team Security Assessment: Inveniam EVM MCP Server
+# Pre-Red-Team Security Assessment: NVNM Chain MCP Server
 
 **Date:** 2026-04-01
 **Last reviewed:** 2026-05-13 (Phase 8.1-8.8 + API key sha256-hashing + defiweb swap; see "Updates since 2026-04-01" at the end)
@@ -18,7 +18,7 @@
 
 ### 1. System Name and Business Purpose
 
-**Inveniam EVM MCP Server** (`inveniam-evm`) -- a Model Context Protocol server that exposes curated, typed tools for interacting with the Inveniam NVNM L2 blockchain (Chain ID 58887). It translates MCP tool calls into EVM JSON-RPC and anchor precompile interactions, normalizes responses, and implements a prepare-sign-submit pattern for write operations where the server never holds private keys.
+**NVNM Chain MCP Server** (MCP server name: `nvnm-chain`, renamed from `inveniam-evm` in Phase 8.9) -- a Model Context Protocol server that exposes curated, typed tools for interacting with the NVNM Chain, Inveniam's L2 on MANTRA (Chain ID 58887). It translates MCP tool calls into EVM JSON-RPC and anchor precompile interactions, normalizes responses, and implements a prepare-sign-submit pattern for write operations where the server never holds private keys.
 
 **Evidence:** [docs/DESIGN.md](DESIGN.md) section 1; [README.md](../README.md) opening sections.
 
@@ -56,7 +56,7 @@ Layered Go packages: `cmd/` -> `config`, `logging`, `telemetry`, `evm`, `anchor`
 | Boundary | From | To | Transport |
 |---|---|---|---|
 | TB1 | MCP Client/Agent | MCP Server | stdio (local) or HTTP (network) |
-| TB2 | MCP Server | Inveniam EVM RPC | HTTPS JSON-RPC |
+| TB2 | MCP Server | NVNM Chain RPC | HTTPS JSON-RPC |
 | TB3 | MCP Server | OTLP Collector | gRPC (insecure) |
 | TB4 | External scraper | Health/Metrics server | HTTP :9090 |
 | TB5 | Operator/CI | Container image | Docker build + K8s deploy |
@@ -213,7 +213,7 @@ This is an **MCP tool server** consumed by AI agents/LLMs:
 
 ### Executive Summary
 
-The Inveniam EVM MCP Server has a solid defensive foundation: no server-side key material, distroless container, K8s security contexts, input validation on blockchain types, and the `gosec` linter. However, it has **zero authentication or authorization** on its HTTP interface, relying entirely on an undocumented reverse proxy assumption. This is the dominant risk. Secondary concerns include unbounded input sizes enabling denial of service, information leakage through error propagation and telemetry, inconsistent security hardening between K8s and Helm manifests, and absence of dependency vulnerability scanning in CI. For a system exposing blockchain write capabilities to AI agents, the lack of per-operation approval, audit logging, and rate limiting at the MCP layer represents a meaningful gap.
+The NVNM Chain MCP Server has a solid defensive foundation: no server-side key material, distroless container, K8s security contexts, input validation on blockchain types, and the `gosec` linter. However, it has **zero authentication or authorization** on its HTTP interface, relying entirely on an undocumented reverse proxy assumption. This is the dominant risk. Secondary concerns include unbounded input sizes enabling denial of service, information leakage through error propagation and telemetry, inconsistent security hardening between K8s and Helm manifests, and absence of dependency vulnerability scanning in CI. For a system exposing blockchain write capabilities to AI agents, the lack of per-operation approval, audit logging, and rate limiting at the MCP layer represents a meaningful gap.
 
 ### Top 10 Most Plausible Attack Paths (Ranked)
 
@@ -933,4 +933,5 @@ Phase 8 also tracks the following security items still pending:
 | **API-key hashing at rest** with `.pre-migration` backup + atomic tmp-rename writes | 8.6 (IRREVERSIBLE) | Current `main` stores raw bearer tokens on disk in operator-managed key stores. Any earlier "stored hashed at rest" claim in this document is **not yet accurate** -- the migration in 8.6 will make it true. Until 8.6 ships, operators should treat the key store file as a high-sensitivity secret comparable to `.env`-style credentials. |
 | Constant-time auth comparison on the hash bytes | 8.7 | Defense-in-depth alongside the hash-lookup path. |
 | Server identity rename + `INVENIAM_*` → `NVNM_*` env-var hard cut with fail-loud guard | 8.9 (BREAKING) -- **SHIPPED 2026-05-13** | Eliminates the dual-prefix transient state. Strict policy: legacy var detected at startup fails loud even when the matching `NVNM_*` is also set. See `docs/RUNBOOK.md#env-var-migration`. |
+| Binary + Docker artifact identity rename (`cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`; ghcr image `inveniamcapital/inveniam-mcp-server` → `inveniamcapital/nvnm-mcp-server`; K8s `metadata.name` and `app.kubernetes.io/name` labels; Grafana dashboard `uid`) | 8.13 (BREAKING) -- **SHIPPED 2026-05-13** | Companion to 8.9. Atomic rename of the publishing surface so the project no longer carries the old identity outside the rc.1/rc.2 CHANGELOG history. Old ghcr image stays in place but receives no further updates. |
 | OWASP Top-10 self-audit gate | 8.12 | Final close-out before Phase 8 marked COMPLETE. |

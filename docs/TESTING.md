@@ -1,21 +1,20 @@
 # Testing
 
-This document describes the testing strategy, framework, and latest results for the Inveniam EVM MCP Server.
+This document describes the testing strategy, framework, and latest results for the NVNM Chain MCP Server.
 
 ## Overview
 
-The project uses a layered testing approach: unit tests with mocks for fast feedback, golden tests for response shape stability, integration tests against the live Inveniam testnet, HTTP end-to-end tests through the MCP protocol layer, k6 load tests for performance, and Docker smoke tests for deployment verification.
+The project uses a layered testing approach: unit tests with mocks for fast feedback, golden tests for response shape stability, integration tests against the live NVNM testnet, HTTP end-to-end tests through the MCP protocol layer, k6 load tests for performance, and Docker smoke tests for deployment verification.
 
-**Test inventory** (as of 2026-04-28):
+**Test inventory** (as of 2026-05-13, after Phase 8.1-8.9 + 8.13 ship):
 
 | Metric | Count |
 |--------|-------|
-| Test files | 30 |
-| Test functions | 271 |
-| Lines of test code | ~5,800 |
-| Golden fixture files | 13 |
-| Integration test files (build tag) | 6 |
-| Packages with tests | 8 of 10 |
+| Test files | 45 |
+| Test functions (top-level) | 333 |
+| Subtests (table-driven cases) | 136 |
+| Integration test files (`-tags integration`) | 7 |
+| Packages with tests | 9 of 13 |
 
 ## Running Tests
 
@@ -272,7 +271,7 @@ ok  internal/mcp       1.555s
 ok  internal/telemetry 1.736s
 ```
 
-All 271 tests pass (across 30 test files in 8 packages). Zero failures. Includes 25 protocol E2E and 30 admin/managed-keys tests in `internal/mcp`.
+All 469 tests pass (333 top-level + 136 subtests, across 45 test files in 9 packages). Zero failures. Includes the protocol E2E suite, admin/managed-keys coverage, and the Phase 8 onboarding-tool tests in `internal/mcp`.
 
 ### Integration Tests
 

@@ -11,6 +11,14 @@ import (
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
+		// Phase 8.9 legacy keys: clear so tests work in any
+		// developer env that still has stale INVENIAM_* set
+		// (e.g. a sourced .env from before the migration).
+		// Config.Load fails loud if any of these are present,
+		// which would otherwise mask the actual test scenarios.
+		"INVENIAM_EVM_RPC_URL",
+		"INVENIAM_EVM_ARCHIVE_RPC_URL",
+		"INVENIAM_CHAIN_ID",
 		"NVNM_EVM_RPC_URL",
 		"NVNM_EVM_ARCHIVE_RPC_URL",
 		"NVNM_CHAIN_ID",
