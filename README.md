@@ -1,6 +1,6 @@
-# Inveniam EVM MCP Server
+# NVNM Chain MCP Server
 
-A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the Inveniam EVM chain (NVNM) through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
+A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the NVNM Chain (Inveniam's L2 on MANTRA) through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
 
 This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-value MCP tools with normalized responses designed for both human and LLM consumers.
 
@@ -19,7 +19,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phases 0–7 complete; Phase 8 in progress (8 of 12 tasks landed as of 2026-05-13).** 8.1–8.5 (foundation types, tool annotations, `next_actions` envelope, EIP-1559 default, Origin-header validation), 8.6 (API-key hashing migration), 8.7 (constant-time auth on hashed bytes), and 8.8 (five onboarding tools) have shipped. 8.9 (env-var hard cut `INVENIAM_*` → `NVNM_*`), 8.10 (privacy-by-design doc statement), 8.11 (test-fixture cleanup), and 8.12 (OWASP self-audit close-out) remain. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings, remediation results, and the 2026-05-13 update sections for the most recent migrations.
+**Phases 0–7 complete; Phase 8 in progress (9 of 12 tasks landed as of 2026-05-13).** 8.1–8.5 (foundation types, tool annotations, `next_actions` envelope, EIP-1559 default, Origin-header validation), 8.6 (API-key hashing migration), 8.7 (constant-time auth on hashed bytes), 8.8 (five onboarding tools), and 8.9 (BREAKING env-var hard cut `INVENIAM_*` → `NVNM_*` plus server-identity rename — see `docs/RUNBOOK.md#env-var-migration`) have shipped. 8.10 (privacy-by-design doc statement), 8.11 (test-fixture cleanup), and 8.12 (OWASP self-audit close-out) remain. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings, remediation results, and the 2026-05-13 update sections for the most recent migrations.
 
 HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all audit logs and OTel spans. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`); the prompt shows the recovered signer address, the first 4 bytes of calldata (method selector), and the chain environment label so consumers can spot signature-substitution attacks. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
 
@@ -30,7 +30,7 @@ The EVM RPC stack uses `github.com/defiweb/go-eth` (MIT) -- `go-ethereum` was re
 ## Prerequisites
 
 - Go 1.26+
-- Access to the Inveniam EVM RPC endpoint
+- Access to the NVNM Chain EVM RPC endpoint
 - (Optional) `golangci-lint` for linting
 - (Optional) `pre-commit` for git hooks
 - (Optional) Docker for containerized deployment
@@ -51,8 +51,8 @@ make help
 make build
 
 # Configure (minimum required)
-export INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io
-export INVENIAM_CHAIN_ID=58887
+export NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io
+export NVNM_CHAIN_ID=58887
 export ANCHOR_ABI_PATH=abi/anchoring.json
 
 # Run (stdio transport -- for local MCP client integration)
@@ -68,7 +68,7 @@ make run-http
 ```json
 {
   "mcpServers": {
-    "inveniam-evm": {
+    "nvnm-chain": {
       "command": "/path/to/inveniam-mcp-server",
       "args": ["--transport", "stdio"]
     }
@@ -128,8 +128,8 @@ All configuration is via environment variables. No config files required.
 
 | Variable | Description |
 |---|---|
-| `INVENIAM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `INVENIAM_CHAIN_ID` | Expected chain ID (`58887` for NVNM testnet) |
+| `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
+| `NVNM_CHAIN_ID` | Expected chain ID (`58887` for NVNM testnet) |
 
 ### Authentication (HTTP transport)
 
@@ -160,7 +160,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 
 | Variable | Default | Description |
 |---|---|---|
-| `INVENIAM_EVM_ARCHIVE_RPC_URL` | _(none)_ | Archive node RPC for historical queries |
+| `NVNM_EVM_ARCHIVE_RPC_URL` | _(none)_ | Archive node RPC for historical queries |
 | `ANCHOR_ADDRESS` | `0x0000000000000000000000000000000000000A00` | Anchor precompile address |
 | `ANCHOR_ABI_PATH` | _(none)_ | Path to anchor ABI JSON file |
 | `REQUEST_TIMEOUT` | `15s` | Timeout for upstream RPC calls |
@@ -176,7 +176,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | Variable | Default | Description |
 |---|---|---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(none)_ | OTel Collector endpoint (e.g. `localhost:4317`). Enables OTLP trace + metric export |
-| `OTEL_SERVICE_NAME` | `inveniam-mcp-server` | Service name in traces and metrics |
+| `OTEL_SERVICE_NAME` | `nvnm-mcp-server` | Service name in traces and metrics |
 | `ENABLE_PROMETHEUS` | `true` | Expose `/metrics` endpoint on metrics port |
 | `ENABLE_STDOUT_TELEMETRY` | `false` | Dump spans/metrics to stderr (dev only) |
 | `METRICS_ADDR` | `:9090` | Listen address for health + metrics endpoints |
@@ -377,8 +377,8 @@ For comprehensive testing documentation, including test architecture, framework 
 ```bash
 make docker-build
 docker run --rm \
-  -e INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-  -e INVENIAM_CHAIN_ID=58887 \
+  -e NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+  -e NVNM_CHAIN_ID=58887 \
   -e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
   -e MCP_TRANSPORT=http \
   -p 8080:8080 \
@@ -398,12 +398,12 @@ kubectl apply -k deploy/k8s/
 kubectl apply -k deploy/k8s/ -n your-namespace
 ```
 
-A Helm chart is available in `deploy/helm/inveniam-mcp-server/`:
+A Helm chart is available in `deploy/helm/nvnm-mcp-server/`:
 
 ```bash
-helm install inveniam-mcp deploy/helm/inveniam-mcp-server/ \
-  --set env.INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-  --set env.INVENIAM_CHAIN_ID=58887
+helm install nvnm-mcp deploy/helm/nvnm-mcp-server/ \
+  --set env.NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+  --set env.NVNM_CHAIN_ID=58887
 ```
 
 Prometheus alerting rules are in `deploy/prometheus/alerts.yaml` and a Grafana dashboard in `deploy/grafana/dashboard.json`.
@@ -436,7 +436,7 @@ abi/
   anchoring.json             Anchor precompile ABI
 deploy/
   k8s/                       Kubernetes manifests (Deployment, Service, HPA, ServiceMonitor, NetworkPolicy)
-  helm/inveniam-mcp-server/  Helm chart
+  helm/nvnm-mcp-server/      Helm chart
   grafana/                   Grafana dashboard JSON
   prometheus/                Prometheus alerting rules
 tests/

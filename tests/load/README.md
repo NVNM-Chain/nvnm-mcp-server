@@ -1,12 +1,12 @@
 # k6 load tests (MCP HTTP)
 
-Load tests for the Inveniam EVM MCP server using [k6](https://k6.io/) against the **Streamable HTTP** transport. Requests are JSON-RPC 2.0 `POST` with `Content-Type: application/json`.
+Load tests for the NVNM Chain MCP server using [k6](https://k6.io/) against the **Streamable HTTP** transport. Requests are JSON-RPC 2.0 `POST` with `Content-Type: application/json`.
 
 ## Prerequisites
 
 - [k6](https://k6.io/docs/get-started/installation/) installed (`k6 version`).
 - MCP server running with HTTP transport and reachable JSON-RPC URL (see below).
-- Valid chain configuration: `INVENIAM_EVM_RPC_URL`, `INVENIAM_CHAIN_ID`, and `ANCHOR_ABI_PATH` as required by the server (see project `README.md`).
+- Valid chain configuration: `NVNM_EVM_RPC_URL`, `NVNM_CHAIN_ID`, and `ANCHOR_ABI_PATH` as required by the server (see project `README.md`).
 - **Authentication**: the current k6 script does **not** send `Authorization` headers. To run load tests, start the server with **no** keys configured (`MCP_API_KEYS_FILE` and `MCP_API_KEY` both unset, `AUTH_PROVIDER=apikey` default) so the server warns at startup but accepts all requests. If you need authenticated load testing, extend `k6_mcp_http.js` to read a token from `__ENV.MCP_AUTH_TOKEN` and add it to the request headers in `setup()` and the VU code.
 - **Rate limiting**: when `MCP_RATE_LIMIT` is set (default 60 req/s per client), all unauthenticated requests share a single bucket and high-VU scenarios will receive HTTP `429`. Either raise `MCP_RATE_LIMIT`/`MCP_RATE_BURST` for the load-test run, or unset them.
 

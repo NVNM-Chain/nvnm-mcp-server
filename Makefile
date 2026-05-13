@@ -39,8 +39,8 @@ MCP_ADDR := http://localhost:8080
 HEALTH_ADDR := http://localhost:9090
 
 run-local: build
-	INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-	INVENIAM_CHAIN_ID=58887 \
+	NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+	NVNM_CHAIN_ID=58887 \
 	ANCHOR_ABI_PATH="$(CURDIR)/abi/anchoring.json" \
 	ENABLE_WRITE_TOOLS=true \
 	LOG_LEVEL=debug \
@@ -166,8 +166,8 @@ docker-build:
 
 docker-run:
 	docker run --rm \
-		-e INVENIAM_EVM_RPC_URL \
-		-e INVENIAM_CHAIN_ID \
+		-e NVNM_EVM_RPC_URL \
+		-e NVNM_CHAIN_ID \
 		-e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
 		-e MCP_TRANSPORT=http \
 		-p 8080:8080 \
@@ -176,8 +176,8 @@ docker-run:
 docker-smoke: docker-build
 	@echo "Starting container..."
 	@CONTAINER_ID=$$(docker run -d --rm \
-		-e INVENIAM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-		-e INVENIAM_CHAIN_ID=58887 \
+		-e NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
+		-e NVNM_CHAIN_ID=58887 \
 		-e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
 		-e ENABLE_WRITE_TOOLS=true \
 		-e MCP_TRANSPORT=http \

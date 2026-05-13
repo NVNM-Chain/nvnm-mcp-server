@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const tracerName = "inveniam-mcp-server"
+const tracerName = "nvnm-mcp-server"
 
 type requestIDKey struct{}
 

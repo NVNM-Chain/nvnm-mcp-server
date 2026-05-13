@@ -142,12 +142,12 @@ Full reference: `README.md` (Configuration section).
 - Validate after loading; fail fast on missing or invalid values
 - Required fields (RPC URL, chain ID) must be non-empty
 - Timeouts must be positive durations
-- If write tools are enabled (`INVENIAM_WRITE_TOOLS_ENABLED=true`), signing config must be present
+- If write tools are enabled (`ENABLE_WRITE_TOOLS=true`), signing config must be present
 
 ```go
 func (c *Config) Validate() error {
     if c.RPCURL == "" {
-        return fmt.Errorf("INVENIAM_RPC_URL is required")
+        return fmt.Errorf("NVNM_EVM_RPC_URL is required")
     }
     if c.RequestTimeout <= 0 {
         return fmt.Errorf("request timeout must be positive")
@@ -167,7 +167,7 @@ func (c *Config) Validate() error {
 
 ### Naming
 
-- Chain-specific settings: `INVENIAM_` prefix
+- Chain-specific settings: `NVNM_` prefix (the former `INVENIAM_` prefix was hard-cut in Phase 8.9, see `docs/RUNBOOK.md#env-var-migration`)
 - Anchor-specific settings: `ANCHOR_` prefix
 - Document all new variables in `README.md`
 

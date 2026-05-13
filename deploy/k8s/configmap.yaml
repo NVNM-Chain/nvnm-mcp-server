@@ -12,10 +12,10 @@ data:
   # API keys) belongs in the companion Secret -- see
   # secret.yaml.example. Both are pulled via envFrom in deployment.yaml.
 
-  # Chain configuration. Note: INVENIAM_CHAIN_ID will be renamed to
-  # NVNM_CHAIN_ID in Phase 8.9 (breaking, hard cut). Operators should
-  # plan to swap when they bump the server version that ships 8.9.
-  INVENIAM_CHAIN_ID: "787111" # current testnet (nvnm-testnet-1)
+  # Chain configuration. The Phase 8.9 hard cut renamed the
+  # former INVENIAM_* env vars to NVNM_*; the server fails loud
+  # at startup if any legacy INVENIAM_* var is still set.
+  NVNM_CHAIN_ID: "787111" # current testnet (nvnm-testnet-1)
   ANCHOR_ABI_PATH: "/app/abi/anchoring.json"
 
   # Transports and ports.

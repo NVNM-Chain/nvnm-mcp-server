@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "inveniam-mcp-server.fullname" . }}-config
+  name: {{ include "nvnm-mcp-server.fullname" . }}-config
   labels:
-    {{- include "inveniam-mcp-server.labels" . | nindent 4 }}
+    {{- include "nvnm-mcp-server.labels" . | nindent 4 }}
 data:
 {{- range $k, $v := .Values.env }}
   {{ $k }}: {{ $v | quote }}

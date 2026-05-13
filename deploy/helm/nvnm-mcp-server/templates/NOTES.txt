@@ -11,18 +11,18 @@ MCP HTTP transport is exposed on port {{ .Values.service.ports.mcp }}; health ch
 
 2. Port-forward the MCP service for local access:
 
-   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "inveniam-mcp-server.fullname" . }} {{ .Values.service.ports.mcp }}:{{ .Values.service.ports.mcp }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "nvnm-mcp-server.fullname" . }} {{ .Values.service.ports.mcp }}:{{ .Values.service.ports.mcp }}
 
 3. Check health endpoints (metrics port):
 
-   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "inveniam-mcp-server.fullname" . }} {{ .Values.service.ports.metrics }}:{{ .Values.service.ports.metrics }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "nvnm-mcp-server.fullname" . }} {{ .Values.service.ports.metrics }}:{{ .Values.service.ports.metrics }}
    curl -sSf http://127.0.0.1:{{ .Values.service.ports.metrics }}/healthz
    curl -sSf http://127.0.0.1:{{ .Values.service.ports.metrics }}/readyz
 
 4. In-cluster MCP URL (replace cluster DNS suffix as needed):
 
-   http://{{ include "inveniam-mcp-server.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.ports.mcp }}
+   http://{{ include "nvnm-mcp-server.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.ports.mcp }}
 
 Ensure `INVENIAM_EVM_RPC_URL` and other `env` values in your values file or `--set` overrides are correct for your chain. Inspect the generated ConfigMap:
 
-   kubectl get configmap -n {{ .Release.Namespace }} {{ include "inveniam-mcp-server.fullname" . }}-config -o yaml
+   kubectl get configmap -n {{ .Release.Namespace }} {{ include "nvnm-mcp-server.fullname" . }}-config -o yaml

@@ -7,7 +7,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
-const meterName = "inveniam-mcp-server"
+const meterName = "nvnm-mcp-server"
 
 // Metrics holds all application-level metric instruments.
 type Metrics struct {

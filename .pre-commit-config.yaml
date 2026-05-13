@@ -15,6 +15,10 @@ repos:
         exclude: '\.md$'
       - id: end-of-file-fixer
       - id: check-yaml
+        # Same rationale as the yamllint exclude below: Helm chart
+        # templates use Go-template syntax that does not parse as YAML
+        # until rendered.
+        exclude: '^deploy/helm/[^/]+/templates/.*$'
       - id: check-toml
       - id: check-json
       - id: check-merge-conflict
@@ -43,6 +47,12 @@ repos:
     hooks:
       - id: yamllint
         args: [-d, relaxed]
+        # Helm chart templates contain Go-template syntax (`{{ ... }}`,
+        # `{{- include ... }}`) that yamllint cannot parse as YAML.
+        # The templates render to valid YAML at install time; the chart
+        # itself is validated by `helm lint` / `helm template`, not by
+        # yamllint.
+        exclude: '^deploy/helm/[^/]+/templates/.*$'
 
 default_language_version:
   golang: "1.26.2"

@@ -1,6 +1,51 @@
-# Operational runbook: Inveniam EVM MCP Server
+# Operational runbook: NVNM Chain MCP Server
 
-This document covers production deployment and day-two operations for the Go MCP server that exposes the Inveniam EVM chain (NVNM L2, chain ID **58887**) via MCP tools, with HTTP transport, separate health/metrics port, OpenTelemetry traces, and Prometheus metrics.
+This document covers production deployment and day-two operations for the Go MCP server that exposes the NVNM Chain (Inveniam L2 on MANTRA, chain ID **58887**) via MCP tools, with HTTP transport, separate health/metrics port, OpenTelemetry traces, and Prometheus metrics.
+
+---
+
+## Env var migration
+
+**Phase 8.9 (2026-05-13, BREAKING):** all chain/RPC config keys moved from the `INVENIAM_*` prefix to `NVNM_*`. There is no compatibility alias. `Config.Load` runs a pre-validation pass at startup; if **any** of the three legacy keys are set in the environment, the server exits immediately with an error pointing back to this section. The strict policy fires even when the matching `NVNM_*` is also set — dual-populated config is the silent-drift trap fail-loud exists to catch.
+
+### Migration table
+
+| Phase 8.9 (current) | Pre-8.9 (rejected) | Notes |
+|---------------------|--------------------|-------|
+| `NVNM_EVM_RPC_URL` | `INVENIAM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint. Required. |
+| `NVNM_EVM_ARCHIVE_RPC_URL` | `INVENIAM_EVM_ARCHIVE_RPC_URL` | Reserved for archive RPC; optional. |
+| `NVNM_CHAIN_ID` | `INVENIAM_CHAIN_ID` | Expected chain ID. Required. |
+
+Already-present `NVNM_*` knobs (`NVNM_CHAIN_ENVIRONMENT`, `NVNM_ALLOWED_ORIGINS`, `NVNM_DOCS_URL`, `NVNM_EXPLORER_URL`, `NVNM_BRIDGE_URL`) are unchanged by the rename — they were always under the `NVNM_*` prefix.
+
+### Steps for an existing deployment
+
+1. **In every ConfigMap, Helm `values.yaml`, `.env`, systemd unit, Compose file, Terraform module, or shell wrapper that sets `INVENIAM_*`:** rename the key to its `NVNM_*` equivalent per the table above. Don't keep the old key alongside the new one — the server treats that as a configuration error and refuses to start.
+2. **Diff the change before deploying.** If your secrets manager / values overlay sets either prefix dynamically, search for `INVENIAM_` across all overlay layers.
+3. **Restart workloads.** First start under the new binary either succeeds with `NVNM_*` only, or fails loud with a message listing each detected legacy key and a pointer back to this section.
+
+### What the failure looks like
+
+```
+config error: legacy INVENIAM_* env vars detected; rename to NVNM_*
+per docs/RUNBOOK.md#env-var-migration: found INVENIAM_EVM_RPC_URL,
+INVENIAM_CHAIN_ID. Migration table: docs/RUNBOOK.md#env-var-migration
+```
+
+No partial startup, no silent fallback. The error names every legacy key it found so a single restart surfaces all of them.
+
+### Server identity changes shipped alongside
+
+Phase 8.9 also renamed three operator-visible identity strings to match the chain rename. None of these are user-configured, but they appear in telemetry, MCP `initialize` responses, and logs:
+
+| Identifier | Pre-8.9 | Phase 8.9 |
+|------------|---------|-----------|
+| MCP server name (`initialize` response) | `inveniam-evm` | `nvnm-chain` |
+| OTel `OTEL_SERVICE_NAME` default | `inveniam-mcp-server` | `nvnm-mcp-server` |
+| OTel Tracer / Meter name (internal) | `inveniam-mcp-server` | `nvnm-mcp-server` |
+| Helm chart name (`deploy/helm/.../Chart.yaml`) | `inveniam-mcp-server` | `nvnm-mcp-server` |
+
+Dashboards that filter by `service.name`, `tracer`, or `meter` will need their queries updated. Dashboard updates can lag the deploy — the metrics keep flowing, they're just labeled differently — but plan for the cutover in the same change window.
 
 ---
 
@@ -10,8 +55,8 @@ This document covers production deployment and day-two operations for the Go MCP
 
 | Variable | Purpose |
 |----------|---------|
-| `INVENIAM_EVM_RPC_URL` | Primary EVM JSON-RPC URL (`http://` or `https://` only). May include query parameters for provider API keys; treat as secret if it does. |
-| `INVENIAM_CHAIN_ID` | Expected chain ID; must be a positive integer (e.g. `58887`). Startup fails validation if missing or invalid. |
+| `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC URL (`http://` or `https://` only). May include query parameters for provider API keys; treat as secret if it does. |
+| `NVNM_CHAIN_ID` | Expected chain ID; must be a positive integer (e.g. `58887`). Startup fails validation if missing or invalid. |
 
 Production default RPC for this network: `https://evm.inveniam.mantrachain.io`.
 
@@ -27,7 +72,7 @@ Set to `/app/abi/anchoring.json` when that file is baked into the image (see bel
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `INVENIAM_EVM_ARCHIVE_RPC_URL` | _(empty)_ | Reserved for archive RPC when historical-query routing is implemented; not consumed by the current binary for routing. |
+| `NVNM_EVM_ARCHIVE_RPC_URL` | _(empty)_ | Reserved for archive RPC when historical-query routing is implemented; not consumed by the current binary for routing. |
 | `ANCHOR_ADDRESS` | `0x0000000000000000000000000000000000000A00` | Anchor precompile address. |
 | `REQUEST_TIMEOUT` | `15s` | Per-upstream-call context timeout on the EVM client. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. |
@@ -38,15 +83,15 @@ Set to `/app/abi/anchoring.json` when that file is baked into the image (see bel
 | `ENABLE_PROMETHEUS` | `true` | When `true`, serves `GET /metrics` on the metrics port. |
 | `ENABLE_STDOUT_TELEMETRY` | `false` | Emit OTel spans/metrics to stdout (debug only). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | OTLP gRPC endpoint (e.g. `otel-collector:4317`); enables trace and metric export to a collector. |
-| `OTEL_SERVICE_NAME` | `inveniam-mcp-server` | Service name in OTel resource. |
+| `OTEL_SERVICE_NAME` | `nvnm-mcp-server` | Service name in OTel resource. |
 
-### NVNM-prefixed environment variables (introduced in Phase 8)
+### Additional NVNM-prefixed environment variables
 
-Phase 8 introduced a set of new operator-facing knobs under the `NVNM_*` prefix. These are additive to the existing `INVENIAM_*` chain configuration; a hard-cut rename of the older prefix is planned for Phase 8.9 (tracked in `docs/IMPLEMENTATION_PLAN.md`). Until that rename ships, both prefixes coexist and the two namespaces target different concerns: `INVENIAM_*` for chain/RPC config, `NVNM_*` for Phase 8 onboarding + transport hardening.
+The following `NVNM_*` knobs are additive to the required chain config above. They surface in onboarding-tool responses or gate the HTTP transport's Origin-header allowlist.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NVNM_CHAIN_ENVIRONMENT` | inferred from `INVENIAM_CHAIN_ID` | `testnet` or `mainnet`. Selects env-aware token naming (`mantraUSD`/`wmantraUSD` vs `mmUSD`/`wmmUSD`) for onboarding-tool responses. Inference falls back to `testnet` for chain IDs the server does not recognize (787111 → testnet; 1611 → mainnet). |
+| `NVNM_CHAIN_ENVIRONMENT` | inferred from `NVNM_CHAIN_ID` | `testnet` or `mainnet`. Selects env-aware token naming (`mantraUSD`/`wmantraUSD` vs `mmUSD`/`wmmUSD`) for onboarding-tool responses. Inference falls back to `testnet` for chain IDs the server does not recognize (787111 → testnet; 1611 → mainnet). |
 | `NVNM_DOCS_URL` | _(empty)_ | Operator-facing docs URL surfaced in onboarding-tool responses (e.g., the wizard's "where to learn more" hint). Optional. |
 | `NVNM_EXPLORER_URL` | _(empty)_ | Block-explorer URL surfaced to agents in onboarding-tool responses. Optional. |
 | `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
@@ -135,7 +180,7 @@ When approval is `required`:
 
 ### Secrets management
 
-- Store `INVENIAM_EVM_RPC_URL` in Kubernetes Secrets, AWS Secrets Manager/SSM, or equivalent when it contains API keys or signed tokens.
+- Store `NVNM_EVM_RPC_URL` in Kubernetes Secrets, AWS Secrets Manager/SSM, or equivalent when it contains API keys or signed tokens.
 - Store `MCP_API_KEYS_FILE` contents or `MCP_API_KEY` value in the platform secret store. The key store file (`.mcp-keys.json`) is gitignored.
 - Prefer injecting secrets via environment from the platform secret store; avoid committing URLs or API keys to Git.
 - Logs redact full RPC URLs to host-only where configured; still treat the env value as sensitive.
@@ -197,7 +242,7 @@ Background probes run every **30 seconds** (`readinessCheckInterval` in `interna
 
 ## 3. Metrics reference
 
-Metrics are registered on the OpenTelemetry `Meter` named `inveniam-mcp-server` and exported through the OTel Prometheus exporter. Exact Prometheus series names and histogram layout follow the exporter and `prometheus/otlptranslator` naming rules (including `otel_scope_*` labels on exported metrics). After deployment, confirm live names with:
+Metrics are registered on the OpenTelemetry `Meter` named `nvnm-mcp-server` and exported through the OTel Prometheus exporter. Exact Prometheus series names and histogram layout follow the exporter and `prometheus/otlptranslator` naming rules (including `otel_scope_*` labels on exported metrics). After deployment, confirm live names with:
 
 ```bash
 curl -sS "http://<pod-ip>:9090/metrics" | grep -E 'mcp|evm_rpc|tool|active'
@@ -232,7 +277,7 @@ Prometheus alert rules ship with the repo at **`deploy/prometheus/alerts.yaml`**
 ### `InveniamMCPHighErrorRate`
 
 - **Likely cause:** Upstream RPC errors, timeouts, or tool-level failures.
-- **Actions:** Inspect `mcp.server.tool.errors` and `evm.rpc.errors` by label; search logs for `"status":"error"` and `level` `ERROR`; verify `INVENIAM_EVM_RPC_URL` reachability and provider status.
+- **Actions:** Inspect `mcp.server.tool.errors` and `evm.rpc.errors` by label; search logs for `"status":"error"` and `level` `ERROR`; verify `NVNM_EVM_RPC_URL` reachability and provider status.
 
 ### `InveniamMCPCriticalErrorRate`
 
@@ -311,7 +356,7 @@ Structured logs are JSON on **stderr** (`slog` JSON handler). Each MCP tool invo
 
 ### AWS CloudWatch Logs Insights
 
-Replace log group with yours (e.g. `/ecs/inveniam-mcp-server`):
+Replace log group with yours (e.g. `/ecs/nvnm-mcp-server`):
 
 ```
 fields @timestamp, tool, status, duration, request_id, msg
@@ -339,11 +384,11 @@ fields @timestamp, tool, status, request_id
 ### Grafana Loki (LogQL)
 
 ```logql
-{job="inveniam-mcp-server"} | json | status = "error"
+{job="nvnm-mcp-server"} | json | status = "error"
 ```
 
 ```logql
-{job="inveniam-mcp-server"} | json | tool = `anchor_get_registries`
+{job="nvnm-mcp-server"} | json | tool = `anchor_get_registries`
 ```
 
 ### Correlating logs with traces
@@ -496,8 +541,8 @@ The MCP server holds **no durable application state**. Recovery is redeploy and 
 
 ### RPC endpoint failover
 
-- If you operate a secondary RPC URL, update `INVENIAM_EVM_RPC_URL` (and restart workloads). Archive URL env exists for future use; confirm code support before relying on split routing.
-- Verify chain ID still matches `INVENIAM_CHAIN_ID`.
+- If you operate a secondary RPC URL, update `NVNM_EVM_RPC_URL` (and restart workloads). Archive URL env exists for future use; confirm code support before relying on split routing.
+- Verify chain ID still matches `NVNM_CHAIN_ID`.
 
 ### Post-recovery verification
 

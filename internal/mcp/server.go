@@ -17,7 +17,7 @@ import (
 	"github.com/inveniam/nvnm-mcp-server/internal/version"
 )
 
-const serverName = "inveniam-evm"
+const serverName = "nvnm-chain"
 
 // Server wraps the MCP server with its dependencies.
 type Server struct {

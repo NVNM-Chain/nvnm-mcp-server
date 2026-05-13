@@ -11,9 +11,9 @@ import (
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"INVENIAM_EVM_RPC_URL",
-		"INVENIAM_EVM_ARCHIVE_RPC_URL",
-		"INVENIAM_CHAIN_ID",
+		"NVNM_EVM_RPC_URL",
+		"NVNM_EVM_ARCHIVE_RPC_URL",
+		"NVNM_CHAIN_ID",
 		"ANCHOR_ADDRESS",
 		"ANCHOR_ABI_PATH",
 		"REQUEST_TIMEOUT",
@@ -55,8 +55,8 @@ func clearEnv(t *testing.T) {
 
 func setMinimalEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
-	t.Setenv("INVENIAM_CHAIN_ID", "58887")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
+	t.Setenv("NVNM_CHAIN_ID", "58887")
 	// Chain ID 58887 (the old manveniam-1) is intentionally not in the
 	// recognized list. Set NVNM_CHAIN_ENVIRONMENT explicitly so Load()
 	// has a fail-safe answer for non-recognized chain IDs. Tests that
@@ -101,9 +101,9 @@ func TestLoad_Minimal(t *testing.T) {
 
 func TestLoad_AllFields(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://rpc.example.com")
-	t.Setenv("INVENIAM_EVM_ARCHIVE_RPC_URL", "https://archive.example.com")
-	t.Setenv("INVENIAM_CHAIN_ID", "1")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
+	t.Setenv("NVNM_EVM_ARCHIVE_RPC_URL", "https://archive.example.com")
+	t.Setenv("NVNM_CHAIN_ID", "1")
 	t.Setenv("ANCHOR_ADDRESS", "0x1234567890abcdef1234567890abcdef12345678")
 	t.Setenv("ANCHOR_ABI_PATH", "/tmp/test.json")
 	t.Setenv("REQUEST_TIMEOUT", "30s")
@@ -159,7 +159,7 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			name: "missing RPC URL",
 			setup: func(t *testing.T) {
 				t.Helper()
-				t.Setenv("INVENIAM_CHAIN_ID", "1")
+				t.Setenv("NVNM_CHAIN_ID", "1")
 			},
 			wantErr: ErrMissingRPCURL,
 		},
@@ -167,8 +167,8 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			name: "invalid RPC URL scheme",
 			setup: func(t *testing.T) {
 				t.Helper()
-				t.Setenv("INVENIAM_EVM_RPC_URL", "ws://rpc.example.com")
-				t.Setenv("INVENIAM_CHAIN_ID", "1")
+				t.Setenv("NVNM_EVM_RPC_URL", "ws://rpc.example.com")
+				t.Setenv("NVNM_CHAIN_ID", "1")
 			},
 			wantErr: ErrInvalidRPCURL,
 		},
@@ -176,7 +176,7 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			name: "missing chain ID",
 			setup: func(t *testing.T) {
 				t.Helper()
-				t.Setenv("INVENIAM_EVM_RPC_URL", "https://rpc.example.com")
+				t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
 			},
 			wantErr: ErrInvalidChainID,
 		},
@@ -184,8 +184,8 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			name: "invalid transport",
 			setup: func(t *testing.T) {
 				t.Helper()
-				t.Setenv("INVENIAM_EVM_RPC_URL", "https://rpc.example.com")
-				t.Setenv("INVENIAM_CHAIN_ID", "1")
+				t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
+				t.Setenv("NVNM_CHAIN_ID", "1")
 				t.Setenv("MCP_TRANSPORT", "grpc")
 			},
 			wantErr: ErrInvalidTransport,
@@ -237,22 +237,22 @@ func TestLoad_ValidationErrors(t *testing.T) {
 
 func TestLoad_InvalidChainID(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://rpc.example.com")
-	t.Setenv("INVENIAM_CHAIN_ID", "not-a-number")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
+	t.Setenv("NVNM_CHAIN_ID", "not-a-number")
 
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "invalid INVENIAM_CHAIN_ID") {
+	if !strings.Contains(err.Error(), "invalid NVNM_CHAIN_ID") {
 		t.Errorf("error = %q, want substring about invalid chain ID", err.Error())
 	}
 }
 
 func TestLoad_InvalidTimeout(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://rpc.example.com")
-	t.Setenv("INVENIAM_CHAIN_ID", "1")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
+	t.Setenv("NVNM_CHAIN_ID", "1")
 	t.Setenv("REQUEST_TIMEOUT", "bad")
 
 	_, err := Load()
@@ -317,8 +317,8 @@ func TestLoad_TelemetryDefaults(t *testing.T) {
 	if cfg.OTELEndpoint != "" {
 		t.Errorf("OTELEndpoint = %q, want empty (disabled by default)", cfg.OTELEndpoint)
 	}
-	if cfg.OTELServiceName != "inveniam-mcp-server" {
-		t.Errorf("OTELServiceName = %q, want %q", cfg.OTELServiceName, "inveniam-mcp-server")
+	if cfg.OTELServiceName != "nvnm-mcp-server" {
+		t.Errorf("OTELServiceName = %q, want %q", cfg.OTELServiceName, "nvnm-mcp-server")
 	}
 	if !cfg.EnablePrometheus {
 		t.Error("EnablePrometheus should default to true")
@@ -633,8 +633,8 @@ func TestLoad_ChainEnvironment_FailsFastForUnknownChainID(t *testing.T) {
 	// so this test exercises the "unrecognized chain ID + no operator
 	// override" path. The previous behavior silently fell back to
 	// testnet; the new behavior is fail-fast.
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
-	t.Setenv("INVENIAM_CHAIN_ID", "58887")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
+	t.Setenv("NVNM_CHAIN_ID", "58887")
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for unrecognized chain ID with no explicit NVNM_CHAIN_ENVIRONMENT, got nil")
@@ -658,8 +658,8 @@ func TestLoad_ChainEnvironment_ExplicitTestnetWithUnrecognizedChainID(t *testing
 
 func TestLoad_ChainEnvironment_InferredFromTestnetChainID(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
-	t.Setenv("INVENIAM_CHAIN_ID", "787111")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
+	t.Setenv("NVNM_CHAIN_ID", "787111")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -671,8 +671,8 @@ func TestLoad_ChainEnvironment_InferredFromTestnetChainID(t *testing.T) {
 
 func TestLoad_ChainEnvironment_InferredFromMainnetChainID(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.nvnmchain.io")
-	t.Setenv("INVENIAM_CHAIN_ID", "1611")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.nvnmchain.io")
+	t.Setenv("NVNM_CHAIN_ID", "1611")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -684,8 +684,8 @@ func TestLoad_ChainEnvironment_InferredFromMainnetChainID(t *testing.T) {
 
 func TestLoad_ChainEnvironment_ExplicitOverridesInference(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("INVENIAM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
-	t.Setenv("INVENIAM_CHAIN_ID", "787111") // testnet by inference
+	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
+	t.Setenv("NVNM_CHAIN_ID", "787111") // testnet by inference
 	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "mainnet")
 	cfg, err := Load()
 	if err != nil {
@@ -773,5 +773,45 @@ func TestLoad_AllowedOrigins_NilWhenUnset(t *testing.T) {
 	}
 	if cfg.AllowedOrigins != nil {
 		t.Errorf("AllowedOrigins = %v, want nil when NVNM_ALLOWED_ORIGINS is unset", cfg.AllowedOrigins)
+	}
+}
+
+// TestLoad_RejectsLegacyEnvVars is the Phase 8.9 hard-cut
+// regression. The server MUST fail loud at startup if any of the
+// three former INVENIAM_* env vars is still set, even when the
+// matching NVNM_* var is also set. Strict policy chosen
+// 2026-05-13 so operators cannot leave stale config silently in
+// place during a deployment that thinks it migrated.
+func TestLoad_RejectsLegacyEnvVars(t *testing.T) {
+	cases := []struct {
+		name      string
+		legacyKey string
+		legacyVal string
+	}{
+		{"rpc_url", "INVENIAM_EVM_RPC_URL", "https://legacy.example.com"},
+		{"archive_url", "INVENIAM_EVM_ARCHIVE_RPC_URL", "https://archive.example.com"},
+		{"chain_id", "INVENIAM_CHAIN_ID", "1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t)
+			setMinimalEnv(t) // populates NVNM_* equivalents
+			t.Setenv(tc.legacyKey, tc.legacyVal)
+			t.Cleanup(func() { os.Unsetenv(tc.legacyKey) })
+
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load: expected error for legacy var %s, got nil", tc.legacyKey)
+			}
+			if !errors.Is(err, ErrLegacyEnvVars) {
+				t.Errorf("Load: error = %v, want wraps ErrLegacyEnvVars", err)
+			}
+			if !strings.Contains(err.Error(), tc.legacyKey) {
+				t.Errorf("Load: error %q must name the offending legacy key %s", err, tc.legacyKey)
+			}
+			if !strings.Contains(err.Error(), "docs/RUNBOOK.md") {
+				t.Errorf("Load: error %q must point at the migration runbook", err)
+			}
+		})
 	}
 }

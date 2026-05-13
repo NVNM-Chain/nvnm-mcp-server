@@ -173,7 +173,7 @@ Layered Go packages: `cmd/` -> `config`, `logging`, `telemetry`, `evm`, `anchor`
 ### Secrets Flow Summary
 
 ```
-Operator --[env var injection]--> INVENIAM_EVM_RPC_URL
+Operator --[env var injection]--> NVNM_EVM_RPC_URL
                                      |
                       +--------------+--------------+
                       |              |              |
@@ -590,7 +590,7 @@ All "Immediate Fixes" and "Before Red Team" items have been implemented. Each fi
 | Aspect | Detail |
 |---|---|
 | Fix | Aligned Helm chart with raw K8s deployment manifest |
-| Files | `deploy/helm/inveniam-mcp-server/values.yaml`, `deploy/helm/inveniam-mcp-server/templates/deployment.yaml` |
+| Files | `deploy/helm/nvnm-mcp-server/values.yaml`, `deploy/helm/nvnm-mcp-server/templates/deployment.yaml` |
 | Changes | Pod security context now includes `runAsUser: 65532`, `runAsGroup: 65532`, `runAsNonRoot: true`. Container security context now includes `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]`. Values split into `podSecurityContext` and `containerSecurityContext` for clarity. |
 | Verification | Template renders correctly with new values structure |
 
@@ -932,5 +932,5 @@ Phase 8 also tracks the following security items still pending:
 |---|---|---|
 | **API-key hashing at rest** with `.pre-migration` backup + atomic tmp-rename writes | 8.6 (IRREVERSIBLE) | Current `main` stores raw bearer tokens on disk in operator-managed key stores. Any earlier "stored hashed at rest" claim in this document is **not yet accurate** -- the migration in 8.6 will make it true. Until 8.6 ships, operators should treat the key store file as a high-sensitivity secret comparable to `.env`-style credentials. |
 | Constant-time auth comparison on the hash bytes | 8.7 | Defense-in-depth alongside the hash-lookup path. |
-| Server identity rename + `INVENIAM_*` → `NVNM_*` env-var hard cut with fail-loud guard | 8.9 (BREAKING) | Eliminates the dual-prefix transient state. |
+| Server identity rename + `INVENIAM_*` → `NVNM_*` env-var hard cut with fail-loud guard | 8.9 (BREAKING) -- **SHIPPED 2026-05-13** | Eliminates the dual-prefix transient state. Strict policy: legacy var detected at startup fails loud even when the matching `NVNM_*` is also set. See `docs/RUNBOOK.md#env-var-migration`. |
 | OWASP Top-10 self-audit gate | 8.12 | Final close-out before Phase 8 marked COMPLETE. |

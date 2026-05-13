@@ -24,9 +24,15 @@ resources:
     cpu: 500m
 
 # Non-secret configuration; injected via ConfigMap.
+#
+# Phase 8.9 (BREAKING, 2026-05-13): chain config moved from the
+# INVENIAM_* prefix to NVNM_*. The server fails loud at startup if
+# any legacy INVENIAM_EVM_RPC_URL, INVENIAM_EVM_ARCHIVE_RPC_URL, or
+# INVENIAM_CHAIN_ID is set in the environment -- even alongside the
+# NVNM_* equivalent. See docs/RUNBOOK.md#env-var-migration.
 env:
-  INVENIAM_EVM_RPC_URL: ""
-  INVENIAM_CHAIN_ID: "58887"
+  NVNM_EVM_RPC_URL: ""
+  NVNM_CHAIN_ID: "58887"
   ANCHOR_ABI_PATH: ""
   MCP_TRANSPORT: "http"
   LOG_LEVEL: "info"

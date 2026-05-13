@@ -11,9 +11,12 @@ import (
 
 // Sentinel validation errors.
 var (
-	ErrMissingRPCURL          = errors.New("INVENIAM_EVM_RPC_URL is required")
-	ErrInvalidRPCURL          = errors.New("INVENIAM_EVM_RPC_URL must start with http:// or https://")
-	ErrInvalidChainID         = errors.New("INVENIAM_CHAIN_ID must be a positive integer")
+	ErrMissingRPCURL  = errors.New("NVNM_EVM_RPC_URL is required")
+	ErrInvalidRPCURL  = errors.New("NVNM_EVM_RPC_URL must start with http:// or https://")
+	ErrInvalidChainID = errors.New("NVNM_CHAIN_ID must be a positive integer")
+	ErrLegacyEnvVars  = errors.New(
+		"legacy INVENIAM_* env vars detected; rename to NVNM_* per docs/RUNBOOK.md#env-var-migration",
+	)
 	ErrInvalidTimeout         = errors.New("REQUEST_TIMEOUT must be a positive duration")
 	ErrInvalidTransport       = errors.New("MCP_TRANSPORT must be \"stdio\" or \"http\"")
 	ErrInvalidRetries         = errors.New("RPC_MAX_RETRIES must be non-negative")
@@ -125,11 +128,40 @@ type Config struct {
 	TrustProxyHeaders bool
 }
 
+// detectLegacyEnvVars returns the names of any pre-Phase-8.9
+// INVENIAM_* env vars currently set in the process environment.
+// The legacy set is hard-coded -- only the three vars that the
+// server ever read under the old prefix qualify; arbitrary
+// INVENIAM_* keys in the environment (from unrelated tooling)
+// are ignored. Strict policy: if any are present, we fail loud
+// regardless of whether the matching NVNM_* var is also set, so
+// operators cannot leave stale config silently in place.
+func detectLegacyEnvVars() []string {
+	legacyKeys := []string{
+		"INVENIAM_EVM_RPC_URL",
+		"INVENIAM_EVM_ARCHIVE_RPC_URL",
+		"INVENIAM_CHAIN_ID",
+	}
+	var found []string
+	for _, k := range legacyKeys {
+		if _, ok := os.LookupEnv(k); ok {
+			found = append(found, k)
+		}
+	}
+	return found
+}
+
 // Load reads configuration from environment variables and returns a validated Config.
 func Load() (*Config, error) {
+	if legacy := detectLegacyEnvVars(); len(legacy) > 0 {
+		return nil, fmt.Errorf(
+			"%w: found %s. Migration table: docs/RUNBOOK.md#env-var-migration",
+			ErrLegacyEnvVars, strings.Join(legacy, ", "),
+		)
+	}
 	cfg := &Config{
-		EVMRPCURL:        os.Getenv("INVENIAM_EVM_RPC_URL"),
-		EVMArchiveRPCURL: os.Getenv("INVENIAM_EVM_ARCHIVE_RPC_URL"),
+		EVMRPCURL:        os.Getenv("NVNM_EVM_RPC_URL"),
+		EVMArchiveRPCURL: os.Getenv("NVNM_EVM_ARCHIVE_RPC_URL"),
 		AnchorAddress:    envOrDefault("ANCHOR_ADDRESS", "0x0000000000000000000000000000000000000A00"),
 		AnchorABIPath:    os.Getenv("ANCHOR_ABI_PATH"),
 		LogLevel:         envOrDefault("LOG_LEVEL", "info"),
@@ -137,11 +169,11 @@ func Load() (*Config, error) {
 		HTTPAddr:         envOrDefault("MCP_HTTP_ADDR", ":8080"),
 	}
 
-	chainIDStr := os.Getenv("INVENIAM_CHAIN_ID")
+	chainIDStr := os.Getenv("NVNM_CHAIN_ID")
 	if chainIDStr != "" {
 		id, err := strconv.ParseInt(chainIDStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid INVENIAM_CHAIN_ID %q: %w", chainIDStr, err)
+			return nil, fmt.Errorf("invalid NVNM_CHAIN_ID %q: %w", chainIDStr, err)
 		}
 		cfg.ChainID = id
 	}
@@ -165,7 +197,7 @@ func Load() (*Config, error) {
 	cfg.AdminAPIAddr = envOrDefault("ADMIN_API_ADDR", "127.0.0.1:8081")
 
 	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "inveniam-mcp-server")
+	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "nvnm-mcp-server")
 	cfg.EnablePrometheus = envOrDefault("ENABLE_PROMETHEUS", "true") == "true"
 	cfg.EnableStdoutTel = envOrDefault("ENABLE_STDOUT_TELEMETRY", "false") == "true"
 	// Secure-by-default: OTLP gRPC connects with TLS unless the
@@ -176,54 +208,9 @@ func Load() (*Config, error) {
 	cfg.OTLPInsecure = envOrDefault("OTLP_INSECURE", "false") == "true"
 	cfg.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
 
-	retryStr := envOrDefault("RPC_MAX_RETRIES", "3")
-	retries, err := strconv.Atoi(retryStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid RPC_MAX_RETRIES %q: %w", retryStr, err)
+	if loadErr := cfg.loadResilienceConfig(); loadErr != nil {
+		return nil, loadErr
 	}
-	cfg.RPCMaxRetries = retries
-
-	initialBackoffStr := envOrDefault("RPC_INITIAL_BACKOFF", "500ms")
-	initialBackoff, err := time.ParseDuration(initialBackoffStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid RPC_INITIAL_BACKOFF %q: %w", initialBackoffStr, err)
-	}
-	cfg.RPCInitialBackoff = initialBackoff
-
-	maxBackoffStr := envOrDefault("RPC_MAX_BACKOFF", "10s")
-	maxBackoff, err := time.ParseDuration(maxBackoffStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid RPC_MAX_BACKOFF %q: %w", maxBackoffStr, err)
-	}
-	cfg.RPCMaxBackoff = maxBackoff
-
-	rateLimitStr := envOrDefault("RPC_RATE_LIMIT", "100")
-	rateLimit, err := strconv.ParseFloat(rateLimitStr, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid RPC_RATE_LIMIT %q: %w", rateLimitStr, err)
-	}
-	cfg.RPCRateLimit = rateLimit
-
-	rateBurstStr := envOrDefault("RPC_RATE_BURST", "20")
-	rateBurst, err := strconv.Atoi(rateBurstStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid RPC_RATE_BURST %q: %w", rateBurstStr, err)
-	}
-	cfg.RPCRateBurst = rateBurst
-
-	breakerThresholdStr := envOrDefault("CIRCUIT_BREAKER_THRESHOLD", "5")
-	breakerThreshold, err := strconv.ParseUint(breakerThresholdStr, 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("invalid CIRCUIT_BREAKER_THRESHOLD %q: %w", breakerThresholdStr, err)
-	}
-	cfg.CircuitBreakerThreshold = uint32(breakerThreshold)
-
-	breakerTimeoutStr := envOrDefault("CIRCUIT_BREAKER_TIMEOUT", "30s")
-	breakerTimeout, err := time.ParseDuration(breakerTimeoutStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid CIRCUIT_BREAKER_TIMEOUT %q: %w", breakerTimeoutStr, err)
-	}
-	cfg.CircuitBreakerTimeout = breakerTimeout
 
 	sampleRatioStr := envOrDefault("OTEL_TRACE_SAMPLE_RATIO", "1.0")
 	sampleRatio, err := strconv.ParseFloat(sampleRatioStr, 64)
@@ -264,6 +251,63 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadResilienceConfig parses the RPC retry / backoff / rate-limit /
+// circuit-breaker env vars into c. Extracted from Load() to keep
+// Load's cyclomatic complexity below the project's gocyclo threshold;
+// each parse adds a branch and these knobs cluster naturally.
+func (c *Config) loadResilienceConfig() error {
+	retryStr := envOrDefault("RPC_MAX_RETRIES", "3")
+	retries, err := strconv.Atoi(retryStr)
+	if err != nil {
+		return fmt.Errorf("invalid RPC_MAX_RETRIES %q: %w", retryStr, err)
+	}
+	c.RPCMaxRetries = retries
+
+	initialBackoffStr := envOrDefault("RPC_INITIAL_BACKOFF", "500ms")
+	initialBackoff, err := time.ParseDuration(initialBackoffStr)
+	if err != nil {
+		return fmt.Errorf("invalid RPC_INITIAL_BACKOFF %q: %w", initialBackoffStr, err)
+	}
+	c.RPCInitialBackoff = initialBackoff
+
+	maxBackoffStr := envOrDefault("RPC_MAX_BACKOFF", "10s")
+	maxBackoff, err := time.ParseDuration(maxBackoffStr)
+	if err != nil {
+		return fmt.Errorf("invalid RPC_MAX_BACKOFF %q: %w", maxBackoffStr, err)
+	}
+	c.RPCMaxBackoff = maxBackoff
+
+	rateLimitStr := envOrDefault("RPC_RATE_LIMIT", "100")
+	rateLimit, err := strconv.ParseFloat(rateLimitStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid RPC_RATE_LIMIT %q: %w", rateLimitStr, err)
+	}
+	c.RPCRateLimit = rateLimit
+
+	rateBurstStr := envOrDefault("RPC_RATE_BURST", "20")
+	rateBurst, err := strconv.Atoi(rateBurstStr)
+	if err != nil {
+		return fmt.Errorf("invalid RPC_RATE_BURST %q: %w", rateBurstStr, err)
+	}
+	c.RPCRateBurst = rateBurst
+
+	breakerThresholdStr := envOrDefault("CIRCUIT_BREAKER_THRESHOLD", "5")
+	breakerThreshold, err := strconv.ParseUint(breakerThresholdStr, 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid CIRCUIT_BREAKER_THRESHOLD %q: %w", breakerThresholdStr, err)
+	}
+	c.CircuitBreakerThreshold = uint32(breakerThreshold)
+
+	breakerTimeoutStr := envOrDefault("CIRCUIT_BREAKER_TIMEOUT", "30s")
+	breakerTimeout, err := time.ParseDuration(breakerTimeoutStr)
+	if err != nil {
+		return fmt.Errorf("invalid CIRCUIT_BREAKER_TIMEOUT %q: %w", breakerTimeoutStr, err)
+	}
+	c.CircuitBreakerTimeout = breakerTimeout
+
+	return nil
 }
 
 // loadChainEnvironment resolves c.ChainEnvironment from

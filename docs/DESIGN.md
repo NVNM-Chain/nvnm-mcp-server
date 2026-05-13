@@ -506,7 +506,7 @@ type Config struct {
 
     // Telemetry
     OTELEndpoint     string        // OTEL_EXPORTER_OTLP_ENDPOINT; enables OTLP export
-    OTELServiceName  string        // default "inveniam-mcp-server"
+    OTELServiceName  string        // default "nvnm-mcp-server"
     OTLPInsecure     bool          // OTLP_INSECURE; default true; set false for TLS
     TraceSampleRatio float64       // OTEL_TRACE_SAMPLE_RATIO; default 1.0
     EnablePrometheus bool          // default true; exposes /metrics
@@ -618,9 +618,10 @@ OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric 
 
 Once mainnet is live alongside testnet, the server supports **both** by
 **running two independent instances**, one per chain. Each instance is
-pinned to its chain at startup via `INVENIAM_EVM_RPC_URL`,
-`INVENIAM_CHAIN_ID`, and `NVNM_CHAIN_ENVIRONMENT` (the env-var prefix
-moves to `NVNM_*` in Phase 8.9 -- the model stays the same).
+pinned to its chain at startup via `NVNM_EVM_RPC_URL`,
+`NVNM_CHAIN_ID`, and `NVNM_CHAIN_ENVIRONMENT`. (The Phase 8.9 hard
+cut renamed these from the legacy `INVENIAM_*` prefix; see
+`docs/RUNBOOK.md#env-var-migration`.)
 
 ```
                     ┌── [server-testnet] ─── HTTPS ──► [testnet RPC]

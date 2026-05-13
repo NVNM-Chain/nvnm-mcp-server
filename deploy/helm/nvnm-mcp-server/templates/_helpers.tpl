@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "inveniam-mcp-server.name" -}}
+{{- define "nvnm-mcp-server.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "inveniam-mcp-server.fullname" -}}
+{{- define "nvnm-mcp-server.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,16 +24,16 @@ Create a default fully qualified app name.
 {{/*
 Chart name and version, suitable for label values.
 */}}
-{{- define "inveniam-mcp-server.chart" -}}
+{{- define "nvnm-mcp-server.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "inveniam-mcp-server.labels" -}}
-helm.sh/chart: {{ include "inveniam-mcp-server.chart" . }}
-{{ include "inveniam-mcp-server.selectorLabels" . }}
+{{- define "nvnm-mcp-server.labels" -}}
+helm.sh/chart: {{ include "nvnm-mcp-server.chart" . }}
+{{ include "nvnm-mcp-server.selectorLabels" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
@@ -41,7 +41,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "inveniam-mcp-server.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "inveniam-mcp-server.name" . }}
+{{- define "nvnm-mcp-server.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "nvnm-mcp-server.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}

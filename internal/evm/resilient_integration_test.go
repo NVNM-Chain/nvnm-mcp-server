@@ -33,7 +33,7 @@ func newIntegrationMetrics(t *testing.T) *telemetry.Metrics {
 
 func newResilientTestClient(t *testing.T) Client {
 	t.Helper()
-	rpcURL := os.Getenv("INVENIAM_EVM_RPC_URL")
+	rpcURL := os.Getenv("NVNM_EVM_RPC_URL")
 	if rpcURL == "" {
 		rpcURL = "https://evm.inveniam.mantrachain.io"
 	}

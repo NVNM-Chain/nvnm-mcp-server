@@ -2,14 +2,14 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "inveniam-mcp-server.fullname" . }}
+  name: {{ include "nvnm-mcp-server.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "inveniam-mcp-server.labels" . | nindent 4 }}
+    {{- include "nvnm-mcp-server.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
-      {{- include "inveniam-mcp-server.selectorLabels" . | nindent 6 }}
+      {{- include "nvnm-mcp-server.selectorLabels" . | nindent 6 }}
   endpoints:
     - port: metrics
       path: /metrics
