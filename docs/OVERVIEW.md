@@ -4,22 +4,22 @@
 
 A production-grade [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents, LLMs, and developer tools native access to the Inveniam NVNM blockchain -- the purpose-built L2 for AI Agent and document anchoring and provenance verification, secured by MANTRA's validator set.
 
-This is not a raw JSON-RPC passthrough. It exposes **16 curated, typed tools** with normalized responses designed for both human comprehension and LLM consumption. All blockchain complexity -- ABI encoding, gas estimation, nonce management, transaction construction -- is handled server-side. Callers pass plain parameters and get structured JSON back.
+This is not a raw JSON-RPC passthrough. It exposes **21 curated, typed tools** with normalized responses designed for both human comprehension and LLM consumption. All blockchain complexity -- ABI encoding, gas estimation, nonce management, transaction construction -- is handled server-side. Callers pass plain parameters and get structured JSON back.
 
 ### Key Numbers
 
 | | |
 |---|---|
-| **16** MCP tools | 8 chain reads, 4 anchor reads, 4 writes |
+| **21** MCP tools | 5 onboarding, 8 chain reads, 4 anchor reads, 4 writes |
 | **0** private keys on the server | Prepare-sign-submit by design |
-| **271** automated tests | Unit, E2E, integration, load, golden |
+| **271+** automated tests | Unit, E2E, integration, load, golden |
 | **<2ms** p95 latency | Under sustained 75-VU load |
 
 ---
 
 ## Why It Matters
 
-**No Web3 Required.** ABI encoding, gas estimation, nonce management, and transaction construction are handled server-side. Callers just pass plain parameters and get structured JSON back. No `ethers.js`, no `go-ethereum`, no web3 libraries needed on the client.
+**No Web3 Required.** ABI encoding, gas estimation, nonce management, and transaction construction are handled server-side. Callers just pass plain parameters and get structured JSON back. No `ethers.js`, no EVM client libraries needed on the client side.
 
 **Keys Never Leave You.** The prepare-sign-submit pattern means private keys never touch the server. The MCP server constructs the transaction, your infrastructure signs it (HSM, Vault, local keystore -- your choice), and the server broadcasts it. The server is a stateless translator, not a custodian.
 
@@ -34,6 +34,16 @@ This is not a raw JSON-RPC passthrough. It exposes **16 curated, typed tools** w
 ---
 
 ## Tool Capabilities
+
+### Onboarding (5 tools)
+
+| Tool | Capability |
+|---|---|
+| `nvnm_overview` | Lobby tool. Chain identity, the privacy-by-design property, 6-step canonical agent journey, prereqs summary. No chain calls. |
+| `wallet_status` | One-shot snapshot for an EVM address: balance, nonce, and a three-state status (`unfunded` / `funded_unused` / `funded_active`). |
+| `nvnm_setup_wizard` | Four-state prose-guided onboarding flow. Language-specific samples (Python / JS / Go) for wallet generation that store via `keyring` / `.env` files / mode-0o600 files -- samples never `print` private keys. |
+| `nvnm_setup_verify_hash` | Stateless challenge: per-address deterministic challenge string; caller proves they can compute SHA-256 of it. |
+| `nvnm_setup_verify_signature` | Stateless challenge: same challenge; caller proves they can produce an EIP-191 `personal_sign` signature; server recovers the signer and compares. |
 
 ### EVM Chain Reads (8 tools)
 
@@ -124,4 +134,4 @@ Your Agent          MCP Server           Your Signer          NVNM Chain
 
 ---
 
-**Stack:** Go 1.26 -- MCP SDK v1.5.0 -- go-ethereum -- OpenTelemetry -- Prometheus -- Distroless
+**Stack:** Go 1.26 -- MCP SDK v1.5.0 -- defiweb/go-eth (MIT) -- OpenTelemetry -- Prometheus -- Distroless. Dependencies vendored (`vendor/` committed); CI builds with `-mod=vendor` for supply-chain safety.

@@ -59,8 +59,8 @@ Fast, deterministic tests using mocks and stubs. Run with `make test`.
 
 | Package | Test file(s) | Tests | What's covered |
 |---------|-------------|-------|----------------|
-| `internal/mcp` | `tools_test.go` | 46 | All 16 MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`) |
-| `internal/mcp` | `server_test.go` | 6 | HTTP E2E via `httptest.NewServer`: `ListTools` (all 16 tools), `CallTool` (success + error propagation) |
+| `internal/mcp` | `tools_test.go` | 46 | The 16 EVM + anchor MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`); onboarding tools (the 5 added in Phase 8.8) have dedicated `tools_overview_test.go`, `tools_wallet_test.go`, `tools_setup_wizard_test.go`, `tools_setup_verify_test.go` |
+| `internal/mcp` | `server_test.go` | 6 | HTTP E2E via `httptest.NewServer`: `ListTools` (all 21 tools), `CallTool` (success + error propagation) |
 | `internal/mcp` | `server_e2e_test.go` | 20 | Write approval E2E (auto/required/declined/canceled/no-elicitation/prompt-details/RPC-error), API key auth E2E (valid/invalid/missing/disabled/no-keys), per-client approval overrides (auto-overrides-required/required-overrides-auto/auth+elicitation), tx decoding, approval message formatting, sentinel error tests |
 | `internal/mcp` | `managed_keys_test.go` | 12 | `ManagedKeyStore` CRUD: create+lookup, duplicate rejection, list redaction, enable/disable, approval update, delete, persistence across reloads, counters, empty store, file permissions |
 | `internal/mcp` | `admin_test.go` | 18 | Admin API E2E: auth (missing/invalid/valid token), create (success/duplicate/missing-id/invalid-approval), list (empty/with-keys), update (disable+enable/set-approval/not-found/empty-body), delete (success/not-found), full lifecycle, hot-reload (created key immediately usable, disabled key immediately rejected) |
@@ -139,7 +139,7 @@ These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock 
 
 | Test | What's verified |
 |------|-----------------|
-| `TestE2E_ListTools_Returns16` | Server registers exactly 16 tools (12 read + 4 write) |
+| `TestE2E_ListTools_Returns21` | Server registers exactly 21 tools (5 onboarding + 8 EVM reads + 4 anchor reads + 4 writes) |
 | `TestE2E_ListTools_ContainsExpectedNames` | Every expected tool name is present |
 | `TestE2E_CallTool_ChainID` | `evm_get_chain_id` returns non-error structured content |
 | `TestE2E_CallTool_AnchorInfo` | `anchor_info` returns non-error structured content |

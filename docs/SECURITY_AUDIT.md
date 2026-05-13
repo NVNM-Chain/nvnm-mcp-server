@@ -1,9 +1,16 @@
 # Pre-Red-Team Security Assessment: Inveniam EVM MCP Server
 
 **Date:** 2026-04-01
-**Last reviewed:** 2026-04-28 (backlog items refreshed; see "Updates since 2026-04-01" at the end)
+**Last reviewed:** 2026-05-13 (Phase 8.1-8.8 + API key sha256-hashing + defiweb swap; see "Updates since 2026-04-01" at the end)
 **Scope:** Full repository defensive security review
 **Status:** Assessment complete; remediation complete (see Phase 4)
+
+> **Reading order.** This document is a point-in-time snapshot from 2026-04-01. Material covered by the snapshot (tool surface, dependency list, sha256-at-rest claim) has changed since. The authoritative current state lives in the "Updates since 2026-04-01" and "Updates since 2026-05-13" sections at the bottom -- read those first if you want the as-of-today picture. Specifically:
+>
+> - Tool count: 16 -> **21** after Phase 8.8 (5 onboarding tools added).
+> - EVM client: `go-ethereum` v1.17.2 -> **`defiweb/go-eth`** (MIT-licensed, vendored). The GPL-3.0 exposure that drove the swap is closed.
+> - API keys: raw-at-rest -> **sha256-at-rest** with one-shot `.pre-migration` backup (Phase 8.6) + constant-time validation (Phase 8.7).
+> - Auth middleware chain: gained `originGuard` outermost (Phase 8.5) and IP-failure rate limiter (Phase 8.x).
 
 ---
 

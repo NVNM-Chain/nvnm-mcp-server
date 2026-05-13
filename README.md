@@ -19,11 +19,13 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phases 0–7 complete; Phase 8 in progress (5 of 12 tasks landed as of 2026-05-11).** Generic EVM tools, anchor read tools, write support (prepare-sign-submit), observability, production hardening, pre-red-team security hardening, FusionAuth OAuth integration, and MetaMask wallet signing support are implemented and tested. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings and remediation results.
+**Phases 0–7 complete; Phase 8 in progress (8 of 12 tasks landed as of 2026-05-13).** 8.1–8.5 (foundation types, tool annotations, `next_actions` envelope, EIP-1559 default, Origin-header validation), 8.6 (API-key hashing migration), 8.7 (constant-time auth on hashed bytes), and 8.8 (five onboarding tools) have shipped. 8.9 (env-var hard cut `INVENIAM_*` → `NVNM_*`), 8.10 (privacy-by-design doc statement), 8.11 (test-fixture cleanup), and 8.12 (OWASP self-audit close-out) remain. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings, remediation results, and the 2026-05-13 update sections for the most recent migrations.
 
-HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all audit logs and OTel spans. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Per-client MCP rate limiting returns HTTP `429` when exceeded. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`). A dedicated admin REST API on a separate port enables runtime key management without server restarts.
+HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all audit logs and OTel spans. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`); the prompt shows the recovered signer address, the first 4 bytes of calldata (method selector), and the chain environment label so consumers can spot signature-substitution attacks. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
 
-Write tools construct complete unsigned transactions with both `raw_tx` (for HSM/CLI signers) and `wallet_tx_request` (for MetaMask / EIP-1193 wallets); private keys never touch the server -- see [Write Architecture](#write-architecture-phase-3). Phase 8.4 made EIP-1559 (type-2) the default transaction format; callers that need legacy type-0 set `prefer_legacy_tx: true` on the prepare-tool input. Every tool response carries a `next_actions` hint array (Phase 8.3) so agents can chain calls from response-embedded affordances rather than server-side orchestration. Every tool carries an MCP `ToolAnnotations` payload (Phase 8.2) so clients can tell read-only tools from state-changing ones without inferring spec defaults. OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+Write tools construct complete unsigned transactions with both `raw_tx` (for HSM/CLI signers) and `wallet_tx_request` (for MetaMask / EIP-1193 wallets); private keys never touch the server -- see [Write Architecture](#write-architecture-phase-3). Phase 8.4 made EIP-1559 (type-2) the default transaction format; callers that need legacy type-0 set `prefer_legacy_tx: true` on the prepare-tool input. Every tool response carries a `next_actions` hint array (Phase 8.3) so agents can chain calls from response-embedded affordances rather than server-side orchestration. Every tool carries an MCP `ToolAnnotations` payload (Phase 8.2) so clients can tell read-only tools from state-changing ones without inferring spec defaults. Five Phase 8.8 onboarding tools (`nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`) walk first-time agents through wallet generation, funding, and on-chain state derivation; the wizard's `funded_active` state is explicit that "has sent any transaction" is not the same as "has anchored" because the chain emits no events by design. OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
+
+The EVM RPC stack uses `github.com/defiweb/go-eth` (MIT) -- `go-ethereum` was removed in 2026-05-13 to comply with the proprietary commercial license policy in `CLAUDE.md`; see `docs/SECURITY_AUDIT.md` for the migration record. Dependencies are vendored (`vendor/`) and CI builds with `-mod=vendor` for supply-chain safety.
 
 ## Prerequisites
 
@@ -166,7 +168,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `ENABLE_WRITE_TOOLS` | `false` | Enable write (prepare) tools |
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
-| `OTLP_INSECURE` | `true` | Use insecure (plaintext) connection to OTLP endpoint. Set `false` for TLS. |
+| `OTLP_INSECURE` | `false` | Use TLS for the OTLP gRPC connection. Set to `true` only for sidecar / localhost collectors that do not support TLS. |
 | `WRITE_APPROVAL_DEFAULT` | `required` | Global default for human-in-the-loop write approval. `required` prompts user via MCP elicitation before broadcasting; `auto` skips approval. Per-client overrides via key store. |
 
 ### Observability
@@ -195,6 +197,18 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `OTEL_TRACE_SAMPLE_RATIO` | `1.0` | Fraction of traces sampled (0.0-1.0) |
 
 ## MCP Tools
+
+21 tools in total. First-time agents should call `nvnm_overview` first; it returns the canonical 6-step journey across the rest of the surface.
+
+### Phase 8.8: Onboarding (5 tools)
+
+| Tool | Description |
+|---|---|
+| `nvnm_overview` | Lobby tool. Chain identity, privacy-by-design property, 6-step agent journey, prereqs. No chain calls. |
+| `wallet_status` | Balance + nonce for an address; three-state status (`unfunded` / `funded_unused` / `funded_active`). |
+| `nvnm_setup_wizard` | Four-state guided onboarding with language-specific samples (Python / JS / Go) that store keys via `keyring` / `.env` / `0o600` files (never `print` them). |
+| `nvnm_setup_verify_hash` | Stateless challenge: caller proves they can hash a per-address challenge. |
+| `nvnm_setup_verify_signature` | Stateless challenge: caller proves they can EIP-191 sign the same challenge. |
 
 ### Phase 1: Generic EVM
 

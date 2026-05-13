@@ -78,7 +78,7 @@ cmd/inveniam-mcp-server/main.go
     ├── internal/config      (env loading, validation)
     ├── internal/logging     (slog wrapper, redaction helpers)
     ├── internal/telemetry   (OTel providers, MCP middleware, health server, metrics)
-    ├── internal/evm         (ethclient wrapper, normalized types, tracing wrapper)
+    ├── internal/evm         (defiweb/go-eth RPC wrapper, normalized types, tracing wrapper)
     ├── internal/anchor      (anchor adapter, prepare-sign-submit, address validation)
     ├── internal/auth         (claims, token validation, FusionAuth JWT, API key adapter)
     ├── internal/mcp         (MCP server, tool handlers, auth middleware, key store)
@@ -157,7 +157,7 @@ Error taxonomy (for MCP responses):
 
 #### `internal/evm`
 
-Generic EVM JSON-RPC client layer. Wraps `go-ethereum/ethclient`.
+Generic EVM JSON-RPC client layer. Wraps `defiweb/go-eth` (MIT-licensed).
 
 Interface:
 
@@ -188,8 +188,8 @@ type Client interface {
 ```
 
 Design decisions:
-- Methods return **normalized types** directly, not raw go-ethereum types. Normalization happens at the EVM layer boundary.
-- The client wraps `ethclient.Client` and holds a configured timeout.
+- Methods return **normalized types** directly, not raw upstream RPC types. Normalization happens at the EVM layer boundary.
+- The client wraps a `defiweb/go-eth` RPC transport and holds a configured timeout.
 - A **tracing wrapper** (`NewTracingClient`) implements the same `Client` interface, adding OTel spans and duration/error metrics to every RPC call without modifying the core client.
 - If an archive RPC URL is configured, a second client is available for historical queries.
 
@@ -227,7 +227,7 @@ type Client interface {
 Design decisions:
 - The precompile address is known (`0x...0A00`) and defaulted in config.
 - ABI is loaded from a JSON file at startup via `ANCHOR_ABI_PATH`. If not set, anchor tools are registered but return informative errors.
-- The client uses `go-ethereum`'s ABI pack/unpack to encode `eth_call` requests against the precompile.
+- The client uses `defiweb/go-eth`'s ABI pack/unpack to encode `eth_call` requests against the precompile.
 - Write preparation methods return `UnsignedTransaction` containing the fully constructed transaction (with nonce, gas, chain ID) but no signature. Signing is the caller's responsibility.
 - The `Available()` method allows MCP tools to provide clear status about whether the ABI is loaded.
 
@@ -259,6 +259,19 @@ Tools use a `{domain}_{verb}_{noun}` pattern:
 - `anchor_get_registry` -- read registry
 - `anchor_prepare_add_registry` -- prepare a write transaction
 - `evm_send_raw_transaction` -- broadcast a signed transaction
+
+Onboarding tools (Phase 8.8) use an `nvnm_*` / `wallet_*` prefix instead of `{domain}_{verb}_{noun}`. They are concierge-style entry points -- prose-guided, multi-state, surfaced to first-time agents -- and don't map to a single RPC verb the way the EVM and anchor reads do.
+
+### Tool Inventory
+
+21 tools after Phase 8.8. Each registers a `ToolAnnotations` payload (ReadOnly / Destructive / OpenWorld) and returns a response envelope carrying a `next_actions[]` array whose `tool` hints are AST-verified at test time to point at registered tool names.
+
+| Group | Count | Tools |
+|---|---|---|
+| Onboarding | 5 | `nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature` |
+| EVM reads | 8 | `evm_get_chain_id`, `evm_get_block`, `evm_get_transaction`, `evm_get_transaction_receipt`, `evm_get_balance`, `evm_get_code`, `evm_get_logs`, `evm_call_contract` |
+| Anchor reads | 4 | `anchor_info`, `anchor_get_registry`, `anchor_get_registries`, `anchor_get_records` |
+| Anchor + EVM writes | 4 | `anchor_prepare_add_registry`, `anchor_prepare_add_record`, `anchor_prepare_grant_role`, `evm_send_raw_transaction` |
 
 ### Input Validation
 
@@ -906,7 +919,7 @@ The EVM client stack includes a resilience wrapper (`internal/evm/resilient.go`)
 ### Composition
 
 ```
-raw ethclient → TracingClient → ResilientClient → (used by anchor + MCP handlers)
+defiweb/go-eth RPC → TracingClient → ResilientClient → (used by anchor + MCP handlers)
 ```
 
 Each retry attempt passes through the tracing layer, producing its own OTel span. The resilient wrapper adds metrics for retry count, circuit breaker state, and rate-limit rejections.
@@ -961,7 +974,7 @@ State transitions are logged at WARN level and recorded in the `evm.rpc.circuit_
 | Decision | Choice | Rationale |
 |---|---|---|
 | MCP SDK | Official `go-sdk` v1.5.0 | Maintained by Google/Anthropic, typed tool binding, both transports |
-| EVM client | `go-ethereum/ethclient` | Industry standard, well-tested, directly wraps JSON-RPC |
+| EVM client | `defiweb/go-eth` | MIT-licensed (no LGPL/GPL exposure); covers RPC + ABI + secp256k1 in one tree; suitable for proprietary distribution |
 | Logging | `log/slog` + redaction | Structured, zero-dep base, safe redaction utilities |
 | Telemetry | OpenTelemetry SDK | Vendor-agnostic; native Prometheus + OTLP export; follows OTel env var conventions |
 | Health checks | Separate `:9090` server | Decoupled from MCP transport; compatible with K8s, ALB, Azure probes |

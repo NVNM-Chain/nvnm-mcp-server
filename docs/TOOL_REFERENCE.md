@@ -1,12 +1,12 @@
 # MCP Tool Reference
 
-Complete schema reference for all 16 tools exposed by the Inveniam EVM MCP Server.
+Complete schema reference for all 21 tools exposed by the Inveniam EVM MCP Server.
 
 > **Write tools require `ENABLE_WRITE_TOOLS=true`.**
-> Tools 13--16 (anchor\_prepare\_add\_registry, anchor\_prepare\_add\_record,
-> anchor\_prepare\_grant\_role, evm\_send\_raw\_transaction) are only registered
+> The four write tools (`anchor_prepare_add_registry`, `anchor_prepare_add_record`,
+> `anchor_prepare_grant_role`, `evm_send_raw_transaction`) are only registered
 > when the `ENABLE_WRITE_TOOLS` environment variable is set to `true`.
-> Without it the server exposes 12 read-only tools.
+> Without it the server exposes 17 read-only tools (5 onboarding, 8 EVM reads, 4 anchor reads).
 >
 > **HTTP authentication:** When using HTTP transport with auth configured
 > (API keys via `MCP_API_KEYS_FILE` / `MCP_API_KEY`, or FusionAuth via
@@ -37,11 +37,11 @@ Every tool carries an MCP `ToolAnnotations` payload so clients (and connector-di
 
 | Profile | `ReadOnlyHint` | `DestructiveHint` | `OpenWorldHint` | Tools |
 |---|---|---|---|---|
-| `newOpenWorldReadOnly` | true | _(unset)_ | true | `evm_get_*` (8), `anchor_get_*` (3), `anchor_prepare_*` (3) |
-| `newClosedWorldReadOnly` | true | _(unset)_ | false | `anchor_info` |
+| `newOpenWorldReadOnly` | true | _(unset)_ | true | `evm_get_*` (8), `anchor_get_*` (3), `anchor_prepare_*` (3), `wallet_status`, `nvnm_setup_wizard` |
+| `newClosedWorldReadOnly` | true | _(unset)_ | false | `anchor_info`, `nvnm_overview`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature` |
 | `newDestructiveWriteTool` | false | true | true | `evm_send_raw_transaction` |
 
-`anchor_prepare_*` tools are annotated read-only because the prepare step itself only reads chain state (nonce, gas, fees); the destructive effect happens at `evm_send_raw_transaction` time after the caller signs and broadcasts. Phase 8.8 adds four additional `newClosedWorldReadOnly` tools (`nvnm_overview`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`, plus pure-compute helpers) -- this table will need a refresh then.
+`anchor_prepare_*` tools are annotated read-only because the prepare step itself only reads chain state (nonce, gas, fees); the destructive effect happens at `evm_send_raw_transaction` time after the caller signs and broadcasts. The four `nvnm_*` / `wallet_*` onboarding tools added in Phase 8.8 split between open-world (those that touch chain state -- `wallet_status`, `nvnm_setup_wizard`) and closed-world (pure-compute helpers and the lobby tool -- `nvnm_overview`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`).
 
 ### `next_actions` response envelope
 
@@ -77,6 +77,14 @@ Each prepare tool gains an optional `prefer_legacy_tx` (bool, default `false`) i
 
 ## Table of Contents
 
+### Onboarding (Phase 8.8)
+
+- [nvnm\_overview](#nvnm_overview)
+- [wallet\_status](#wallet_status)
+- [nvnm\_setup\_wizard](#nvnm_setup_wizard)
+- [nvnm\_setup\_verify\_hash](#nvnm_setup_verify_hash)
+- [nvnm\_setup\_verify\_signature](#nvnm_setup_verify_signature)
+
 ### Phase 1 -- Generic EVM
 
 1. [evm\_get\_chain\_id](#1-evm_get_chain_id)
@@ -101,6 +109,164 @@ Each prepare tool gains an optional `prefer_legacy_tx` (bool, default `false`) i
 14. [anchor\_prepare\_add\_record](#14-anchor_prepare_add_record)
 15. [anchor\_prepare\_grant\_role](#15-anchor_prepare_grant_role)
 16. [evm\_send\_raw\_transaction](#16-evm_send_raw_transaction)
+
+---
+
+## nvnm\_overview
+
+Lobby tool. Returns chain identity, the privacy-by-design property, the canonical agent journey, and a one-line prerequisites summary. No chain calls; pure-compute from operator-configured runtime info.
+
+### Input Parameters
+
+_No parameters._
+
+### Output Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `chain_name` | `string` | Human-readable chain name. |
+| `chain_environment` | `string` | One of `mainnet` / `testnet` / `local`. |
+| `chain_id` | `int64` | EIP-155 chain ID. |
+| `anchor_precompile` | `string` | Anchor precompile address (`0x...0A00`). |
+| `explorer_url` | `string` | Operator-configured explorer URL (omitted when empty). |
+| `docs_url` | `string` | Operator-configured docs URL (omitted when empty). |
+| `bridge_url` | `string` | Operator-configured bridge URL (omitted when empty). |
+| `token_native` | `string` | Native gas token symbol (e.g. `INVE`). |
+| `token_wrapped` | `string` | Wrapped token symbol (e.g. `WINVE`). |
+| `what_is_nvnm_chain` | `string` | 2-3 sentence prose explanation. |
+| `privacy_by_design` | `string` | Verbatim caveat: the precompile emits no events, so only the caller knows what their transactions did. |
+| `prereqs` | `[]string` | Prerequisites a caller needs before interacting. |
+| `canonical_journey` | `[]object` | Recommended first-time-agent sequence; each entry is `{step, tool, hint}`. |
+| `next_actions` | `[]NextAction` | Hints toward `wallet_status` / `nvnm_setup_wizard`. |
+
+### Error Conditions
+
+None: pure-compute, no RPC.
+
+---
+
+## wallet\_status
+
+One-shot snapshot for an EVM address. Returns balance, nonce, and a three-state status -- `unfunded` / `funded_unused` / `funded_active`. The status field is intentionally honest: `funded_active` means "has sent any transaction," NOT "has anchored," because the chain emits no events by design.
+
+### Input Parameters
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `address` | `string` | yes | EVM address (`0x...`). |
+
+### Output Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `address` | `string` | EIP-55 checksummed address. |
+| `balance_wei` | `string` | Balance as decimal-wei string (`"0"` when unfunded). |
+| `balance_human` | `string` | Balance in the env-aware wrapped-token unit (e.g. `"1.5 WINVE"`). |
+| `nonce` | `uint64` | Pending nonce. |
+| `has_sent_tx` | `bool` | True iff `nonce > 0`. |
+| `status` | `string` | `unfunded` / `funded_unused` / `funded_active`. |
+| `chain_id` | `int64` | EIP-155 chain ID (echoed for client convenience). |
+| `chain_environment` | `string` | `mainnet` / `testnet` / `local`. |
+| `token_native` | `string` | Native gas-token symbol. |
+| `token_wrapped` | `string` | Wrapped-token symbol used by `balance_human`. |
+| `next_actions` | `[]NextAction` | Status-specific recommendations. |
+
+### Error Conditions
+
+- Invalid address format.
+- Upstream RPC error fetching balance or pending nonce.
+
+---
+
+## nvnm\_setup\_wizard
+
+Four-state prose-guided onboarding flow: `needs_wallet` / `unfunded` / `funded_unused` / `funded_active`. Without an address, returns language-specific wallet-generation samples (Python / JS / Go) that store the key via `keyring` / `.env` files / mode-`0600` files -- the samples never `print` the private key. With an address, derives state from the on-chain snapshot and returns concrete next-step prose plus a wallet snapshot.
+
+### Input Parameters
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `address` | `string` | no | Optional EVM address. Omit to receive the `needs_wallet` response. |
+
+### Output Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `string` | One of `needs_wallet` / `unfunded` / `funded_unused` / `funded_active`. |
+| `message` | `string` | State-specific prose guidance. |
+| `wallet` | `object` | Snapshot (`address`, `balance_wei`, `balance_human`, `nonce`, `has_sent_tx`, `chain_id`, `chain_environment`, `token_native`, `token_wrapped`) -- omitted when `state=needs_wallet`. |
+| `sample_code` | `[]object` | Language-specific wallet-generation snippets -- only populated when `state=needs_wallet`. Each entry has `language`, `title`, `code`. |
+| `bridge_url` | `string` | Bridge URL for funding -- populated when `state=needs_wallet` or `state=unfunded`. |
+| `next_actions` | `[]NextAction` | State-specific recommendations. |
+
+### Error Conditions
+
+- Invalid address format (when an address is provided).
+- Upstream RPC error fetching balance or pending nonce.
+
+### Important caveat
+
+`funded_active` says "has sent any transaction," NOT "has anchored." The chain emits no events by design, so this server cannot detect anchoring specifically. The response prose repeats this caveat verbatim.
+
+---
+
+## nvnm\_setup\_verify\_hash
+
+Stateless hashing challenge. The server derives a deterministic per-address challenge string and the caller proves they can compute `SHA-256` of it. No on-chain state, no per-session state.
+
+### Input Parameters
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `address` | `string` | yes | EVM address (`0x...`) the challenge is bound to. |
+| `hash` | `string` | yes | Caller's SHA-256 of the challenge bytes, 0x-prefixed hex. |
+
+### Output Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `ok` | `bool` | True iff `hash` matches the expected digest. |
+| `address` | `string` | EIP-55 checksummed address. |
+| `challenge` | `string` | The deterministic challenge string. |
+| `expected` | `string` | The server-computed expected digest (0x-prefixed lowercase hex). |
+| `got` | `string` | The caller-supplied digest, normalized (lowercase, 0x-prefixed). |
+| `next_actions` | `[]NextAction` | On success, points at `nvnm_setup_verify_signature`. On mismatch, points back at `nvnm_setup_verify_hash` with a recompute hint. |
+
+### Error Conditions
+
+- Invalid address format.
+- Missing `hash` (returns `missing_required`).
+- Hash mismatch (returns `invalid_hash`; the response body still carries `expected` and `got` so the caller can debug their hashing path).
+
+---
+
+## nvnm\_setup\_verify\_signature
+
+Stateless signing challenge. Uses the same per-address challenge as `nvnm_setup_verify_hash`; the caller produces an EIP-191 `personal_sign` signature over it, and the server recovers the signer address and compares it to the supplied `address`.
+
+### Input Parameters
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `address` | `string` | yes | EVM address the caller claims to control; also the address that should be recovered from the signature. |
+| `signature` | `string` | yes | EIP-191 `personal_sign` output over the challenge, 0x-prefixed hex (65 bytes / 132 hex chars). |
+
+### Output Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `ok` | `bool` | True iff the recovered signer matches `address`. |
+| `address` | `string` | EIP-55 checksummed address (what the caller claimed). |
+| `challenge` | `string` | The deterministic challenge string. |
+| `recovered_address` | `string` | The address ECDSA-recovered from the signature (omitted on parse failure). |
+| `next_actions` | `[]NextAction` | On success, points at `anchor_get_registries` / `anchor_prepare_*`. On mismatch, points back at `nvnm_setup_verify_signature` with a re-sign hint. |
+
+### Error Conditions
+
+- Invalid address format.
+- Malformed `signature` (wrong length, non-hex, or unparseable as `r||s||v`).
+- ECDSA recovery failure (e.g., bad `v` byte).
+- Recovered signer does not match the supplied address.
 
 ---
 
