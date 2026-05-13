@@ -48,3 +48,6 @@ deploy/k8s/secret.yaml
 
 # Build
 /build/
+
+# Local per-developer scratch (HANDOFF notes, throwaway files)
+.local/
