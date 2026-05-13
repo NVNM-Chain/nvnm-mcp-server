@@ -17,7 +17,11 @@ coverage.html
 coverage.txt
 
 # Dependency directories
-vendor/
+# vendor/ is INTENTIONALLY tracked since the go-ethereum -> defiweb swap.
+# CI builds with -mod=vendor so a compromised upstream cannot affect a
+# build that succeeds locally. To refresh: go mod tidy && go mod vendor.
+# (If reintroducing module-mode builds, restore "vendor/" here and
+# remove the third_party copies.)
 
 # IDE
 .idea/

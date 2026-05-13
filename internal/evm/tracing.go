@@ -5,8 +5,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -107,7 +106,7 @@ func (t *tracingClient) BlockByNumber(
 }
 
 func (t *tracingClient) BlockByHash(
-	ctx context.Context, hash common.Hash, fullTx bool,
+	ctx context.Context, hash defitypes.Hash, fullTx bool,
 ) (result *NormalizedBlock, err error) {
 	err = t.rpcCall(ctx, "eth_getBlockByHash", func(c context.Context) error {
 		result, err = t.inner.BlockByHash(c, hash, fullTx)
@@ -117,7 +116,7 @@ func (t *tracingClient) BlockByHash(
 }
 
 func (t *tracingClient) TransactionByHash(
-	ctx context.Context, hash common.Hash,
+	ctx context.Context, hash defitypes.Hash,
 ) (result *NormalizedTransaction, err error) {
 	err = t.rpcCall(ctx, "eth_getTransactionByHash", func(c context.Context) error {
 		result, err = t.inner.TransactionByHash(c, hash)
@@ -127,7 +126,7 @@ func (t *tracingClient) TransactionByHash(
 }
 
 func (t *tracingClient) TransactionReceipt(
-	ctx context.Context, hash common.Hash,
+	ctx context.Context, hash defitypes.Hash,
 ) (result *NormalizedReceipt, err error) {
 	err = t.rpcCall(ctx, "eth_getTransactionReceipt", func(c context.Context) error {
 		result, err = t.inner.TransactionReceipt(c, hash)
@@ -137,7 +136,7 @@ func (t *tracingClient) TransactionReceipt(
 }
 
 func (t *tracingClient) BalanceAt(
-	ctx context.Context, address common.Address, block *big.Int,
+	ctx context.Context, address defitypes.Address, block *big.Int,
 ) (result *NormalizedBalance, err error) {
 	err = t.rpcCall(ctx, "eth_getBalance", func(c context.Context) error {
 		result, err = t.inner.BalanceAt(c, address, block)
@@ -147,7 +146,7 @@ func (t *tracingClient) BalanceAt(
 }
 
 func (t *tracingClient) CodeAt(
-	ctx context.Context, address common.Address, block *big.Int,
+	ctx context.Context, address defitypes.Address, block *big.Int,
 ) (result *CodeResult, err error) {
 	err = t.rpcCall(ctx, "eth_getCode", func(c context.Context) error {
 		result, err = t.inner.CodeAt(c, address, block)
@@ -158,7 +157,7 @@ func (t *tracingClient) CodeAt(
 
 //nolint:gocritic // hugeParam: msg matches go-ethereum's CallContract signature
 func (t *tracingClient) CallContract(
-	ctx context.Context, msg ethereum.CallMsg, block *big.Int,
+	ctx context.Context, msg defitypes.Call, block *big.Int,
 ) (result []byte, err error) {
 	err = t.rpcCall(ctx, "eth_call", func(c context.Context) error {
 		result, err = t.inner.CallContract(c, msg, block)
@@ -168,7 +167,7 @@ func (t *tracingClient) CallContract(
 }
 
 func (t *tracingClient) FilterLogs(
-	ctx context.Context, q ethereum.FilterQuery,
+	ctx context.Context, q defitypes.FilterLogsQuery,
 ) (result []NormalizedLog, err error) {
 	err = t.rpcCall(ctx, "eth_getLogs", func(c context.Context) error {
 		result, err = t.inner.FilterLogs(c, q)
@@ -178,7 +177,7 @@ func (t *tracingClient) FilterLogs(
 }
 
 func (t *tracingClient) PendingNonceAt(
-	ctx context.Context, address common.Address,
+	ctx context.Context, address defitypes.Address,
 ) (result uint64, err error) {
 	err = t.rpcCall(ctx, "eth_getTransactionCount", func(c context.Context) error {
 		result, err = t.inner.PendingNonceAt(c, address)
@@ -205,7 +204,7 @@ func (t *tracingClient) SuggestGasTipCap(ctx context.Context) (result *big.Int, 
 
 //nolint:gocritic // hugeParam: msg matches go-ethereum's EstimateGas signature
 func (t *tracingClient) EstimateGas(
-	ctx context.Context, msg ethereum.CallMsg,
+	ctx context.Context, msg defitypes.Call,
 ) (result uint64, err error) {
 	err = t.rpcCall(ctx, "eth_estimateGas", func(c context.Context) error {
 		result, err = t.inner.EstimateGas(c, msg)

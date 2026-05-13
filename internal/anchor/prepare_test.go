@@ -7,8 +7,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/logging"
 )
@@ -179,13 +178,13 @@ func TestPrepareAddRegistry_BuildsUnsignedTx(t *testing.T) {
 	abiPath := testABIPath(t)
 	logger := logging.New("error")
 	mock := &mockEVMClient{
-		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+		pendingNonceFn: func(_ context.Context, _ defitypes.Address) (uint64, error) {
 			return 42, nil
 		},
 		suggestGasFn: func(_ context.Context) (*big.Int, error) {
 			return big.NewInt(5000000000), nil
 		},
-		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+		estimateGasFn: func(_ context.Context, _ defitypes.Call) (uint64, error) {
 			return 100000, nil
 		},
 	}
@@ -321,13 +320,13 @@ func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
 	logger := logging.New("error")
 	const chainID = int64(58887)
 	mock := &mockEVMClient{
-		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+		pendingNonceFn: func(_ context.Context, _ defitypes.Address) (uint64, error) {
 			return 7, nil
 		},
 		suggestGasFn: func(_ context.Context) (*big.Int, error) {
 			return big.NewInt(1_000_000_000), nil
 		},
-		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+		estimateGasFn: func(_ context.Context, _ defitypes.Call) (uint64, error) {
 			return 50000, nil
 		},
 	}
@@ -397,7 +396,7 @@ func TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault(t *testing.T) {
 	logger := logging.New("error")
 	const chainID = int64(58887)
 	mock := &mockEVMClient{
-		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+		pendingNonceFn: func(_ context.Context, _ defitypes.Address) (uint64, error) {
 			return 13, nil
 		},
 		suggestGasFn: func(_ context.Context) (*big.Int, error) {
@@ -406,7 +405,7 @@ func TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault(t *testing.T) {
 		suggestGasTipFn: func(_ context.Context) (*big.Int, error) {
 			return big.NewInt(2_000_000_000), nil // 2 gwei tip
 		},
-		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+		estimateGasFn: func(_ context.Context, _ defitypes.Call) (uint64, error) {
 			return 80000, nil
 		},
 	}
@@ -470,7 +469,7 @@ func TestPrepareAddRegistry_FallsBackToDefaultTipCap_WhenSuggestGasTipCapErrors(
 	abiPath := testABIPath(t)
 	logger := logging.New("error")
 	mock := &mockEVMClient{
-		pendingNonceFn: func(_ context.Context, _ common.Address) (uint64, error) {
+		pendingNonceFn: func(_ context.Context, _ defitypes.Address) (uint64, error) {
 			return 0, nil
 		},
 		suggestGasFn: func(_ context.Context) (*big.Int, error) {
@@ -479,7 +478,7 @@ func TestPrepareAddRegistry_FallsBackToDefaultTipCap_WhenSuggestGasTipCapErrors(
 		suggestGasTipFn: func(_ context.Context) (*big.Int, error) {
 			return nil, errors.New("eth_maxPriorityFeePerGas not supported")
 		},
-		estimateGasFn: func(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+		estimateGasFn: func(_ context.Context, _ defitypes.Call) (uint64, error) {
 			return 50000, nil
 		},
 	}

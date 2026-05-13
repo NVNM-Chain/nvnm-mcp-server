@@ -6,8 +6,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
@@ -90,37 +89,37 @@ func (s *stubClient) GetChainInfo(_ context.Context) (*ChainInfo, error)  { retu
 func (s *stubClient) BlockByNumber(_ context.Context, _ *big.Int, _ bool) (*NormalizedBlock, error) {
 	return nil, nil
 }
-func (s *stubClient) BlockByHash(_ context.Context, _ common.Hash, _ bool) (*NormalizedBlock, error) {
+func (s *stubClient) BlockByHash(_ context.Context, _ defitypes.Hash, _ bool) (*NormalizedBlock, error) {
 	return nil, nil
 }
-func (s *stubClient) TransactionByHash(_ context.Context, _ common.Hash) (*NormalizedTransaction, error) {
+func (s *stubClient) TransactionByHash(_ context.Context, _ defitypes.Hash) (*NormalizedTransaction, error) {
 	return nil, nil
 }
-func (s *stubClient) TransactionReceipt(_ context.Context, _ common.Hash) (*NormalizedReceipt, error) {
+func (s *stubClient) TransactionReceipt(_ context.Context, _ defitypes.Hash) (*NormalizedReceipt, error) {
 	return nil, nil
 }
-func (s *stubClient) BalanceAt(_ context.Context, _ common.Address, _ *big.Int) (*NormalizedBalance, error) {
+func (s *stubClient) BalanceAt(_ context.Context, _ defitypes.Address, _ *big.Int) (*NormalizedBalance, error) {
 	return nil, nil
 }
-func (s *stubClient) CodeAt(_ context.Context, _ common.Address, _ *big.Int) (*CodeResult, error) {
+func (s *stubClient) CodeAt(_ context.Context, _ defitypes.Address, _ *big.Int) (*CodeResult, error) {
 	return nil, nil
 }
 
 //nolint:gocritic // hugeParam: matches go-ethereum's CallContract signature
-func (s *stubClient) CallContract(_ context.Context, _ ethereum.CallMsg, _ *big.Int) ([]byte, error) {
+func (s *stubClient) CallContract(_ context.Context, _ defitypes.Call, _ *big.Int) ([]byte, error) {
 	return nil, nil
 }
-func (s *stubClient) FilterLogs(_ context.Context, _ ethereum.FilterQuery) ([]NormalizedLog, error) {
+func (s *stubClient) FilterLogs(_ context.Context, _ defitypes.FilterLogsQuery) ([]NormalizedLog, error) {
 	return nil, nil
 }
-func (s *stubClient) PendingNonceAt(_ context.Context, _ common.Address) (uint64, error) {
+func (s *stubClient) PendingNonceAt(_ context.Context, _ defitypes.Address) (uint64, error) {
 	return 0, nil
 }
 func (s *stubClient) SuggestGasPrice(_ context.Context) (*big.Int, error)  { return big.NewInt(0), nil }
 func (s *stubClient) SuggestGasTipCap(_ context.Context) (*big.Int, error) { return big.NewInt(0), nil }
 
 //nolint:gocritic // hugeParam: matches go-ethereum's EstimateGas signature
-func (s *stubClient) EstimateGas(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+func (s *stubClient) EstimateGas(_ context.Context, _ defitypes.Call) (uint64, error) {
 	return 0, nil
 }
 func (s *stubClient) SendRawTransaction(_ context.Context, _ string) (string, error) {

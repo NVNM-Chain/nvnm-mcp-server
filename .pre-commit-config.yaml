@@ -53,5 +53,6 @@ exclude: |
     build/|
     dist/|
     coverage\.html|
-    \.golangci-lint-cache/.*
+    \.golangci-lint-cache/.*|
+    vendor/.*
   )$

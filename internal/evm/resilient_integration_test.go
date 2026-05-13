@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
@@ -94,7 +94,7 @@ func TestResilientIntegration_BalanceAt(t *testing.T) {
 	c := newResilientTestClient(t)
 	ctx := context.Background()
 
-	addr := common.HexToAddress("0x0000000000000000000000000000000000000000")
+	addr := defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000000")
 	bal, err := c.BalanceAt(ctx, addr, nil)
 	if err != nil {
 		t.Fatalf("BalanceAt: %v", err)

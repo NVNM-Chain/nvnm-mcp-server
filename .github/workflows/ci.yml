@@ -34,18 +34,16 @@ jobs:
           args: --timeout=5m
 
       - name: License scan
-        # Temporary allowlist: GPL-3.0 and LGPL-3.0 are present SOLELY
-        # to accommodate github.com/ethereum/go-ethereum, pending a
-        # decision on whether to replace it with an MIT-licensed
-        # alternative. See docs/LICENSE_EXCEPTIONS.md. Hard-refused for
-        # proprietary commercial work without exception: GPL-2.0,
-        # AGPL-3.0 (and -only/-or-later variants). All other entries
-        # are routine permissive licenses.
+        # Hard-refused for proprietary commercial work: GPL-*, LGPL-*,
+        # AGPL-* in all variants. All other entries are routine
+        # permissive licenses. go-ethereum (LGPL-3.0 under static
+        # linking) was replaced with github.com/defiweb/go-eth (MIT)
+        # in the swap recorded in docs/SECURITY_AUDIT.md.
         run: |
           go install github.com/google/go-licenses@latest
           go-licenses check ./... \
             --ignore github.com/inveniam/nvnm-mcp-server \
-            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-2-Clause-FreeBSD,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0,0BSD,Zlib,EPL-2.0,CDDL-1.0,GPL-3.0,LGPL-3.0
+            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-2-Clause-FreeBSD,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0,0BSD,Zlib,EPL-2.0,CDDL-1.0
 
       - name: Vulnerability check
         run: |
@@ -53,10 +51,13 @@ jobs:
           govulncheck ./...
 
       - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
+        # -mod=vendor pins the dep tree to the committed vendor/
+        # directory. Supply-chain hardening: a compromised upstream
+        # cannot affect a build that succeeds locally.
+        run: go test -mod=vendor -race -coverprofile=coverage.out ./...
 
       - name: Build
-        run: go build -o bin/inveniam-mcp-server ./cmd/inveniam-mcp-server
+        run: go build -mod=vendor -o bin/inveniam-mcp-server ./cmd/inveniam-mcp-server
 
       - name: Upload coverage
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

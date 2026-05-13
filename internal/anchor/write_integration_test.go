@@ -4,18 +4,15 @@ package anchor_test
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
+	defitypes "github.com/defiweb/go-eth/types"
+	defiwallet "github.com/defiweb/go-eth/wallet"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
@@ -25,7 +22,7 @@ const credentialsPath = "../../.chain_credentials.txt"
 
 type testCredentials struct {
 	Address    string
-	PrivateKey *ecdsa.PrivateKey
+	PrivateKey *defiwallet.PrivateKey
 }
 
 func loadCredentials(t *testing.T) testCredentials {
@@ -51,10 +48,11 @@ func loadCredentials(t *testing.T) testCredentials {
 	}
 
 	keyHex = strings.TrimPrefix(keyHex, "0x")
-	privKey, err := crypto.HexToECDSA(keyHex)
+	keyBytes, err := hex.DecodeString(keyHex)
 	if err != nil {
-		t.Fatalf("invalid private key: %v", err)
+		t.Fatalf("invalid private key hex: %v", err)
 	}
+	privKey := defiwallet.NewKeyFromBytes(keyBytes)
 
 	return testCredentials{Address: address, PrivateKey: privKey}
 }
@@ -72,12 +70,13 @@ func integrationEVMClient(t *testing.T) evm.Client {
 	return c
 }
 
-// signUnsignedTx deserializes an UnsignedTransaction, signs it with the given
-// private key using EIP-155, and returns the signed transaction as 0x-prefixed hex.
+// signUnsignedTx deserializes an UnsignedTransaction, signs it with
+// the given private key, and returns the signed transaction as
+// 0x-prefixed hex. Handles type-0 and type-2 transactions uniformly.
 func signUnsignedTx(
 	t *testing.T,
 	utx *anchor.UnsignedTransaction,
-	key *ecdsa.PrivateKey,
+	key *defiwallet.PrivateKey,
 ) string {
 	t.Helper()
 
@@ -87,22 +86,20 @@ func signUnsignedTx(
 		t.Fatalf("decode raw tx hex: %v", err)
 	}
 
-	tx := new(types.Transaction)
-	if err := tx.UnmarshalBinary(txBytes); err != nil {
+	tx := defitypes.NewTransaction()
+	if _, err := tx.DecodeRLP(txBytes); err != nil {
 		t.Fatalf("unmarshal unsigned tx: %v", err)
 	}
+	if utx.ChainID < 0 {
+		t.Fatalf("negative chain ID %d", utx.ChainID)
+	}
+	tx.SetChainID(uint64(utx.ChainID))
 
-	// LatestSignerForChainID returns a signer that handles every
-	// transaction type the chain supports. For Phase 8.4+ this matters:
-	// PrepareAddRegistry now defaults to EIP-1559 (type 2), and the
-	// previous EIP155Signer could only sign type-0 transactions.
-	signer := types.LatestSignerForChainID(big.NewInt(utx.ChainID))
-	signedTx, err := types.SignTx(tx, signer, key)
-	if err != nil {
+	if err := key.SignTransaction(context.Background(), tx); err != nil {
 		t.Fatalf("sign tx: %v", err)
 	}
 
-	signedBytes, err := signedTx.MarshalBinary()
+	signedBytes, err := tx.Raw()
 	if err != nil {
 		t.Fatalf("marshal signed tx: %v", err)
 	}
@@ -120,7 +117,10 @@ func waitForReceipt(
 ) *evm.NormalizedReceipt {
 	t.Helper()
 
-	hash := common.HexToHash(txHash)
+	hash, err := defitypes.HashFromHex(txHash, defitypes.PadNone)
+	if err != nil {
+		t.Fatalf("invalid tx hash %s: %v", txHash, err)
+	}
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {

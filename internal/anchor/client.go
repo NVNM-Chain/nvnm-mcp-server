@@ -8,9 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
+	defiabi "github.com/defiweb/go-eth/abi"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
@@ -35,11 +34,43 @@ type Client interface {
 	PrepareGrantRole(ctx context.Context, req PrepareGrantRoleRequest) (*UnsignedTransaction, error)
 }
 
+// abiRegistryRow mirrors the on-chain tuple component layout for the
+// `registries` view. Field tags map to ABI component names.
+type abiRegistryRow struct {
+	ID          uint64 `abi:"id"`
+	Name        string `abi:"name"`
+	Description string `abi:"description"`
+	Creator     string `abi:"creator"`
+	CreatedAt   string `abi:"createdAt"`
+	Metadata    string `abi:"metadata"`
+}
+
+// abiRecordRow mirrors the on-chain tuple component layout for the
+// `records` view.
+type abiRecordRow struct {
+	Registry     string `abi:"registry"`
+	URI          string `abi:"uri"`
+	Checksum     string `abi:"checksum"`
+	ChecksumAlgo string `abi:"checksumAlgo"`
+	Metadata     string `abi:"metadata"`
+	Timestamp    string `abi:"timestamp"`
+	Status       string `abi:"status"`
+	RecordID     uint64 `abi:"recordId"`
+	Index        uint64 `abi:"index"`
+	IsLatest     bool   `abi:"isLatest"`
+}
+
+// abiPaginationOutput mirrors the on-chain pagination response tuple.
+type abiPaginationOutput struct {
+	NextKey []byte `abi:"nextKey"`
+	Total   uint64 `abi:"total"`
+}
+
 type client struct {
 	evmClient evm.Client
-	address   common.Address
+	address   defitypes.Address
 	chainID   int64
-	parsedABI *abi.ABI
+	parsedABI *defiabi.Contract
 	logger    *slog.Logger
 }
 
@@ -54,7 +85,7 @@ func NewClient(
 	abiPath string,
 	logger *slog.Logger,
 ) Client {
-	addr := common.HexToAddress(address)
+	addr := defitypes.MustAddressFromHex(address)
 	c := &client{
 		evmClient: evmClient,
 		address:   addr,
@@ -73,14 +104,14 @@ func NewClient(
 		} else {
 			c.parsedABI = parsed
 			logger.Info("anchor ABI loaded",
-				slog.String("address", addr.Hex()),
+				slog.String("address", evm.AddressHex(addr)),
 				slog.Int("methods", len(parsed.Methods)),
 			)
 		}
 	} else {
 		logger.Info(
 			"no ANCHOR_ABI_PATH set; anchor query tools will be registered but return errors until ABI is provided",
-			slog.String("address", addr.Hex()),
+			slog.String("address", evm.AddressHex(addr)),
 		)
 	}
 
@@ -89,7 +120,7 @@ func NewClient(
 
 func (c *client) Info() PrecompileInfo {
 	info := PrecompileInfo{
-		Address:   c.address.Hex(),
+		Address:   evm.AddressHex(c.address),
 		ChainID:   c.chainID,
 		ABILoaded: c.parsedABI != nil,
 	}
@@ -135,16 +166,13 @@ func (c *client) GetRegistry(
 		return nil, err
 	}
 
-	results, err := c.parsedABI.Unpack("registries", output)
-	if err != nil {
+	var rows []abiRegistryRow
+	var page abiPaginationOutput
+	if err := c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page); err != nil {
 		return nil, fmt.Errorf("unpack registries response: %w", err)
 	}
 
-	registries, err := decodeRegistries(results)
-	if err != nil {
-		return nil, err
-	}
-
+	registries := toRegistries(rows)
 	if len(registries) == 0 {
 		return nil, fmt.Errorf("registry lookup returned no results: %w", apperrors.ErrRegistryNotFound)
 	}
@@ -190,26 +218,16 @@ func (c *client) GetRegistries(
 		return nil, err
 	}
 
-	results, err := c.parsedABI.Unpack("registries", output)
-	if err != nil {
+	var rows []abiRegistryRow
+	var page abiPaginationOutput
+	if err := c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page); err != nil {
 		return nil, fmt.Errorf("unpack registries response: %w", err)
 	}
 
-	registries, err := decodeRegistries(results)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := &GetRegistriesResponse{
-		Registries: registries,
-	}
-	if len(results) > 1 {
-		if pg, ok := decodePagination(results[1]); ok {
-			resp.Pagination = pg
-		}
-	}
-
-	return resp, nil
+	return &GetRegistriesResponse{
+		Registries: toRegistries(rows),
+		Pagination: &PageResponse{Total: page.Total},
+	}, nil
 }
 
 // GetRecords queries anchor records with flexible filtering.
@@ -259,43 +277,38 @@ func (c *client) GetRecords(
 		return nil, err
 	}
 
-	results, err := c.parsedABI.Unpack("records", output)
-	if err != nil {
+	var rows []abiRecordRow
+	var page abiPaginationOutput
+	if err := c.parsedABI.Methods["records"].DecodeValues(output, &rows, &page); err != nil {
 		return nil, fmt.Errorf("unpack records response: %w", err)
 	}
 
-	records, err := decodeRecords(results)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := &GetRecordsResponse{
-		Records: records,
-	}
-	if len(results) > 1 {
-		if pg, ok := decodePagination(results[1]); ok {
-			resp.Pagination = pg
-		}
-	}
-
-	return resp, nil
+	return &GetRecordsResponse{
+		Records:    toRecords(rows),
+		Pagination: &PageResponse{Total: page.Total},
+	}, nil
 }
 
-// callPrecompile packs and executes an eth_call against the precompile.
-// args is passed directly to abi.ABI.Pack, which requires interface{} variadic.
+// callPrecompile encodes and executes an eth_call against the precompile.
+// args is passed directly to defiweb's Method.EncodeArgs.
 func (c *client) callPrecompile(
 	ctx context.Context,
 	method string,
 	args ...interface{},
 ) ([]byte, error) {
-	input, err := c.parsedABI.Pack(method, args...)
+	m, ok := c.parsedABI.Methods[method]
+	if !ok {
+		return nil, fmt.Errorf("method %q: %w", method, apperrors.ErrAnchorABIMethodMissing)
+	}
+	input, err := m.EncodeArgs(args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack %s call: %w", method, err)
 	}
 
-	msg := ethereum.CallMsg{
-		To:   &c.address,
-		Data: input,
+	to := c.address
+	msg := defitypes.Call{
+		To:    &to,
+		Input: input,
 	}
 
 	output, err := c.evmClient.CallContract(ctx, msg, nil)
@@ -309,112 +322,49 @@ func (c *client) requireABI() error {
 	if c.parsedABI == nil {
 		return fmt.Errorf(
 			"set ANCHOR_ABI_PATH to a valid ABI JSON file (precompile address: %s): %w",
-			c.address.Hex(), apperrors.ErrAnchorABIMissing,
+			evm.AddressHex(c.address), apperrors.ErrAnchorABIMissing,
 		)
 	}
 	return nil
 }
 
-// decodeRegistries extracts []Registry from the ABI-unpacked result slice.
-// go-ethereum returns anonymous structs; we must use the exact anonymous type
-// in the assertion (named types are distinct even if structurally identical).
-func decodeRegistries(results []interface{}) ([]Registry, error) {
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	type row = struct { //nolint:revive // field names must match ABI component names
-		Id          uint64 `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Creator     string `json:"creator"`
-		CreatedAt   string `json:"createdAt"`
-		Metadata    string `json:"metadata"`
-	}
-
-	rawSlice, ok := results[0].([]row)
-	if !ok {
-		return nil, fmt.Errorf(
-			"unexpected registries result type %T: %w",
-			results[0], apperrors.ErrPrecompileCall,
-		)
-	}
-
-	registries := make([]Registry, len(rawSlice))
-	for i := range rawSlice {
-		registries[i] = Registry{
-			ID:          rawSlice[i].Id,
-			Name:        rawSlice[i].Name,
-			Description: rawSlice[i].Description,
-			Creator:     rawSlice[i].Creator,
-			CreatedAt:   rawSlice[i].CreatedAt,
-			Metadata:    rawSlice[i].Metadata,
+func toRegistries(rows []abiRegistryRow) []Registry {
+	out := make([]Registry, len(rows))
+	for i := range rows {
+		out[i] = Registry{
+			ID:          rows[i].ID,
+			Name:        rows[i].Name,
+			Description: rows[i].Description,
+			Creator:     rows[i].Creator,
+			CreatedAt:   rows[i].CreatedAt,
+			Metadata:    rows[i].Metadata,
 		}
 	}
-	return registries, nil
+	return out
 }
 
-// decodeRecords extracts []Record from the ABI-unpacked result slice.
-func decodeRecords(results []interface{}) ([]Record, error) {
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	type row = struct {
-		Registry     string `json:"registry"`
-		Uri          string `json:"uri"` //nolint:revive // must match ABI field name
-		Checksum     string `json:"checksum"`
-		ChecksumAlgo string `json:"checksumAlgo"`
-		Metadata     string `json:"metadata"`
-		Timestamp    string `json:"timestamp"`
-		Status       string `json:"status"`
-		RecordId     uint64 `json:"recordId"` //nolint:revive // must match ABI field name
-		Index        uint64 `json:"index"`
-		IsLatest     bool   `json:"isLatest"`
-	}
-
-	rawSlice, ok := results[0].([]row)
-	if !ok {
-		return nil, fmt.Errorf(
-			"unexpected records result type %T: %w",
-			results[0], apperrors.ErrPrecompileCall,
-		)
-	}
-
-	records := make([]Record, len(rawSlice))
-	for i := range rawSlice {
-		records[i] = Record{
-			Registry:     rawSlice[i].Registry,
-			RecordID:     rawSlice[i].RecordId,
-			Index:        rawSlice[i].Index,
-			Checksum:     rawSlice[i].Checksum,
-			ChecksumAlgo: rawSlice[i].ChecksumAlgo,
-			URI:          rawSlice[i].Uri,
-			Status:       rawSlice[i].Status,
-			IsLatest:     rawSlice[i].IsLatest,
-			Timestamp:    rawSlice[i].Timestamp,
-			Metadata:     rawSlice[i].Metadata,
+func toRecords(rows []abiRecordRow) []Record {
+	out := make([]Record, len(rows))
+	for i := range rows {
+		out[i] = Record{
+			Registry:     rows[i].Registry,
+			RecordID:     rows[i].RecordID,
+			Index:        rows[i].Index,
+			Checksum:     rows[i].Checksum,
+			ChecksumAlgo: rows[i].ChecksumAlgo,
+			URI:          rows[i].URI,
+			Status:       rows[i].Status,
+			IsLatest:     rows[i].IsLatest,
+			Timestamp:    rows[i].Timestamp,
+			Metadata:     rows[i].Metadata,
 		}
 	}
-	return records, nil
-}
-
-// decodePagination extracts pagination info from an ABI-unpacked result element.
-func decodePagination(raw interface{}) (*PageResponse, bool) {
-	type pg = struct {
-		NextKey []byte `json:"nextKey"`
-		Total   uint64 `json:"total"`
-	}
-	p, ok := raw.(pg)
-	if !ok {
-		return nil, false
-	}
-	return &PageResponse{Total: p.Total}, true
+	return out
 }
 
 // loadABI reads a JSON ABI file and parses it. Accepts either a raw ABI array
 // or a wrapper object with an "abi" key (as used by Truffle/Hardhat artifacts).
-func loadABI(path string) (*abi.ABI, error) {
+func loadABI(path string) (*defiabi.Contract, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is operator-controlled config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("read ABI file %s: %w", path, err)
@@ -431,14 +381,14 @@ func loadABI(path string) (*abi.ABI, error) {
 		}
 	}
 
-	parsed, err := abi.JSON(strings.NewReader(raw))
+	parsed, err := defiabi.ParseJSON([]byte(raw))
 	if err != nil {
 		return nil, fmt.Errorf("parse ABI from %s: %w", path, err)
 	}
 
 	if len(parsed.Methods) == 0 {
-		return nil, fmt.Errorf("ABI at %s: %w", path, apperrors.ErrAnchorABIMissing)
+		return nil, fmt.Errorf("ABI from %s: %w", path, apperrors.ErrAnchorABIEmpty)
 	}
 
-	return &parsed, nil
+	return parsed, nil
 }

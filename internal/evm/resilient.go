@@ -11,8 +11,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 	gobreaker "github.com/sony/gobreaker/v2"
 	"golang.org/x/time/rate"
 
@@ -199,52 +198,52 @@ func (r *resilientClient) BlockByNumber(ctx context.Context, number *big.Int, fu
 	})
 }
 
-func (r *resilientClient) BlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (*NormalizedBlock, error) {
+func (r *resilientClient) BlockByHash(ctx context.Context, hash defitypes.Hash, fullTx bool) (*NormalizedBlock, error) {
 	return resilientCall(ctx, r, "eth_getBlockByHash", func(ctx context.Context) (*NormalizedBlock, error) {
 		return r.inner.BlockByHash(ctx, hash, fullTx)
 	})
 }
 
-func (r *resilientClient) TransactionByHash(ctx context.Context, hash common.Hash) (*NormalizedTransaction, error) {
+func (r *resilientClient) TransactionByHash(ctx context.Context, hash defitypes.Hash) (*NormalizedTransaction, error) {
 	return resilientCall(ctx, r, "eth_getTransactionByHash", func(ctx context.Context) (*NormalizedTransaction, error) {
 		return r.inner.TransactionByHash(ctx, hash)
 	})
 }
 
-func (r *resilientClient) TransactionReceipt(ctx context.Context, hash common.Hash) (*NormalizedReceipt, error) {
+func (r *resilientClient) TransactionReceipt(ctx context.Context, hash defitypes.Hash) (*NormalizedReceipt, error) {
 	return resilientCall(ctx, r, "eth_getTransactionReceipt", func(ctx context.Context) (*NormalizedReceipt, error) {
 		return r.inner.TransactionReceipt(ctx, hash)
 	})
 }
 
 func (r *resilientClient) BalanceAt(
-	ctx context.Context, address common.Address, block *big.Int,
+	ctx context.Context, address defitypes.Address, block *big.Int,
 ) (*NormalizedBalance, error) {
 	return resilientCall(ctx, r, "eth_getBalance", func(ctx context.Context) (*NormalizedBalance, error) {
 		return r.inner.BalanceAt(ctx, address, block)
 	})
 }
 
-func (r *resilientClient) CodeAt(ctx context.Context, address common.Address, block *big.Int) (*CodeResult, error) {
+func (r *resilientClient) CodeAt(ctx context.Context, address defitypes.Address, block *big.Int) (*CodeResult, error) {
 	return resilientCall(ctx, r, "eth_getCode", func(ctx context.Context) (*CodeResult, error) {
 		return r.inner.CodeAt(ctx, address, block)
 	})
 }
 
 //nolint:gocritic // hugeParam: msg matches go-ethereum's CallContract signature
-func (r *resilientClient) CallContract(ctx context.Context, msg ethereum.CallMsg, block *big.Int) ([]byte, error) {
+func (r *resilientClient) CallContract(ctx context.Context, msg defitypes.Call, block *big.Int) ([]byte, error) {
 	return resilientCall(ctx, r, "eth_call", func(ctx context.Context) ([]byte, error) {
 		return r.inner.CallContract(ctx, msg, block)
 	})
 }
 
-func (r *resilientClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]NormalizedLog, error) {
+func (r *resilientClient) FilterLogs(ctx context.Context, q defitypes.FilterLogsQuery) ([]NormalizedLog, error) {
 	return resilientCall(ctx, r, "eth_getLogs", func(ctx context.Context) ([]NormalizedLog, error) {
 		return r.inner.FilterLogs(ctx, q)
 	})
 }
 
-func (r *resilientClient) PendingNonceAt(ctx context.Context, address common.Address) (uint64, error) {
+func (r *resilientClient) PendingNonceAt(ctx context.Context, address defitypes.Address) (uint64, error) {
 	return resilientCall(ctx, r, "eth_getTransactionCount", func(ctx context.Context) (uint64, error) {
 		return r.inner.PendingNonceAt(ctx, address)
 	})
@@ -263,7 +262,7 @@ func (r *resilientClient) SuggestGasTipCap(ctx context.Context) (*big.Int, error
 }
 
 //nolint:gocritic // hugeParam: msg matches go-ethereum's EstimateGas signature
-func (r *resilientClient) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+func (r *resilientClient) EstimateGas(ctx context.Context, msg defitypes.Call) (uint64, error) {
 	return resilientCall(ctx, r, "eth_estimateGas", func(ctx context.Context) (uint64, error) {
 		return r.inner.EstimateGas(ctx, msg)
 	})

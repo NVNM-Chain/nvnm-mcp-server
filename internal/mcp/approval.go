@@ -7,7 +7,8 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/core/types"
+	deficrypto "github.com/defiweb/go-eth/crypto"
+	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
@@ -62,40 +63,56 @@ func DecodeTxSummary(signedTxHex, clientID, chainEnv string) (*TxSummary, error)
 		return nil, fmt.Errorf("decode tx hex for approval prompt: %w", err)
 	}
 
-	tx := new(types.Transaction)
-	if err := tx.UnmarshalBinary(txBytes); err != nil {
+	tx := defitypes.NewTransaction()
+	if _, err := tx.DecodeRLP(txBytes); err != nil {
 		return nil, fmt.Errorf("unmarshal tx for approval prompt: %w", err)
 	}
 
 	to := "(contract creation)"
-	if tx.To() != nil {
-		to = tx.To().Hex()
+	if tx.To != nil {
+		to = tx.To.Checksum(deficrypto.Keccak256)
 	}
 
 	selector := ""
-	data := tx.Data()
+	data := tx.Input
 	if len(data) >= 4 {
 		selector = "0x" + hex.EncodeToString(data[:4])
 	}
 
-	// Signature recovery. tx.ChainId() returns the chain ID embedded
-	// in the signature (EIP-155 for legacy, the access-list field for
-	// dynamic-fee). We need a Signer keyed to that chain ID to recover
-	// From. NewLondonSigner handles type-0, type-1, and type-2.
+	// Signature recovery. ECRecoverer.RecoverTransaction inspects the
+	// signature embedded in the tx and returns the signer address. It
+	// handles type-0 (LegacyTx), type-1 (AccessListTx), and type-2
+	// (DynamicFeeTx) transactions uniformly.
 	signer := "(recovery failed)"
-	chainID := tx.ChainId()
-	if chainID != nil && chainID.Sign() > 0 {
-		from, sigErr := types.Sender(types.NewLondonSigner(chainID), tx)
-		if sigErr == nil {
-			signer = from.Hex()
-		}
+	if from, recErr := deficrypto.ECRecoverer.RecoverTransaction(tx); recErr == nil && from != nil {
+		signer = from.Checksum(deficrypto.Keccak256)
+	}
+
+	// defiweb stores ChainID as *uint64; surface it as *big.Int for the
+	// existing TxSummary contract.
+	var chainID *big.Int
+	if tx.ChainID != nil {
+		chainID = new(big.Int).SetUint64(*tx.ChainID)
+	}
+
+	value := tx.Value
+	if value == nil {
+		value = big.NewInt(0)
+	}
+	var gas uint64
+	if tx.GasLimit != nil {
+		gas = *tx.GasLimit
+	}
+	var nonce uint64
+	if tx.Nonce != nil {
+		nonce = *tx.Nonce
 	}
 
 	return &TxSummary{
 		To:               to,
-		Value:            tx.Value(),
-		Gas:              tx.Gas(),
-		Nonce:            tx.Nonce(),
+		Value:            value,
+		Gas:              gas,
+		Nonce:            nonce,
 		ChainID:          chainID,
 		DataLen:          len(data),
 		MethodSelector:   selector,

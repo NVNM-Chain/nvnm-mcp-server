@@ -4,7 +4,6 @@ package anchor_test
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -12,10 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	defitypes "github.com/defiweb/go-eth/types"
+	defiwallet "github.com/defiweb/go-eth/wallet"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
+	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
 
 // Phase 8.4 integration tests. Each test reads NVNM_TEST_PRIVATE_KEY
@@ -37,7 +37,7 @@ const phase84ReceiptTimeout = 90 * time.Second
 // envCredentials reads the test wallet from NVNM_TEST_PRIVATE_KEY (set
 // in the gitignored .env). Returns the parsed key and the derived
 // address. Skips the test if the env var is unset.
-func envCredentials(t *testing.T) (*ecdsa.PrivateKey, common.Address) {
+func envCredentials(t *testing.T) (*defiwallet.PrivateKey, defitypes.Address) {
 	t.Helper()
 	raw := os.Getenv("NVNM_TEST_PRIVATE_KEY")
 	if raw == "" {
@@ -48,11 +48,8 @@ func envCredentials(t *testing.T) (*ecdsa.PrivateKey, common.Address) {
 	if err != nil {
 		t.Fatalf("decode NVNM_TEST_PRIVATE_KEY: %v", err)
 	}
-	priv, err := crypto.ToECDSA(keyBytes)
-	if err != nil {
-		t.Fatalf("parse private key: %v", err)
-	}
-	return priv, crypto.PubkeyToAddress(priv.PublicKey)
+	priv := defiwallet.NewKeyFromBytes(keyBytes)
+	return priv, priv.Address()
 }
 
 // TestIntegration_PrepareAddRegistry_EIP1559_RoundTrip exercises the
@@ -69,7 +66,7 @@ func TestIntegration_PrepareAddRegistry_EIP1559_RoundTrip(t *testing.T) {
 
 	regName := fmt.Sprintf("p8.4-eip1559-%d", time.Now().UnixNano())
 	tx, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
-		From:        addr.Hex(),
+		From:        evm.AddressHex(addr),
 		Name:        regName,
 		Description: "Phase 8.4 EIP-1559 round-trip integration test",
 		Metadata:    `{"phase":"8.4","tx_type":"2"}`,
@@ -114,7 +111,7 @@ func TestIntegration_PrepareAddRegistry_Legacy_RoundTrip(t *testing.T) {
 
 	regName := fmt.Sprintf("p8.4-legacy-%d", time.Now().UnixNano())
 	tx, err := c.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
-		From:         addr.Hex(),
+		From:         evm.AddressHex(addr),
 		Name:         regName,
 		Description:  "Phase 8.4 legacy-fallback round-trip integration test",
 		Metadata:     `{"phase":"8.4","tx_type":"0"}`,

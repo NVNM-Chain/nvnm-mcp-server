@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
@@ -19,6 +19,14 @@ const (
 	testPrecompileAddr = "0x0000000000000000000000000000000000000A00"
 	testConnectTimeout = 15 * time.Second
 )
+
+func mustHashFromHex(s string) defitypes.Hash {
+	h, err := defitypes.HashFromHex(s, defitypes.PadNone)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
 
 func integrationClient(t *testing.T) evm.Client {
 	t.Helper()
@@ -120,7 +128,7 @@ func TestIntegration_BalanceAt(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	addr := common.HexToAddress(testPrecompileAddr)
+	addr := defitypes.MustAddressFromHex(testPrecompileAddr)
 	bal, err := c.BalanceAt(ctx, addr, nil)
 	if err != nil {
 		t.Fatalf("BalanceAt: %v", err)
@@ -137,7 +145,7 @@ func TestIntegration_CodeAt_Precompile(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	addr := common.HexToAddress(testPrecompileAddr)
+	addr := defitypes.MustAddressFromHex(testPrecompileAddr)
 	code, err := c.CodeAt(ctx, addr, nil)
 	if err != nil {
 		t.Fatalf("CodeAt: %v", err)
@@ -170,7 +178,7 @@ func TestIntegration_BlockByHash(t *testing.T) {
 		t.Fatalf("BlockByNumber(%d): %v", target, err)
 	}
 
-	blockByHash, err := c.BlockByHash(ctx, common.HexToHash(block.Hash), false)
+	blockByHash, err := c.BlockByHash(ctx, mustHashFromHex(block.Hash), false)
 	if err != nil {
 		// Cosmos EVM chains (ethermint) may not support eth_getBlockByHash
 		t.Skipf("BlockByHash not supported on this chain: %v", err)

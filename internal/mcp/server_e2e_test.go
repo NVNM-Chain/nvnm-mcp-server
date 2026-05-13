@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"crypto/ecdsa"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
+	defitypes "github.com/defiweb/go-eth/types"
+	defiwallet "github.com/defiweb/go-eth/wallet"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
@@ -27,34 +26,30 @@ import (
 // buildSignedTxHex creates a valid signed transaction hex for testing.
 func buildSignedTxHex(t *testing.T) string {
 	t.Helper()
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
+	key := defiwallet.NewRandomKey()
 	return signTxWithKey(t, key)
 }
 
-func signTxWithKey(t *testing.T, key *ecdsa.PrivateKey) string {
+func signTxWithKey(t *testing.T, key *defiwallet.PrivateKey) string {
 	t.Helper()
-	to := common.HexToAddress("0x0000000000000000000000000000000000000A00")
-	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    0,
-		GasPrice: big.NewInt(1000000000),
-		Gas:      21000,
-		To:       &to,
-		Value:    big.NewInt(0),
-		Data:     []byte{0xca, 0xfe},
-	})
-	signer := types.NewEIP155Signer(big.NewInt(58887))
-	signed, err := types.SignTx(tx, signer, key)
-	if err != nil {
+	to := defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000A00")
+	tx := defitypes.NewTransaction().
+		SetType(defitypes.LegacyTxType).
+		SetNonce(0).
+		SetGasPrice(big.NewInt(1000000000)).
+		SetGasLimit(21000).
+		SetTo(to).
+		SetValue(big.NewInt(0)).
+		SetInput([]byte{0xca, 0xfe}).
+		SetChainID(58887)
+	if err := key.SignTransaction(context.Background(), tx); err != nil {
 		t.Fatalf("sign tx: %v", err)
 	}
-	raw, err := signed.MarshalBinary()
+	raw, err := tx.Raw()
 	if err != nil {
 		t.Fatalf("marshal tx: %v", err)
 	}
-	return "0x" + common.Bytes2Hex(raw)
+	return "0x" + hex.EncodeToString(raw)
 }
 
 type e2eServerConfig struct {

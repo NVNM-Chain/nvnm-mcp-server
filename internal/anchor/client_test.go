@@ -8,8 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 	"github.com/inveniam/nvnm-mcp-server/internal/logging"
@@ -17,11 +16,11 @@ import (
 
 // mockEVMClient implements evm.Client for testing without a live RPC.
 type mockEVMClient struct {
-	callContractFn  func(ctx context.Context, msg ethereum.CallMsg, block *big.Int) ([]byte, error)
-	pendingNonceFn  func(ctx context.Context, addr common.Address) (uint64, error)
+	callContractFn  func(ctx context.Context, msg defitypes.Call, block *big.Int) ([]byte, error)
+	pendingNonceFn  func(ctx context.Context, addr defitypes.Address) (uint64, error)
 	suggestGasFn    func(ctx context.Context) (*big.Int, error)
 	suggestGasTipFn func(ctx context.Context) (*big.Int, error)
-	estimateGasFn   func(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
+	estimateGasFn   func(ctx context.Context, msg defitypes.Call) (uint64, error)
 	sendRawTxFn     func(ctx context.Context, hex string) (string, error)
 }
 
@@ -37,29 +36,29 @@ func (m *mockEVMClient) BlockByNumber(context.Context, *big.Int, bool) (*evm.Nor
 	return nil, nil
 }
 
-func (m *mockEVMClient) BlockByHash(context.Context, common.Hash, bool) (*evm.NormalizedBlock, error) {
+func (m *mockEVMClient) BlockByHash(context.Context, defitypes.Hash, bool) (*evm.NormalizedBlock, error) {
 	return nil, nil
 }
 
-func (m *mockEVMClient) TransactionByHash(context.Context, common.Hash) (*evm.NormalizedTransaction, error) {
+func (m *mockEVMClient) TransactionByHash(context.Context, defitypes.Hash) (*evm.NormalizedTransaction, error) {
 	return nil, nil
 }
 
-func (m *mockEVMClient) TransactionReceipt(context.Context, common.Hash) (*evm.NormalizedReceipt, error) {
+func (m *mockEVMClient) TransactionReceipt(context.Context, defitypes.Hash) (*evm.NormalizedReceipt, error) {
 	return nil, nil
 }
 
-func (m *mockEVMClient) BalanceAt(context.Context, common.Address, *big.Int) (*evm.NormalizedBalance, error) {
+func (m *mockEVMClient) BalanceAt(context.Context, defitypes.Address, *big.Int) (*evm.NormalizedBalance, error) {
 	return nil, nil
 }
 
-func (m *mockEVMClient) CodeAt(context.Context, common.Address, *big.Int) (*evm.CodeResult, error) {
+func (m *mockEVMClient) CodeAt(context.Context, defitypes.Address, *big.Int) (*evm.CodeResult, error) {
 	return nil, nil
 }
 
 func (m *mockEVMClient) CallContract(
 	ctx context.Context,
-	msg ethereum.CallMsg, //nolint:gocritic // matches evm.Client interface
+	msg defitypes.Call, //nolint:gocritic // matches evm.Client interface
 	block *big.Int,
 ) ([]byte, error) {
 	if m.callContractFn != nil {
@@ -68,11 +67,11 @@ func (m *mockEVMClient) CallContract(
 	return nil, nil
 }
 
-func (m *mockEVMClient) FilterLogs(context.Context, ethereum.FilterQuery) ([]evm.NormalizedLog, error) {
+func (m *mockEVMClient) FilterLogs(context.Context, defitypes.FilterLogsQuery) ([]evm.NormalizedLog, error) {
 	return nil, nil
 }
 
-func (m *mockEVMClient) PendingNonceAt(ctx context.Context, addr common.Address) (uint64, error) {
+func (m *mockEVMClient) PendingNonceAt(ctx context.Context, addr defitypes.Address) (uint64, error) {
 	if m.pendingNonceFn != nil {
 		return m.pendingNonceFn(ctx, addr)
 	}
@@ -94,7 +93,7 @@ func (m *mockEVMClient) SuggestGasTipCap(ctx context.Context) (*big.Int, error) 
 }
 
 //nolint:gocritic // hugeParam: msg matches evm.Client interface
-func (m *mockEVMClient) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+func (m *mockEVMClient) EstimateGas(ctx context.Context, msg defitypes.Call) (uint64, error) {
 	if m.estimateGasFn != nil {
 		return m.estimateGasFn(ctx, msg)
 	}

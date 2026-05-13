@@ -6,23 +6,22 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 )
 
 func TestIntegration_CallContract_Precompile(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	precompile := common.HexToAddress(testPrecompileAddr)
+	precompile := defitypes.MustAddressFromHex(testPrecompileAddr)
 
 	// The precompile exposes a "registries" view function.
 	// Even with empty calldata, the precompile should return something
 	// (or error gracefully) rather than panic.
 	t.Log("calling precompile with empty calldata...")
-	result, err := c.CallContract(ctx, ethereum.CallMsg{
-		To:   &precompile,
-		Data: []byte{},
+	result, err := c.CallContract(ctx, defitypes.Call{
+		To:    &precompile,
+		Input: []byte{},
 	}, nil)
 	if err != nil {
 		t.Logf("  CallContract with empty data returned error (expected): %v", err)
@@ -38,11 +37,11 @@ func TestIntegration_CallContract_NonExistentAddress(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	addr := defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000001")
 
-	result, err := c.CallContract(ctx, ethereum.CallMsg{
-		To:   &addr,
-		Data: []byte{0x00},
+	result, err := c.CallContract(ctx, defitypes.Call{
+		To:    &addr,
+		Input: []byte{0x00},
 	}, nil)
 	if err != nil {
 		t.Logf("  error (may be expected): %v", err)

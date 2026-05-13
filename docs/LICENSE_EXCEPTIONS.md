@@ -9,23 +9,15 @@ default disposition for GPL-3.0 / LGPL-3.0 / AGPL-3.0 dependencies is:
 
 ## Active exceptions
 
-### `github.com/ethereum/go-ethereum`
+**None at this time.**
 
-| Field | Value |
-|---|---|
-| go-licenses classification | `GPL-3.0` |
-| Actual library license | LGPL-3.0 for consumed packages (`common/`, `core/types/`, `accounts/abi/`, `ethclient/`, ...); GPL-3.0 applies only to the `cmd/` binaries the project does not consume. The library directories ship `COPYING.LESSER` overriding the repo-root `COPYING` (GPL-3.0). `go-licenses` does not honor the per-directory override and surfaces the repo-root classification. |
-| Linkage | Static. `CGO_ENABLED=0` Go binary. LGPL-3.0 § 4 requires "Combined Works" to either (a) permit re-linking against modified versions of the library, or (b) ship under a license that itself permits the same. |
-| Approval status | **Pending business decision.** Treat as provisional. |
-| Approver | TBD |
-| Approval date | TBD |
-| Rationale | The project is built on go-ethereum's RPC client, transaction types, ABI encoder, and `common.Address`/`common.Hash` types from day one. Removal is a significant refactor (see "Replacement alternatives" below). |
-| Mitigation under LGPL-3.0 § 4 | Two viable paths: (a) ship the object files / build artifacts so a recipient can re-link against a modified go-ethereum; (b) re-license the project under a compatible license. Neither is currently in place. |
-| Action items | (1) Confirm the actual transitive license of every consumed package via per-package inspection, not go-licenses' repo-root classification. (2) Evaluate replacement (see below). (3) If replacement is rejected, formalize the LGPL-3.0 obligation in the release pipeline (publish object files or compiled binaries with re-link instructions). |
-
-#### Replacement alternatives evaluated
-
-(populated by research task; see separate analysis)
+The previous entry for `github.com/ethereum/go-ethereum` (LGPL-3.0
+under static linking) was resolved on 2026-05-13 by replacing it with
+`github.com/defiweb/go-eth` (MIT). The migration is recorded in
+`docs/SECURITY_AUDIT.md`. The CI license allowlist no longer carries
+GPL-3.0 or LGPL-3.0; any future dependency under those licenses
+requires an explicit approval entry here before the allowlist can be
+relaxed.
 
 ## Process
 

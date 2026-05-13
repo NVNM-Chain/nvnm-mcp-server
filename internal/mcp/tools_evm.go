@@ -8,8 +8,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
@@ -300,22 +299,24 @@ func makeGetLogsHandler(
 		if err := requireRole(ctx, readRoleSet...); err != nil {
 			return nil, getLogsOutput{}, err
 		}
-		q := ethereum.FilterQuery{}
+		q := defitypes.FilterLogsQuery{}
 		if input.Address != nil {
 			addr, err := parseAddress(*input.Address)
 			if err != nil {
 				return nil, getLogsOutput{}, err
 			}
-			q.Addresses = []common.Address{addr}
+			q.Address = []defitypes.Address{addr}
 		}
 		if input.FromBlock != nil {
-			q.FromBlock = big.NewInt(*input.FromBlock)
+			fb := defitypes.BlockNumberFromBigInt(big.NewInt(*input.FromBlock))
+			q.FromBlock = &fb
 		}
 		if input.ToBlock != nil {
-			q.ToBlock = big.NewInt(*input.ToBlock)
+			tb := defitypes.BlockNumberFromBigInt(big.NewInt(*input.ToBlock))
+			q.ToBlock = &tb
 		}
 		if len(input.Topics) > 0 {
-			topicSet := make([]common.Hash, len(input.Topics))
+			topicSet := make([]defitypes.Hash, len(input.Topics))
 			for i, t := range input.Topics {
 				hash, err := parseHash(t)
 				if err != nil {
@@ -324,7 +325,7 @@ func makeGetLogsHandler(
 				}
 				topicSet[i] = hash
 			}
-			q.Topics = [][]common.Hash{topicSet}
+			q.Topics = [][]defitypes.Hash{topicSet}
 		}
 
 		logs, err := c.FilterLogs(ctx, q)
@@ -365,9 +366,10 @@ func makeCallContractHandler(
 				fmt.Errorf("invalid calldata: %w", err)
 		}
 
-		msg := ethereum.CallMsg{
-			To:   &toAddr,
-			Data: data,
+		toCopy := toAddr
+		msg := defitypes.Call{
+			To:    &toCopy,
+			Input: data,
 		}
 		var blockNum *big.Int
 		if input.BlockNum != nil {
@@ -387,25 +389,30 @@ func makeCallContractHandler(
 
 // --- Validation helpers ---
 
-func parseAddress(s string) (common.Address, error) {
-	if !common.IsHexAddress(s) {
-		return common.Address{},
+func parseAddress(s string) (defitypes.Address, error) {
+	addr, err := defitypes.AddressFromHex(s)
+	if err != nil {
+		return defitypes.Address{},
 			fmt.Errorf("%q: %w", s, apperrors.ErrInvalidAddress)
 	}
-	return common.HexToAddress(s), nil
+	return addr, nil
 }
 
-func parseHash(s string) (common.Hash, error) {
+func parseHash(s string) (defitypes.Hash, error) {
 	s = strings.TrimPrefix(s, "0x")
 	if len(s) != 64 {
-		return common.Hash{},
+		return defitypes.Hash{},
 			fmt.Errorf("%q: %w", s, apperrors.ErrInvalidTxHash)
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
-		return common.Hash{}, fmt.Errorf("invalid hash hex: %w", err)
+		return defitypes.Hash{}, fmt.Errorf("invalid hash hex: %w", err)
 	}
-	return common.BytesToHash(b), nil
+	h, err := defitypes.HashFromBytes(b, defitypes.PadNone)
+	if err != nil {
+		return defitypes.Hash{}, fmt.Errorf("invalid hash bytes: %w", err)
+	}
+	return h, nil
 }
 
 // maxHexDataLen caps hex input strings at 2 MB (1 MB decoded).

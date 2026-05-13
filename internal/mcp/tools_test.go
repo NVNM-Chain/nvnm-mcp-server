@@ -6,8 +6,8 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
@@ -30,8 +30,8 @@ type mockEVM struct {
 	callResult  []byte
 	sendTxHash  string
 	returnErr   error
-	lastAddress common.Address
-	lastHash    common.Hash
+	lastAddress defitypes.Address
+	lastHash    defitypes.Hash
 }
 
 func (m *mockEVM) ChainID(_ context.Context) (*big.Int, error)         { return big.NewInt(58887), m.returnErr }
@@ -42,35 +42,35 @@ func (m *mockEVM) GetChainInfo(_ context.Context) (*evm.ChainInfo, error) {
 func (m *mockEVM) BlockByNumber(_ context.Context, _ *big.Int, _ bool) (*evm.NormalizedBlock, error) {
 	return m.block, m.returnErr
 }
-func (m *mockEVM) BlockByHash(_ context.Context, h common.Hash, _ bool) (*evm.NormalizedBlock, error) {
+func (m *mockEVM) BlockByHash(_ context.Context, h defitypes.Hash, _ bool) (*evm.NormalizedBlock, error) {
 	m.lastHash = h
 	return m.block, m.returnErr
 }
-func (m *mockEVM) TransactionByHash(_ context.Context, h common.Hash) (*evm.NormalizedTransaction, error) {
+func (m *mockEVM) TransactionByHash(_ context.Context, h defitypes.Hash) (*evm.NormalizedTransaction, error) {
 	m.lastHash = h
 	return m.tx, m.returnErr
 }
-func (m *mockEVM) TransactionReceipt(_ context.Context, h common.Hash) (*evm.NormalizedReceipt, error) {
+func (m *mockEVM) TransactionReceipt(_ context.Context, h defitypes.Hash) (*evm.NormalizedReceipt, error) {
 	m.lastHash = h
 	return m.receipt, m.returnErr
 }
-func (m *mockEVM) BalanceAt(_ context.Context, addr common.Address, _ *big.Int) (*evm.NormalizedBalance, error) {
+func (m *mockEVM) BalanceAt(_ context.Context, addr defitypes.Address, _ *big.Int) (*evm.NormalizedBalance, error) {
 	m.lastAddress = addr
 	return m.balance, m.returnErr
 }
-func (m *mockEVM) CodeAt(_ context.Context, addr common.Address, _ *big.Int) (*evm.CodeResult, error) {
+func (m *mockEVM) CodeAt(_ context.Context, addr defitypes.Address, _ *big.Int) (*evm.CodeResult, error) {
 	m.lastAddress = addr
 	return m.code, m.returnErr
 }
 
 //nolint:gocritic // hugeParam: matches go-ethereum's CallContract signature
-func (m *mockEVM) CallContract(_ context.Context, _ ethereum.CallMsg, _ *big.Int) ([]byte, error) {
+func (m *mockEVM) CallContract(_ context.Context, _ defitypes.Call, _ *big.Int) ([]byte, error) {
 	return m.callResult, m.returnErr
 }
-func (m *mockEVM) FilterLogs(_ context.Context, _ ethereum.FilterQuery) ([]evm.NormalizedLog, error) {
+func (m *mockEVM) FilterLogs(_ context.Context, _ defitypes.FilterLogsQuery) ([]evm.NormalizedLog, error) {
 	return m.logs, m.returnErr
 }
-func (m *mockEVM) PendingNonceAt(_ context.Context, _ common.Address) (uint64, error) {
+func (m *mockEVM) PendingNonceAt(_ context.Context, _ defitypes.Address) (uint64, error) {
 	return 0, m.returnErr
 }
 func (m *mockEVM) SuggestGasPrice(_ context.Context) (*big.Int, error) {
@@ -81,7 +81,7 @@ func (m *mockEVM) SuggestGasTipCap(_ context.Context) (*big.Int, error) {
 }
 
 //nolint:gocritic // hugeParam: matches go-ethereum's EstimateGas signature
-func (m *mockEVM) EstimateGas(_ context.Context, _ ethereum.CallMsg) (uint64, error) {
+func (m *mockEVM) EstimateGas(_ context.Context, _ defitypes.Call) (uint64, error) {
 	return 0, m.returnErr
 }
 func (m *mockEVM) SendRawTransaction(_ context.Context, _ string) (string, error) {
@@ -707,7 +707,7 @@ func TestParseAddress_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if addr != common.HexToAddress(testAddr) {
+	if addr != defitypes.MustAddressFromHex(testAddr) {
 		t.Errorf("address mismatch")
 	}
 }

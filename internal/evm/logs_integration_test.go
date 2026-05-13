@@ -7,15 +7,14 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
+	defitypes "github.com/defiweb/go-eth/types"
 )
 
 func TestIntegration_FilterLogs(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	precompile := common.HexToAddress(testPrecompileAddr)
+	precompile := defitypes.MustAddressFromHex(testPrecompileAddr)
 
 	latestBlock, err := c.LatestBlockNumber(ctx)
 	if err != nil {
@@ -29,10 +28,12 @@ func TestIntegration_FilterLogs(t *testing.T) {
 
 	t.Logf("querying logs for precompile %s from block %d to %d", testPrecompileAddr, fromBlock, latestBlock)
 
-	logs, err := c.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(int64(fromBlock)),
-		ToBlock:   big.NewInt(int64(latestBlock)),
-		Addresses: []common.Address{precompile},
+	fromBN := defitypes.BlockNumberFromUint64(fromBlock)
+	toBN := defitypes.BlockNumberFromUint64(latestBlock)
+	logs, err := c.FilterLogs(ctx, defitypes.FilterLogsQuery{
+		FromBlock: &fromBN,
+		ToBlock:   &toBN,
+		Address:   []defitypes.Address{precompile},
 	})
 	if err != nil {
 		t.Fatalf("FilterLogs: %v", err)
@@ -72,10 +73,12 @@ func TestIntegration_FilterLogs_EmptyRange(t *testing.T) {
 	from := int64(latestBlock - 5)
 	to := int64(latestBlock - 4)
 
-	logs, err := c.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(from),
-		ToBlock:   big.NewInt(to),
-		Addresses: []common.Address{common.HexToAddress("0x0000000000000000000000000000000000000001")},
+	fromBN := defitypes.BlockNumberFromBigInt(big.NewInt(from))
+	toBN := defitypes.BlockNumberFromBigInt(big.NewInt(to))
+	logs, err := c.FilterLogs(ctx, defitypes.FilterLogsQuery{
+		FromBlock: &fromBN,
+		ToBlock:   &toBN,
+		Address:   []defitypes.Address{defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000001")},
 	})
 	if err != nil {
 		t.Fatalf("FilterLogs: %v", err)

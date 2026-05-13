@@ -665,6 +665,84 @@ The original assessment marked 6 items as "Backlog" and 2 as "Done" in the Longe
 
 In addition, **FusionAuth OAuth/JWT authentication** was added in Phase 6 as a second auth provider alongside API keys, and **MetaMask wallet signing support** was added in Phase 7 with a `wallet_tx_request` payload returned from every `anchor_prepare_*` tool. Neither was scoped in the original audit but both materially improve the production security posture (centralized identity, browser-wallet UX without server-side keys).
 
+## Updates since 2026-05-13 (go-ethereum -> defiweb/go-eth swap)
+
+The license-allowlist tightening committed on 2026-05-12 (commit
+`6580ddc`) failed CI because `github.com/ethereum/go-ethereum` is
+classified GPL-3.0 by go-licenses and the consumed library packages
+ship under LGPL-3.0 (which the proprietary commercial license policy
+in CLAUDE.md hard-refuses or case-by-cases). The temporary fix at
+`c06da61` restored the allowlist; this entry records the permanent
+remediation.
+
+### What changed
+
+`github.com/ethereum/go-ethereum` has been **removed from the
+dependency tree entirely** and replaced with
+`github.com/defiweb/go-eth v0.7.0` (MIT). Affected surfaces:
+
+| Surface | Before | After |
+|---|---|---|
+| Common types | `common.Address`, `common.Hash`, `common.HexToAddress`, `common.IsHexAddress`, `common.BytesToHash`, `common.Bytes2Hex` | `defitypes.Address`, `defitypes.Hash`, `defitypes.AddressFromHex`, `defitypes.HashFromBytes` |
+| Transaction model | `core/types.Transaction`, `LegacyTx`, `DynamicFeeTx`, `NewTx`, `SignTx`, `Sender`, `NewLondonSigner`, `LatestSignerForChainID`, `NewEIP155Signer` | `defitypes.Transaction` (fluent builder; single type with `SetType(LegacyTxType\|DynamicFeeTxType)`), `defiwallet.PrivateKey.SignTransaction`, `deficrypto.ECRecoverer.RecoverTransaction` |
+| RPC client | `ethclient.Client`, `ethclient.DialContext` | `rpc.Client`, `transport.NewHTTP` |
+| ABI codec | `accounts/abi.ABI`, `abi.Pack`, `abi.Unpack`, `abi.JSON` | `defiabi.Contract`, `Method.EncodeArgs`, `Method.DecodeValues`, `defiabi.ParseJSON` |
+| Filter query | `ethereum.FilterQuery` | `defitypes.FilterLogsQuery` |
+| Call message | `ethereum.CallMsg` | `defitypes.Call` |
+
+### Verification gate
+
+A build-tagged differential test (`internal/anchor/abi_diff_test.go`,
+`//go:build verification`) was added that imported BOTH go-ethereum
+and defiweb, loaded the same `abi/anchoring.json` into both libraries,
+and asserted byte-for-byte equality of the ABI-encoded calldata for
+every method shape the production server constructs: `addRegistry`,
+`addRecord` (the highest-risk surface -- a single tuple struct with
+10 fields including dynamic strings + uint64 + bool), and `grantRole`.
+The test ran 13 cases (short/empty/unicode/long-string/JSON-meta
+matrix per method) and passed all of them. Once the byte-equality
+property was established, the differential test was deleted to allow
+go-ethereum's complete removal from `go.mod`. Future encoder regressions
+will surface via the existing integration tests against testnet.
+
+### Vendoring
+
+`vendor/` is now committed (≈32 MB). Build/test/CI use `-mod=vendor` so
+a compromised upstream module cannot affect a build that succeeded
+locally. To refresh: `go mod tidy && go mod vendor`. Rationale aligns
+with `CLAUDE.md`'s "Consider vendoring if supply-chain risk warrants
+it"; the trade-off (repo size) is small relative to the proprietary
+licensing exposure that vendoring closes off.
+
+### CI / docs follow-up
+
+- `.github/workflows/ci.yml`: license allowlist tightened back to the
+  permissive-only set (no GPL-3.0, no LGPL-3.0); build/test now use
+  `-mod=vendor`.
+- `docs/LICENSE_EXCEPTIONS.md`: cleared of the temporary go-ethereum
+  entry; no active exceptions.
+- `docs/SECURITY_CONSUMER_GUIDANCE.md` and other docs that reference
+  "go-ethereum-derived" details are unchanged; their content describes
+  the on-chain ABI surface, not the Go library that encodes it.
+
+### Operational risk callouts
+
+1. **defiweb is a small-org dependency.** Bus factor is real. The
+   vendored copy is the safety net; in the event of upstream
+   abandonment, the vendored source is forkable in-place.
+2. **defiweb's RPC client does not surface `Block.BaseFeePerGas` as a
+   typed field.** EIP-1559 prepare-tools rely on `MaxPriorityFeePerGas`
+   (eth_maxPriorityFeePerGas) and `GasPrice` (eth_gasPrice), neither of
+   which depends on the BaseFee field. Read tools that returned
+   BaseFee previously now return `nil` for that field. The README and
+   tool descriptions advertised it as best-effort; no consumer is
+   known to depend on it.
+3. **Address output format changed**: defiweb's `Address.String()` is
+   lowercase by default; go-ethereum's `.Hex()` was EIP-55 checksummed.
+   To preserve API compatibility, all production address outputs go
+   through `evm.AddressHex(...)` which calls `Address.Checksum(...)`
+   to produce the EIP-55 form. Tests assert the EIP-55 output.
+
 ## Updates since 2026-05-12 (fresh pre-red-team review + remediation)
 
 A second pre-red-team assessment was conducted on 2026-05-12, grounded

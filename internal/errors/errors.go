@@ -27,6 +27,10 @@ var (
 // Feature/capability errors.
 var (
 	ErrAnchorABIMissing       = errors.New("anchor precompile ABI not loaded")
+	ErrAnchorABIMethodMissing = errors.New("anchor ABI method not found")
+	ErrAnchorABIEmpty         = errors.New("anchor ABI has no methods")
+	ErrInvalidChainID         = errors.New("invalid chain ID")
+	ErrEmptyTxHash            = errors.New("empty transaction hash returned from broadcast")
 	ErrWriteDisabled          = errors.New("write tools are not enabled")
 	ErrWriteDeclined          = errors.New("transaction broadcast declined by user")
 	ErrElicitationUnsupported = errors.New("write approval required but client does not support elicitation")

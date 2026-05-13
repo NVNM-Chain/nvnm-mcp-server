@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
+	defitypes "github.com/defiweb/go-eth/types"
+	defiwallet "github.com/defiweb/go-eth/wallet"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
@@ -33,6 +30,7 @@ var (
 	errTxReverted       = errors.New("transaction reverted")
 	errMissingCredField = errors.New("file missing Address or PrivateKey fields")
 	errReceiptTimeout   = errors.New("timed out waiting for transaction receipt")
+	errNegativeChainID  = errors.New("negative chain ID")
 )
 
 type testRecord struct {
@@ -161,7 +159,7 @@ func submitPreparedTx(
 	}
 	fmt.Printf("  nonce=%d gas=%d gasPrice=%s\n", utx.Nonce, utx.Gas, utx.GasPrice)
 
-	signed, err := signTx(utx, creds.privateKey)
+	signed, err := signTx(ctx, utx, creds.privateKey)
 	if err != nil {
 		return fmt.Errorf("sign %s: %w", label, err)
 	}
@@ -210,7 +208,7 @@ func verifySeededData(ctx context.Context, ac anchor.Client) error {
 
 type credentials struct {
 	address    string
-	privateKey *ecdsa.PrivateKey
+	privateKey *defiwallet.PrivateKey
 }
 
 func loadCredentials(path string) (*credentials, error) {
@@ -234,33 +232,36 @@ func loadCredentials(path string) (*credentials, error) {
 	}
 
 	keyHex = strings.TrimPrefix(keyHex, "0x")
-	privKey, err := crypto.HexToECDSA(keyHex)
+	keyBytes, err := hex.DecodeString(keyHex)
 	if err != nil {
-		return nil, fmt.Errorf("invalid private key: %w", err)
+		return nil, fmt.Errorf("invalid private key hex: %w", err)
 	}
+	priv := defiwallet.NewKeyFromBytes(keyBytes)
 
-	return &credentials{address: address, privateKey: privKey}, nil
+	return &credentials{address: address, privateKey: priv}, nil
 }
 
-func signTx(utx *anchor.UnsignedTransaction, key *ecdsa.PrivateKey) (string, error) {
+func signTx(ctx context.Context, utx *anchor.UnsignedTransaction, key *defiwallet.PrivateKey) (string, error) {
 	rawHex := strings.TrimPrefix(utx.RawTx, "0x")
 	txBytes, err := hex.DecodeString(rawHex)
 	if err != nil {
 		return "", fmt.Errorf("decode raw tx hex: %w", err)
 	}
 
-	tx := new(types.Transaction)
-	if unmarshalErr := tx.UnmarshalBinary(txBytes); unmarshalErr != nil {
-		return "", fmt.Errorf("unmarshal unsigned tx: %w", unmarshalErr)
+	tx := defitypes.NewTransaction()
+	if _, decErr := tx.DecodeRLP(txBytes); decErr != nil {
+		return "", fmt.Errorf("unmarshal unsigned tx: %w", decErr)
+	}
+	if utx.ChainID < 0 {
+		return "", fmt.Errorf("chain ID %d: %w", utx.ChainID, errNegativeChainID)
+	}
+	tx.SetChainID(uint64(utx.ChainID))
+
+	if signErr := key.SignTransaction(ctx, tx); signErr != nil {
+		return "", fmt.Errorf("sign tx: %w", signErr)
 	}
 
-	signer := types.NewEIP155Signer(big.NewInt(utx.ChainID))
-	signedTx, err := types.SignTx(tx, signer, key)
-	if err != nil {
-		return "", fmt.Errorf("sign tx: %w", err)
-	}
-
-	signedBytes, err := signedTx.MarshalBinary()
+	signedBytes, err := tx.Raw()
 	if err != nil {
 		return "", fmt.Errorf("marshal signed tx: %w", err)
 	}
@@ -274,14 +275,17 @@ func waitForReceipt(
 	txHash string,
 	timeout time.Duration,
 ) (*evm.NormalizedReceipt, error) {
-	hash := common.HexToHash(txHash)
+	hash, err := defitypes.HashFromHex(txHash, defitypes.PadNone)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tx hash %s: %w", txHash, err)
+	}
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
 
-		receipt, err := client.TransactionReceipt(ctx, hash)
-		if err != nil {
+		receipt, rerr := client.TransactionReceipt(ctx, hash)
+		if rerr != nil {
 			fmt.Printf("  waiting for receipt...\n")
 			continue
 		}

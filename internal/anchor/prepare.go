@@ -5,12 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	defitypes "github.com/defiweb/go-eth/types"
 
 	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 )
 
 const gasEstimateBufferPercent = 20
@@ -36,7 +36,9 @@ func (c *client) PrepareAddRegistry(
 		return nil, fmt.Errorf("name is required: %w", apperrors.ErrMissingRequired)
 	}
 
-	calldata, err := c.parsedABI.Pack("addRegistry", req.Name, req.Description, req.Metadata)
+	calldata, err := c.parsedABI.Methods["addRegistry"].EncodeArgs(
+		req.Name, req.Description, req.Metadata,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("pack addRegistry: %w", err)
 	}
@@ -64,18 +66,20 @@ func (c *client) PrepareAddRecord(
 		return nil, fmt.Errorf("checksum is required: %w", apperrors.ErrMissingRequired)
 	}
 
-	// The ABI expects a single tuple struct for addRecord
+	// The ABI expects a single tuple struct for addRecord. Field tags
+	// must match the on-chain component names so the encoder maps them
+	// positionally.
 	type recordTuple struct {
-		Registry     string
-		Uri          string //nolint:revive // must match ABI field name
-		Checksum     string
-		ChecksumAlgo string
-		Metadata     string
-		Timestamp    string
-		Status       string
-		RecordId     uint64 //nolint:revive // must match ABI field name
-		Index        uint64
-		IsLatest     bool
+		Registry     string `abi:"registry"`
+		URI          string `abi:"uri"`
+		Checksum     string `abi:"checksum"`
+		ChecksumAlgo string `abi:"checksumAlgo"`
+		Metadata     string `abi:"metadata"`
+		Timestamp    string `abi:"timestamp"`
+		Status       string `abi:"status"`
+		RecordID     uint64 `abi:"recordId"`
+		Index        uint64 `abi:"index"`
+		IsLatest     bool   `abi:"isLatest"`
 	}
 
 	status := req.Status
@@ -85,18 +89,18 @@ func (c *client) PrepareAddRecord(
 
 	record := recordTuple{
 		Registry:     req.Registry,
-		Uri:          req.URI,
+		URI:          req.URI,
 		Checksum:     req.Checksum,
 		ChecksumAlgo: req.ChecksumAlgo,
 		Metadata:     req.Metadata,
 		Timestamp:    "",
 		Status:       status,
-		RecordId:     0,
+		RecordID:     0,
 		Index:        0,
 		IsLatest:     false,
 	}
 
-	calldata, err := c.parsedABI.Pack("addRecord", record)
+	calldata, err := c.parsedABI.Methods["addRecord"].EncodeArgs(record)
 	if err != nil {
 		return nil, fmt.Errorf("pack addRecord: %w", err)
 	}
@@ -124,12 +128,12 @@ func (c *client) PrepareGrantRole(
 		return nil, fmt.Errorf("role is required: %w", apperrors.ErrMissingRequired)
 	}
 
-	if !common.IsHexAddress(req.Account) {
+	account, err := defitypes.AddressFromHex(req.Account)
+	if err != nil {
 		return nil, fmt.Errorf("account %q: %w", req.Account, apperrors.ErrInvalidAddress)
 	}
-	account := common.HexToAddress(req.Account)
-	calldata, err := c.parsedABI.Pack(
-		"grantRole", req.RegistryID, req.Checksum, account, req.Role,
+	calldata, err := c.parsedABI.Methods["grantRole"].EncodeArgs(
+		req.RegistryID, req.Checksum, account, req.Role,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("pack grantRole: %w", err)
@@ -150,10 +154,10 @@ func (c *client) buildUnsignedTx(
 	calldata []byte,
 	preferLegacy bool,
 ) (*UnsignedTransaction, error) {
-	if !common.IsHexAddress(fromHex) {
+	from, err := defitypes.AddressFromHex(fromHex)
+	if err != nil {
 		return nil, fmt.Errorf("from %q: %w", fromHex, apperrors.ErrInvalidAddress)
 	}
-	from := common.HexToAddress(fromHex)
 
 	nonce, err := c.evmClient.PendingNonceAt(ctx, from)
 	if err != nil {
@@ -165,10 +169,11 @@ func (c *client) buildUnsignedTx(
 		return nil, fmt.Errorf("get gas price: %w", err)
 	}
 
-	msg := ethereum.CallMsg{
-		From: from,
-		To:   &c.address,
-		Data: calldata,
+	toAddr := c.address
+	msg := defitypes.Call{
+		From:  &from,
+		To:    &toAddr,
+		Input: calldata,
 	}
 	gasEstimate, err := c.evmClient.EstimateGas(ctx, msg)
 	if err != nil {
@@ -177,12 +182,12 @@ func (c *client) buildUnsignedTx(
 	gasLimit := applyGasBuffer(gasEstimate)
 
 	dataHex := "0x" + hex.EncodeToString(calldata)
-	toHex := c.address.Hex()
-	fromChecksummed := common.HexToAddress(fromHex).Hex()
+	toHex := evm.AddressHex(c.address)
+	fromChecksummed := evm.AddressHex(from)
 
 	if preferLegacy {
 		return c.buildLegacyUnsignedTx(
-			nonce, gasLimit, gasPrice, calldata, dataHex, toHex, fromChecksummed,
+			nonce, gasLimit, gasPrice, dataHex, toHex, fromChecksummed,
 		)
 	}
 	return c.buildDynamicFeeUnsignedTx(
@@ -190,24 +195,29 @@ func (c *client) buildUnsignedTx(
 	)
 }
 
-// buildLegacyUnsignedTx constructs a type-0 LegacyTx. Used when the
-// caller opts in via PreferLegacy, typically because their signer
-// cannot produce type-2 signatures.
+// buildLegacyUnsignedTx constructs a type-0 LegacyTx via defiweb's
+// fluent Transaction builder. Used when the caller opts in via
+// PreferLegacy, typically because their signer cannot produce type-2
+// signatures.
 func (c *client) buildLegacyUnsignedTx(
 	nonce, gasLimit uint64,
 	gasPrice *big.Int,
-	calldata []byte,
 	dataHex, toHex, fromChecksummed string,
 ) (*UnsignedTransaction, error) {
-	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    nonce,
-		To:       &c.address,
-		Value:    big.NewInt(0),
-		Gas:      gasLimit,
-		GasPrice: gasPrice,
-		Data:     calldata,
-	})
-	txBytes, err := tx.MarshalBinary()
+	toAddr := c.address
+	calldata, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("decode calldata hex: %w", err)
+	}
+	tx := defitypes.NewTransaction().
+		SetType(defitypes.LegacyTxType).
+		SetTo(toAddr).
+		SetValue(big.NewInt(0)).
+		SetGasLimit(gasLimit).
+		SetGasPrice(gasPrice).
+		SetInput(calldata).
+		SetNonce(nonce)
+	txBytes, err := tx.Raw()
 	if err != nil {
 		return nil, fmt.Errorf("serialize unsigned transaction: %w", err)
 	}
@@ -262,17 +272,21 @@ func (c *client) buildDynamicFeeUnsignedTx(
 		maxFee = new(big.Int).Set(tipCap)
 	}
 
-	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   big.NewInt(c.chainID),
-		Nonce:     nonce,
-		To:        &c.address,
-		Value:     big.NewInt(0),
-		Gas:       gasLimit,
-		GasTipCap: tipCap,
-		GasFeeCap: maxFee,
-		Data:      calldata,
-	})
-	txBytes, err := tx.MarshalBinary()
+	if c.chainID < 0 {
+		return nil, fmt.Errorf("chain ID %d: %w", c.chainID, apperrors.ErrInvalidChainID)
+	}
+	toAddr := c.address
+	tx := defitypes.NewTransaction().
+		SetType(defitypes.DynamicFeeTxType).
+		SetChainID(uint64(c.chainID)).
+		SetTo(toAddr).
+		SetValue(big.NewInt(0)).
+		SetGasLimit(gasLimit).
+		SetMaxPriorityFeePerGas(tipCap).
+		SetMaxFeePerGas(maxFee).
+		SetInput(calldata).
+		SetNonce(nonce)
+	txBytes, err := tx.Raw()
 	if err != nil {
 		return nil, fmt.Errorf("serialize unsigned transaction: %w", err)
 	}
