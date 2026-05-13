@@ -4,13 +4,17 @@ package evm_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"math/big"
 	"testing"
 	"time"
 
 	defitypes "github.com/defiweb/go-eth/types"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
 )
 
 const (
@@ -30,15 +34,45 @@ func mustHashFromHex(s string) defitypes.Hash {
 
 func integrationClient(t *testing.T) evm.Client {
 	t.Helper()
+	return integrationResilientClient(t)
+}
+
+// integrationResilientClient mirrors the production wiring:
+//
+//	bare client -> resilient wrapper (retry / rate-limit / breaker).
+//
+// Integration tests must use the resilient wrapper because the testnet
+// RPC has a documented transient race on eth_gasPrice immediately after
+// a broadcast (see cometReceiptsRaceMarker in resilient.go). Without
+// the wrapper, tests that call PrepareXxx back-to-back hit the race
+// uncovered and fail spuriously.
+func integrationResilientClient(t *testing.T) evm.Client {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), testConnectTimeout)
 	defer cancel()
 
-	c, err := evm.NewClient(ctx, testRPCURL, testConnectTimeout)
+	raw, err := evm.NewClient(ctx, testRPCURL, testConnectTimeout)
 	if err != nil {
 		t.Fatalf("failed to connect to %s: %v", testRPCURL, err)
 	}
-	t.Cleanup(func() { c.Close() })
-	return c
+	t.Cleanup(func() { raw.Close() })
+
+	mp := sdkmetric.NewMeterProvider()
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	mets, err := telemetry.NewMetrics(mp)
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+
+	return evm.NewResilientClient(raw, evm.ResilientConfig{
+		MaxRetries:       5,
+		InitialBackoff:   500 * time.Millisecond,
+		MaxBackoff:       5 * time.Second,
+		RateLimit:        100,
+		RateBurst:        20,
+		BreakerThreshold: 10,
+		BreakerTimeout:   30 * time.Second,
+	}, mets, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestIntegration_ChainID(t *testing.T) {

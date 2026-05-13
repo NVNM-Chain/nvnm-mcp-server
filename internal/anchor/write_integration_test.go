@@ -20,6 +20,12 @@ import (
 
 const credentialsPath = "../../.chain_credentials.txt"
 
+// receiptPollTimeout bounds how long each test waits for a receipt
+// to appear. The testnet RPC occasionally takes >30s to surface a
+// receipt for a tx we know is on-chain (slow comet-side indexing on
+// busy blocks); 60s covers the observed worst case with margin.
+const receiptPollTimeout = 60 * time.Second
+
 type testCredentials struct {
 	Address    string
 	PrivateKey *defiwallet.PrivateKey
@@ -59,15 +65,9 @@ func loadCredentials(t *testing.T) testCredentials {
 
 func integrationEVMClient(t *testing.T) evm.Client {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), testConnectTimeout)
-	defer cancel()
-
-	c, err := evm.NewClient(ctx, testRPCURL, testConnectTimeout)
-	if err != nil {
-		t.Fatalf("failed to connect to %s: %v", testRPCURL, err)
-	}
-	t.Cleanup(func() { c.Close() })
-	return c
+	// Reuse the shared resilient wrapper so prepare-sign-submit flows
+	// get production-shaped retry coverage on the comet-receipts race.
+	return integrationResilientEVMClient(t)
 }
 
 // signUnsignedTx deserializes an UnsignedTransaction, signs it with
@@ -182,7 +182,7 @@ func TestIntegration_PrepareSignSubmit_AddRegistry(t *testing.T) {
 	t.Logf("  tx hash: %s", txHash)
 
 	// Step 4: Wait for receipt
-	receipt := waitForReceipt(t, evmC, txHash, 30*time.Second)
+	receipt := waitForReceipt(t, evmC, txHash, receiptPollTimeout)
 	if receipt.Status != "success" {
 		t.Fatalf("transaction reverted: status=%s", receipt.Status)
 	}
@@ -235,7 +235,7 @@ func TestIntegration_PrepareSignSubmit_AddRecord(t *testing.T) {
 		t.Fatalf("SendRawTransaction (addRegistry): %v", err)
 	}
 
-	regReceipt := waitForReceipt(t, evmC, regTxHash, 30*time.Second)
+	regReceipt := waitForReceipt(t, evmC, regTxHash, receiptPollTimeout)
 	if regReceipt.Status != "success" {
 		t.Fatalf("addRegistry reverted: status=%s", regReceipt.Status)
 	}
@@ -266,7 +266,7 @@ func TestIntegration_PrepareSignSubmit_AddRecord(t *testing.T) {
 	}
 	t.Logf("  record tx hash: %s", recTxHash)
 
-	recReceipt := waitForReceipt(t, evmC, recTxHash, 30*time.Second)
+	recReceipt := waitForReceipt(t, evmC, recTxHash, receiptPollTimeout)
 	if recReceipt.Status != "success" {
 		t.Fatalf("addRecord reverted: status=%s", recReceipt.Status)
 	}
@@ -325,7 +325,7 @@ func TestIntegration_PrepareSignSubmit_GrantRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendRawTransaction (addRegistry): %v", err)
 	}
-	regReceipt := waitForReceipt(t, evmC, regTxHash, 30*time.Second)
+	regReceipt := waitForReceipt(t, evmC, regTxHash, receiptPollTimeout)
 	if regReceipt.Status != "success" {
 		t.Fatalf("addRegistry reverted: status=%s", regReceipt.Status)
 	}
@@ -357,7 +357,7 @@ func TestIntegration_PrepareSignSubmit_GrantRole(t *testing.T) {
 	}
 	t.Logf("  grant tx hash: %s", grantTxHash)
 
-	grantReceipt := waitForReceipt(t, evmC, grantTxHash, 30*time.Second)
+	grantReceipt := waitForReceipt(t, evmC, grantTxHash, receiptPollTimeout)
 	if grantReceipt.Status != "success" {
 		t.Fatalf("grantRole reverted: status=%s", grantReceipt.Status)
 	}

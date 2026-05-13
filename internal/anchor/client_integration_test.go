@@ -4,12 +4,17 @@ package anchor_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
+
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
 	"github.com/inveniam/nvnm-mcp-server/internal/evm"
 	"github.com/inveniam/nvnm-mcp-server/internal/logging"
+	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
 )
 
 const (
@@ -21,21 +26,48 @@ const (
 
 func integrationClient(t *testing.T) anchor.Client {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), testConnectTimeout)
-	defer cancel()
-
-	evmClient, err := evm.NewClient(ctx, testRPCURL, testConnectTimeout)
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-	t.Cleanup(func() { evmClient.Close() })
-
+	evmClient := integrationResilientEVMClient(t)
 	logger := logging.New("error")
 	c := anchor.NewClient(evmClient, anchor.PrecompileAddress, testChainID, testABIRelPath, logger)
 	if !c.Available() {
 		t.Fatal("anchor client not available (ABI not loaded)")
 	}
 	return c
+}
+
+// integrationResilientEVMClient mirrors the production wiring:
+// bare evm client -> resilient wrapper (retry / rate-limit / breaker).
+// Required because the testnet RPC has a documented transient race on
+// eth_gasPrice immediately after a broadcast (cometReceiptsRaceMarker
+// in evm/resilient.go). Without the wrapper, back-to-back
+// PrepareXxx calls hit the race uncovered and fail spuriously.
+func integrationResilientEVMClient(t *testing.T) evm.Client {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testConnectTimeout)
+	defer cancel()
+
+	raw, err := evm.NewClient(ctx, testRPCURL, testConnectTimeout)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	t.Cleanup(func() { raw.Close() })
+
+	mp := sdkmetric.NewMeterProvider()
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	mets, err := telemetry.NewMetrics(mp)
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+
+	return evm.NewResilientClient(raw, evm.ResilientConfig{
+		MaxRetries:       5,
+		InitialBackoff:   500 * time.Millisecond,
+		MaxBackoff:       5 * time.Second,
+		RateLimit:        100,
+		RateBurst:        20,
+		BreakerThreshold: 10,
+		BreakerTimeout:   30 * time.Second,
+	}, mets, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestIntegration_Info(t *testing.T) {

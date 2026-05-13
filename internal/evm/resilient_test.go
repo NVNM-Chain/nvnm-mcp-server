@@ -223,3 +223,35 @@ func TestResilientClient_DelegatesPing(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 }
+
+// TestIsTransientRPCError_CometReceiptsRace pins the upstream-error
+// marker that recognizes the Cosmos-EVM "tx not found" race on
+// eth_gasPrice (see the cometReceiptsRaceMarker comment). If upstream
+// rewords its error chain, this test will catch the regression -- the
+// integration suite would otherwise just turn flaky again with no
+// signal at the unit level.
+func TestIsTransientRPCError_CometReceiptsRace(t *testing.T) {
+	// Real error text observed from
+	// https://evm.inveniam.mantrachain.io on 2026-05-13.
+	upstream := errors.New(
+		"RPC error: -32000 failed to get rpc block from comet block: " +
+			"failed to get receipts from comet block: tx not found: " +
+			"hash=0x397fdc78dc50de7c2e7162366f144c5a13f8a6228b886d23194d901b56ea88e9, " +
+			"error=tx not found, hash: 0x397fdc78...",
+	)
+	if !isTransientRPCError(upstream) {
+		t.Error("comet-receipts race error should be classified transient")
+	}
+}
+
+// TestIsTransientRPCError_GenericTxNotFoundNotTransient confirms the
+// marker is specific to the gas-price race: a plain "tx not found"
+// from get_transaction_receipt (legitimate -- the tx simply does not
+// exist or hasn't been broadcast) must NOT be retried, or we'd hang
+// callers waiting on receipts for txs that will never appear.
+func TestIsTransientRPCError_GenericTxNotFoundNotTransient(t *testing.T) {
+	upstream := errors.New("transaction not found")
+	if isTransientRPCError(upstream) {
+		t.Error("generic tx-not-found should not be classified transient")
+	}
+}

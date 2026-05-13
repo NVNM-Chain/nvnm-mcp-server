@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -157,6 +158,18 @@ func resilientCall[T any](
 	return typed, nil
 }
 
+// cometReceiptsRaceMarker is the upstream Cosmos-EVM error chain that
+// appears when eth_gasPrice walks the latest block's receipts and finds
+// a tx we just broadcast is in the block but not yet in the receipt
+// index. The race settles in 1-3 seconds. The marker is intentionally
+// specific to the nested "comet receipts" chain so we do NOT retry on
+// legitimate tx-not-found-by-hash errors from get_transaction_receipt.
+//
+// If upstream rewords this chain, integration tests against testnet
+// will surface the regression by going flaky again; the fix is to
+// update this constant.
+const cometReceiptsRaceMarker = "failed to get receipts from comet block"
+
 func isTransientRPCError(err error) bool {
 	if ierrors.IsTransientError(err) {
 		return true
@@ -169,6 +182,9 @@ func isTransientRPCError(err error) bool {
 		return true
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	if strings.Contains(err.Error(), cometReceiptsRaceMarker) {
 		return true
 	}
 	return false
