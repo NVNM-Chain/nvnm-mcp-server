@@ -130,6 +130,10 @@ Run with: `make test-integration` or `go test -tags integration ./...`
 
 Write integration tests require `.chain_credentials.txt` and skip if the file is absent.
 
+The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
+
+**`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile returns `pagination.total = 0` for `registries` and `records` queries even though the client sets `countTotal: true`. The registry/record rows themselves decode correctly; only the count is unpopulated. The integration tests therefore assert on the returned slice length, not on `pagination.total`. MCP tool responses surface whatever the chain returns for `total`, so a downstream consumer should treat it as best-effort, not authoritative, on this network.
+
 ### 4. MCP End-to-End HTTP Tests
 
 These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write approval, API key auth, per-client overrides).

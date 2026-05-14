@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	rpcURL       = "https://evm.inveniam.mantrachain.io"
+	rpcURL       = "https://evm.testnet.nvnmchain.io"
 	abiPath      = "abi/anchoring.json"
-	chainID      = 58887
+	chainID      = 787111
 	credsPath    = ".chain_credentials.txt" //nolint:gosec // not credentials, just a file path constant
 	registryName = "mcp-test-data"
 	registryDesc = "Test registry seeded by cmd/seed-test-data for MCP server validation"

@@ -25,7 +25,7 @@ func run() error {
 
 	logger := logging.NewText("warn")
 
-	rpcURL := "https://evm.inveniam.mantrachain.io"
+	rpcURL := "https://evm.testnet.nvnmchain.io"
 	abiPath := "abi/anchoring.json"
 
 	evmClient, err := evm.NewClient(ctx, rpcURL, 15*time.Second)

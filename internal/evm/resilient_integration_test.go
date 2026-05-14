@@ -35,7 +35,7 @@ func newResilientTestClient(t *testing.T) Client {
 	t.Helper()
 	rpcURL := os.Getenv("NVNM_EVM_RPC_URL")
 	if rpcURL == "" {
-		rpcURL = "https://evm.inveniam.mantrachain.io"
+		rpcURL = "https://evm.testnet.nvnmchain.io"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -69,8 +69,8 @@ func TestResilientIntegration_ChainID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChainID: %v", err)
 	}
-	if chainID.Int64() != 58887 {
-		t.Errorf("ChainID = %d, want 58887", chainID.Int64())
+	if chainID.Int64() != 787111 {
+		t.Errorf("ChainID = %d, want 787111", chainID.Int64())
 	}
 }
 
@@ -82,8 +82,8 @@ func TestResilientIntegration_GetChainInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChainInfo: %v", err)
 	}
-	if info.ChainID != 58887 {
-		t.Errorf("ChainID = %d, want 58887", info.ChainID)
+	if info.ChainID != 787111 {
+		t.Errorf("ChainID = %d, want 787111", info.ChainID)
 	}
 	if info.LatestBlockNumber == 0 {
 		t.Error("LatestBlockNumber should be > 0")

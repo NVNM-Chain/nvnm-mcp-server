@@ -32,7 +32,7 @@ resources:
 # NVNM_* equivalent. See docs/RUNBOOK.md#env-var-migration.
 env:
   NVNM_EVM_RPC_URL: ""
-  NVNM_CHAIN_ID: "58887"
+  NVNM_CHAIN_ID: "787111"
   ANCHOR_ABI_PATH: ""
   MCP_TRANSPORT: "http"
   LOG_LEVEL: "info"

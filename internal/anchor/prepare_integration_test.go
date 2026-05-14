@@ -28,7 +28,7 @@ import (
 //	make test-integration
 //
 // Each test broadcasts a real anchor_prepare_add_registry transaction
-// against the configured testnet (manveniam-1, chain ID 58887). The
+// against the configured testnet (nvnm-testnet-1, chain ID 787111). The
 // registry name is timestamped so each run is idempotent against the
 // on-chain unique-name constraint.
 

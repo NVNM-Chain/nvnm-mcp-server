@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	testRPCURL         = "https://evm.inveniam.mantrachain.io"
-	testChainID        = int64(58887)
+	testRPCURL         = "https://evm.testnet.nvnmchain.io"
+	testChainID        = int64(787111)
 	testABIRelPath     = "../../abi/anchoring.json"
 	testConnectTimeout = 15 * time.Second
 )
@@ -101,9 +101,10 @@ func TestIntegration_GetRegistries(t *testing.T) {
 	if resp.Pagination == nil {
 		t.Fatal("pagination should not be nil")
 	}
-	if resp.Pagination.Total == 0 {
-		t.Error("expected at least one registry on testnet")
-	}
+	// The nvnm-testnet-1 anchor precompile returns pagination.total=0 even
+	// with countTotal=true, so assert on the returned slice -- that is what
+	// the server actually guarantees. See docs/TESTING.md on the count_total
+	// behavioral difference.
 	if len(resp.Registries) == 0 {
 		t.Fatal("expected at least one registry in results")
 	}
@@ -169,8 +170,9 @@ func TestIntegration_GetRecords_ByRegistry(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	// Registry 1 is known to have at least one record from our earlier survey
-	name := "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f"
+	// mcp-test-data is the stable registry seeded by cmd/seed-test-data;
+	// it carries 3 records.
+	name := "mcp-test-data"
 	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
 		Registry:   &name,
 		Pagination: &anchor.PageRequest{Limit: 10},
@@ -179,7 +181,7 @@ func TestIntegration_GetRecords_ByRegistry(t *testing.T) {
 		t.Fatalf("GetRecords(registry=%q): %v", name, err)
 	}
 	if len(resp.Records) == 0 {
-		t.Fatal("expected at least one record in registry 1")
+		t.Fatalf("expected at least one record in %q", name)
 	}
 
 	rec := resp.Records[0]
@@ -207,8 +209,25 @@ func TestIntegration_GetRecords_Pagination(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	// Registry 3 had 2 records, registry 13 had 3 -- use 13
-	name := "b9d7f537-c84c-4dcd-a4be-c6f1253eca01"
+	// mcp-test-data is the stable registry seeded by cmd/seed-test-data;
+	// it carries 3 records -- enough to exercise offset/limit paging.
+	name := "mcp-test-data"
+
+	// Confirm the registry has enough records to page through. The
+	// nvnm-testnet-1 precompile returns pagination.total=0 even with
+	// countTotal=true, so count the returned slice rather than trust Total.
+	all, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
+		Registry:   &name,
+		Pagination: &anchor.PageRequest{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("GetRecords(limit=10): %v", err)
+	}
+	if len(all.Records) < 2 {
+		t.Fatalf("need >= 2 records in %q for pagination test, got %d", name, len(all.Records))
+	}
+
+	// Page 1: first record only.
 	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
 		Registry:   &name,
 		Pagination: &anchor.PageRequest{Limit: 1},
@@ -222,11 +241,8 @@ func TestIntegration_GetRecords_Pagination(t *testing.T) {
 	if resp.Pagination == nil {
 		t.Fatal("pagination should not be nil")
 	}
-	if resp.Pagination.Total < 2 {
-		t.Skipf("expected total >= 2 for pagination test, got %d", resp.Pagination.Total)
-	}
 
-	// Fetch page 2
+	// Page 2: offset by 1.
 	resp2, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
 		Registry:   &name,
 		Pagination: &anchor.PageRequest{Offset: 1, Limit: 1},
