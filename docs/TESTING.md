@@ -13,7 +13,7 @@ The project uses a layered testing approach: unit tests with mocks for fast feed
 | Test files | 45 |
 | Test functions (top-level) | 333 |
 | Subtests (table-driven cases) | 136 |
-| Integration test files (`-tags integration`) | 7 |
+| Integration test files (`-tags integration`) | 8 |
 | Packages with tests | 9 of 13 |
 
 ## Running Tests
@@ -127,8 +127,13 @@ Run with: `make test-integration` or `go test -tags integration ./...`
 | `internal/evm` | `call_integration_test.go` | 2 | `CallContract` against precompile (empty data error path), non-existent address |
 | `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID/name), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
+| `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
+| `internal/mcp` | `wallet_status_integration_test.go` | 1 | `eth_account` round-trip: `wallet_status` before → `PrepareAddRegistry` → sign → broadcast → receipt → `wallet_status` reflects the new nonce |
 
-Write integration tests require `.chain_credentials.txt` and skip if the file is absent.
+Write and round-trip integration tests require testnet credentials --
+`.chain_credentials.txt` (`write_integration_test.go`,
+`wallet_status_integration_test.go`) or `NVNM_TEST_PRIVATE_KEY` from
+`.env` (`prepare_integration_test.go`) -- and skip if absent.
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
 
@@ -290,13 +295,18 @@ $ make test-integration
 - `CallContract` against precompile returns expected error for empty calldata
 - All block, balance, and code queries return valid normalized types
 
-**Anchor integration** (2 files, 9 tests):
+**Anchor integration** (3 files, 11 tests):
 
 - `GetRegistries` returns 153+ registries
 - `GetRegistry` by ID and name both resolve correctly
 - **AddRegistry**: mined successfully, new registry confirmed on-chain
 - **AddRecord**: mined successfully, record confirmed with correct checksum/URI
 - **GrantRole**: mined successfully in block 828178, 40,547 gas used -- first time this tool has been tested on-chain
+- **PrepareAddRegistry round-trips**: EIP-1559 (type-2 default) and legacy (type-0 opt-out) both prepare, sign, broadcast, and mine successfully
+
+**MCP integration** (1 file, 1 test):
+
+- **`eth_account` round-trip**: drives the real `wallet_status` tool core through prepare → sign (local key) → broadcast → receipt, and asserts `wallet_status` reports the nonce advanced by exactly one (Phase 8.12 gate)
 
 ### k6 Load Test
 
@@ -347,7 +357,7 @@ $ make docker-smoke
 │  170 tests  │ 13 fixtures   │  51 tests (protocol, admin, keys) │
 ├─────────────┴───────────────┴───────────────────────────────────┤
 │              Integration Tests (live testnet)                   │
-│              25 tests, build tag: integration                   │
+│              28 tests, build tag: integration                   │
 ├─────────────────────────────────────────────────────────────────┤
 │              k6 Load Tests (HTTP transport)                     │
 │              3 scenarios, 75 VUs, 3 min                         │
