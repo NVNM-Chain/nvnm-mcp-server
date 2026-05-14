@@ -6,16 +6,19 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Target Chain
 
-| Property | Value |
+| Property | Value (testnet) |
 |---|---|
 | **Network** | NVNM Chain -- Inveniam L2 (MANTRA-secured consumer chain) |
-| **Chain ID** | `58887` (`0xe607`) |
-| **Cosmos chain ID** | `manveniam-1` |
-| **Native currency** | mUSD (MANTRA US Dollars) -- used for gas fees |
-| **EVM RPC** | `https://evm.inveniam.mantrachain.io` |
-| **Cosmos RPC** | `https://rpc.inveniam.mantrachain.io` |
-| **Explorer** | `https://explorer.inveniam.mantrachain.io/` |
+| **EVM chain ID** | `787111` (`0xc02a7`) |
+| **Cosmos chain ID** | `nvnm-testnet-1` |
+| **Native token** | `mantraUSD` |
+| **Gas token** | `wmantraUSD` (wrapped `mantraUSD`, held in EVM wallets) -- pays gas fees |
+| **EVM RPC** | `https://evm.testnet.nvnmchain.io` |
+| **Cosmos RPC** | `https://rpc.testnet.nvnmchain.io` |
+| **EVM explorer** | `https://explorer.evm.testnet.nvnmchain.io` |
 | **Anchor precompile** | `0x0000000000000000000000000000000000000A00` |
+
+> **Mainnet** identifiers (EVM chain ID `1611`, Cosmos `nvnm-1`, `*.nvnmchain.io` endpoints) and the full testnet+mainnet reference live in [`docs/DESIGN.md` § Target Chain](docs/DESIGN.md). The server runs as one instance per network.
 
 ## Status
 
@@ -51,8 +54,8 @@ make help
 make build
 
 # Configure (minimum required)
-export NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io
-export NVNM_CHAIN_ID=58887
+export NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io
+export NVNM_CHAIN_ID=787111
 export ANCHOR_ABI_PATH=abi/anchoring.json
 
 # Run (stdio transport -- for local MCP client integration)
@@ -129,7 +132,7 @@ All configuration is via environment variables. No config files required.
 | Variable | Description |
 |---|---|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `NVNM_CHAIN_ID` | Expected chain ID (`58887` for NVNM testnet) |
+| `NVNM_CHAIN_ID` | Expected chain ID (`787111` for NVNM testnet) |
 
 ### Authentication (HTTP transport)
 
@@ -377,8 +380,8 @@ For comprehensive testing documentation, including test architecture, framework 
 ```bash
 make docker-build
 docker run --rm \
-  -e NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-  -e NVNM_CHAIN_ID=58887 \
+  -e NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
+  -e NVNM_CHAIN_ID=787111 \
   -e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
   -e MCP_TRANSPORT=http \
   -p 8080:8080 \
@@ -402,8 +405,8 @@ A Helm chart is available in `deploy/helm/nvnm-mcp-server/`:
 
 ```bash
 helm install nvnm-mcp deploy/helm/nvnm-mcp-server/ \
-  --set env.NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-  --set env.NVNM_CHAIN_ID=58887
+  --set env.NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
+  --set env.NVNM_CHAIN_ID=787111
 ```
 
 Prometheus alerting rules are in `deploy/prometheus/alerts.yaml` and a Grafana dashboard in `deploy/grafana/dashboard.json`.

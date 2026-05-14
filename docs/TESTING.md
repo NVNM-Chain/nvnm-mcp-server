@@ -36,7 +36,7 @@ make seed-test-data    # Create a test registry with phoney records on-chain
 | Command | Prerequisite | Install |
 |---------|-------------|---------|
 | `make test` | Go 1.26+ | -- |
-| `make test-integration` | Network access to `https://evm.inveniam.mantrachain.io` | -- |
+| `make test-integration` | Network access to `https://evm.testnet.nvnmchain.io` | -- |
 | `make test-load` | k6, running server on `:8080` | `brew install k6` |
 | `make docker-smoke` | Docker Desktop | -- |
 | `make seed-test-data` | `.chain_credentials.txt` in project root | See below |
@@ -115,7 +115,7 @@ To update golden files after an intentional change, delete the `.golden.json` fi
 
 ### 3. Integration Tests (live testnet)
 
-Integration tests connect to the Inveniam EVM RPC at `https://evm.inveniam.mantrachain.io` (chain ID 58887). They are excluded from default `go test ./...` by the `//go:build integration` build tag.
+Integration tests connect to the NVNM Chain testnet EVM RPC at `https://evm.testnet.nvnmchain.io` (chain ID 787111). They are excluded from default `go test ./...` by the `//go:build integration` build tag.
 
 Run with: `make test-integration` or `go test -tags integration ./...`
 
@@ -281,7 +281,7 @@ $ make test-integration
 
 **EVM integration** (4 files, 16 tests):
 
-- `ChainID` = 58887, `LatestBlockNumber` = 828169
+- `ChainID` = 787111, `LatestBlockNumber` = 828169
 - `FilterLogs` found 6 logs from precompile in 1000-block range
 - `CallContract` against precompile returns expected error for empty calldata
 - All block, balance, and code queries return valid normalized types

@@ -8,18 +8,22 @@ For write operations, the server constructs unsigned transactions but never hold
 
 ### Target Chain
 
-NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set through Interchain Security (ICS). It is purpose-built for document anchoring and provenance verification.
+NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set through Interchain Security (ICS). It is purpose-built for document anchoring and provenance verification. The chain runs as two networks -- testnet and mainnet -- and this server is deployed as one instance per network (see § 8 Multi-chain).
 
-| Property | Value |
-|---|---|
-| Network | NVNM Chain (Inveniam L2) |
-| Chain ID | `58887` (`0xe607`) |
-| Cosmos chain ID | `manveniam-1` |
-| Native currency | mUSD (MANTRA US Dollars) -- pays gas fees |
-| EVM RPC | `https://evm.inveniam.mantrachain.io` |
-| Cosmos RPC | `https://rpc.inveniam.mantrachain.io` |
-| Explorer | `https://explorer.inveniam.mantrachain.io/` |
-| Anchor precompile | `0x0000000000000000000000000000000000000A00` |
+| Property | Testnet | Mainnet |
+|---|---|---|
+| Cosmos chain ID | `nvnm-testnet-1` | `nvnm-1` |
+| EVM chain ID | `787111` (`0xc02a7`) | `1611` (`0x64b`) |
+| Native token | `mantraUSD` | `mmUSD` |
+| Gas token (EVM, wrapped) | `wmantraUSD` | `wmmUSD` |
+| EVM RPC | `https://evm.testnet.nvnmchain.io` | `https://evm.nvnmchain.io` |
+| Cosmos RPC | `https://rpc.testnet.nvnmchain.io` | `https://rpc.nvnmchain.io` |
+| EVM explorer | `https://explorer.evm.testnet.nvnmchain.io` | `https://evm.explorer.nvnmchain.io` |
+| Anchor precompile | `0x0000000000000000000000000000000000000A00` | `0x0000000000000000000000000000000000000A00` |
+
+> **Privacy-by-design.** The chain stores only hash fingerprints of data (one-way SHA-256), never the underlying data itself. The anchoring precompile deliberately emits no events. Records on chain are meaningless to passive observers; counterparties exchange the underlying file off-band on a need-to-know basis and verify by recomputing the hash. The chain is a neutral notary that never reads documents.
+>
+> *Design implication for this server:* the onboarding wizard and `wallet_status` surface only activity-level signals (e.g., "has this wallet sent any transactions?") and never content-level signals (e.g., "which registries did it touch"). The skipped feature "decoded events in receipts" is correctly off the roadmap — decoding would undermine the privacy design.
 
 ```
                                           ┌─────────────────────┐
@@ -406,7 +410,7 @@ type WalletTransactionRequest struct {
     To                   string `json:"to"`                                // Precompile address
     Data                 string `json:"data"`                              // ABI-encoded calldata
     Value                string `json:"value"`                             // "0x0"
-    ChainID              string `json:"chainId"`                           // 0x-prefixed hex (e.g. "0xe607")
+    ChainID              string `json:"chainId"`                           // 0x-prefixed hex (e.g. "0xc02a7")
     Gas                  string `json:"gas"`                               // 0x-prefixed hex quantity
     GasPrice             string `json:"gasPrice,omitempty"`                // Type-0 path; omitted for EIP-1559
     MaxFeePerGas         string `json:"maxFeePerGas,omitempty"`            // EIP-1559 path

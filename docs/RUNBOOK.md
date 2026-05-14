@@ -1,6 +1,6 @@
 # Operational runbook: NVNM Chain MCP Server
 
-This document covers production deployment and day-two operations for the Go MCP server that exposes the NVNM Chain (Inveniam L2 on MANTRA, chain ID **58887**) via MCP tools, with HTTP transport, separate health/metrics port, OpenTelemetry traces, and Prometheus metrics.
+This document covers production deployment and day-two operations for the Go MCP server that exposes the NVNM Chain (Inveniam L2 on MANTRA, chain ID **787111**) via MCP tools, with HTTP transport, separate health/metrics port, OpenTelemetry traces, and Prometheus metrics.
 
 ---
 
@@ -56,9 +56,9 @@ Dashboards that filter by `service.name`, `tracer`, or `meter` will need their q
 | Variable | Purpose |
 |----------|---------|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC URL (`http://` or `https://` only). May include query parameters for provider API keys; treat as secret if it does. |
-| `NVNM_CHAIN_ID` | Expected chain ID; must be a positive integer (e.g. `58887`). Startup fails validation if missing or invalid. |
+| `NVNM_CHAIN_ID` | Expected chain ID; must be a positive integer (e.g. `787111`). Startup fails validation if missing or invalid. |
 
-Production default RPC for this network: `https://evm.inveniam.mantrachain.io`.
+Default RPC for the testnet network: `https://evm.testnet.nvnmchain.io`.
 
 ### Strongly recommended for production
 

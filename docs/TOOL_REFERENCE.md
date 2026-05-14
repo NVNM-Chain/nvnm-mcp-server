@@ -301,7 +301,7 @@ _No parameters._
 
 ```json
 {
-  "chain_id": 58887,
+  "chain_id": 787111,
   "latest_block_number": 185432
 }
 ```
@@ -771,7 +771,7 @@ This tool reads local configuration only and does not make RPC calls. It should 
 ```json
 {
   "address": "0x0000000000000000000000000000000000000A00",
-  "chain_id": 58887,
+  "chain_id": 787111,
   "abi_loaded": true,
   "method_count": 12
 }
@@ -1039,13 +1039,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "gas": 200000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 58887,
+  "chain_id": 787111,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0x12345678...",
     "value": "0x0",
-    "chainId": "0xe607",
+    "chainId": "0xc02a7",
     "gas": "0x30d40",
     "gasPrice": "0x3b9aca00"
   }
@@ -1110,13 +1110,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "gas": 250000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 58887,
+  "chain_id": 787111,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0xabcdef01...",
     "value": "0x0",
-    "chainId": "0xe607",
+    "chainId": "0xc02a7",
     "gas": "0x3d090",
     "gasPrice": "0x3b9aca00"
   }
@@ -1177,13 +1177,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "gas": 150000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 58887,
+  "chain_id": 787111,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0x87654321...",
     "value": "0x0",
-    "chainId": "0xe607",
+    "chainId": "0xc02a7",
     "gas": "0x249f0",
     "gasPrice": "0x3b9aca00"
   }
@@ -1277,7 +1277,7 @@ quantities suitable for EIP-1193 wallets):
 | `to`       | `string` | Precompile address (0x-prefixed).            |
 | `data`     | `string` | ABI-encoded calldata (hex, 0x-prefixed).     |
 | `value`    | `string` | `"0x0"` for precompile calls.                |
-| `chainId`  | `string` | 0x-prefixed hex chain ID (e.g. `"0xe607"`).  |
+| `chainId`  | `string` | 0x-prefixed hex chain ID (e.g. `"0xc02a7"`).  |
 | `gas`      | `string` | 0x-prefixed hex gas limit.                   |
 | `gasPrice` | `string` | 0x-prefixed hex gas price (wei).             |
 

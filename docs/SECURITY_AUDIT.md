@@ -18,7 +18,7 @@
 
 ### 1. System Name and Business Purpose
 
-**NVNM Chain MCP Server** (MCP server name: `nvnm-chain`, renamed from `inveniam-evm` in Phase 8.9) -- a Model Context Protocol server that exposes curated, typed tools for interacting with the NVNM Chain, Inveniam's L2 on MANTRA (Chain ID 58887). It translates MCP tool calls into EVM JSON-RPC and anchor precompile interactions, normalizes responses, and implements a prepare-sign-submit pattern for write operations where the server never holds private keys.
+**NVNM Chain MCP Server** (MCP server name: `nvnm-chain`, renamed from `inveniam-evm` in Phase 8.9) -- a Model Context Protocol server that exposes curated, typed tools for interacting with the NVNM Chain, Inveniam's L2 on MANTRA (Chain ID 787111). It translates MCP tool calls into EVM JSON-RPC and anchor precompile interactions, normalizes responses, and implements a prepare-sign-submit pattern for write operations where the server never holds private keys.
 
 **Evidence:** [docs/DESIGN.md](DESIGN.md) section 1; [README.md](../README.md) opening sections.
 
