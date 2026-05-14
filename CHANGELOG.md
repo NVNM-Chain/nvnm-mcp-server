@@ -277,9 +277,11 @@ and K8s Secret pattern cleanup.
   reasons (blast-radius isolation, audit-trail clarity, per-chain
   RBAC, per-tier ops, existing startup-env config model, small
   agent-UX cost) plus a "revisit triggers" list.
-- `docs/SECURITY_AUDIT.md` gains "Updates since 2026-05-12" and
-  "Updates since 2026-05-13" sections covering the pre-red-team
-  remediation log and the 8.6/8.7 storage + validator design.
+- `docs/SECURITY_AUDIT.md` gains the "Update 2026-05-12: Fresh
+  pre-red-team review and remediation" and "Update 2026-05-13:
+  Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)"
+  sections covering the pre-red-team remediation log and the
+  8.6/8.7 storage + validator design.
 - `docs/SECURITY_CONSUMER_GUIDANCE.md` (new) describes the two
   threats the server deliberately does NOT mitigate at its boundary
   -- indirect prompt injection via on-chain string fields and
@@ -420,7 +422,8 @@ and K8s Secret pattern cleanup.
   NetworkPolicy rule.
 - **Breaking:** `OTLP_INSECURE` default flipped. Operators
   exporting OTLP over plaintext must now opt in explicitly. See
-  `docs/SECURITY_AUDIT.md` "Updates since 2026-05-12".
+  `docs/SECURITY_AUDIT.md` "Update 2026-05-12: Fresh pre-red-team
+  review and remediation".
 - **Breaking:** `NVNM_CHAIN_ENVIRONMENT` is required when the
   configured chain ID is not one of the recognized testnet/mainnet
   IDs. Private forks must set it explicitly; recognized IDs still

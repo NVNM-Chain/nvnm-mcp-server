@@ -1,11 +1,11 @@
 # Pre-Red-Team Security Assessment: NVNM Chain MCP Server
 
 **Date:** 2026-04-01
-**Last reviewed:** 2026-05-13 (Phase 8.1-8.8 + API key sha256-hashing + defiweb swap; see "Updates since 2026-04-01" at the end)
+**Last reviewed:** 2026-05-13 (Phase 8.1-8.8 + API key sha256-hashing + defiweb swap; see the "Update log" at the end)
 **Scope:** Full repository defensive security review
 **Status:** Assessment complete; remediation complete (see Phase 4)
 
-> **Reading order.** This document is a point-in-time snapshot from 2026-04-01. Material covered by the snapshot (tool surface, dependency list, sha256-at-rest claim) has changed since. The authoritative current state lives in the "Updates since 2026-04-01" and "Updates since 2026-05-13" sections at the bottom -- read those first if you want the as-of-today picture. Specifically:
+> **Reading order.** This document is a point-in-time snapshot from 2026-04-01. Material covered by the snapshot (tool surface, dependency list, sha256-at-rest claim) has changed since. The authoritative current state lives in the "Update log" sections at the bottom (newest entries last) -- read those first if you want the as-of-today picture. Specifically:
 >
 > - Tool count: 16 -> **21** after Phase 8.8 (5 onboarding tools added).
 > - EVM client: `go-ethereum` v1.17.2 -> **`defiweb/go-eth`** (MIT-licensed, vendored). The GPL-3.0 exposure that drove the swap is closed.
@@ -657,7 +657,19 @@ All findings rated High or Critical have been remediated. Of the original 8 Long
 
 ---
 
-## Updates since 2026-04-01
+## Update log
+
+The sections below record changes made after the original 2026-04-01 pre-red-team assessment, in chronological order (oldest first):
+
+- [2026-04-28 — Longer-term backlog delivery](#update-2026-04-28-longer-term-backlog-delivery)
+- [2026-05-11 — Phase 8 in progress](#update-2026-05-11-phase-8-in-progress)
+- [2026-05-12 — Fresh pre-red-team review and remediation](#update-2026-05-12-fresh-pre-red-team-review-and-remediation)
+- [2026-05-13 — go-ethereum replaced by defiweb/go-eth](#update-2026-05-13-go-ethereum-replaced-by-defiwebgo-eth)
+- [2026-05-13 — Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)](#update-2026-05-13-phase-86-and-87-hashed-at-rest-constant-time-auth)
+
+---
+
+## Update 2026-04-28: Longer-term backlog delivery
 
 The original assessment marked 6 items as "Backlog" and 2 as "Done" in the Longer-Term tier. As of 2026-04-28, 5 of those 6 backlog items have been delivered:
 
@@ -672,7 +684,108 @@ The original assessment marked 6 items as "Backlog" and 2 as "Done" in the Longe
 
 In addition, **FusionAuth OAuth/JWT authentication** was added in Phase 6 as a second auth provider alongside API keys, and **MetaMask wallet signing support** was added in Phase 7 with a `wallet_tx_request` payload returned from every `anchor_prepare_*` tool. Neither was scoped in the original audit but both materially improve the production security posture (centralized identity, browser-wallet UX without server-side keys).
 
-## Updates since 2026-05-13 (go-ethereum -> defiweb/go-eth swap)
+---
+
+## Update 2026-05-11: Phase 8 in progress
+
+Phase 8 is layering additional security and onboarding controls on top of the Phase 5–7 baseline. As of 2026-05-11 the following Phase 8 items have shipped on `main`:
+
+| Item | Phase 8 task | Commit | Notes |
+|---|---|---|---|
+| **Tool annotations on every tool** (`ReadOnlyHint` / `DestructiveHint` / `OpenWorldHint` profiles) | 8.2 | `d0cc16f` | Lets MCP clients and connector-directory reviewers tell read-only from state-changing tools without relying on spec defaults. `evm_send_raw_transaction` is the only `DestructiveHint=true` tool; `anchor_info` is the one `OpenWorldHint=false` tool. |
+| **`next_actions` envelope on every tool response** | 8.3 | `3b88f3b` | Static AST reachability test prevents stale tool-name references in hint strings. |
+| **EIP-1559 (type-2) prepare-tools by default** | 8.4 | `2e9e751` | Backwards-compat: `gas_price` field dual-populated on type-2 responses; `prefer_legacy_tx` input parameter for opt-out. Verified end-to-end against testnet for both transaction types. |
+| **Origin-header validation on HTTP transport** | 8.5 | `cc8ca80` | DNS-rebinding defense per the MCP spec. Outermost middleware so rejection short-circuits before auth or rate-limit work. Allowlist via `NVNM_ALLOWED_ORIGINS`; localhost-only default. |
+
+Phase 8 also tracks the following security items still pending:
+
+| Item | Phase 8 task | Notes |
+|---|---|---|
+| **API-key hashing at rest** with `.pre-migration` backup + atomic tmp-rename writes | 8.6 (IRREVERSIBLE) | Current `main` stores raw bearer tokens on disk in operator-managed key stores. Any earlier "stored hashed at rest" claim in this document is **not yet accurate** -- the migration in 8.6 will make it true. Until 8.6 ships, operators should treat the key store file as a high-sensitivity secret comparable to `.env`-style credentials. |
+| Constant-time auth comparison on the hash bytes | 8.7 | Defense-in-depth alongside the hash-lookup path. |
+| Server identity rename + `INVENIAM_*` → `NVNM_*` env-var hard cut with fail-loud guard | 8.9 (BREAKING) -- **SHIPPED 2026-05-13** | Eliminates the dual-prefix transient state. Strict policy: legacy var detected at startup fails loud even when the matching `NVNM_*` is also set. See `docs/RUNBOOK.md#env-var-migration`. |
+| Binary + Docker artifact identity rename (`cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`; ghcr image `inveniamcapital/inveniam-mcp-server` → `inveniamcapital/nvnm-mcp-server`; K8s `metadata.name` and `app.kubernetes.io/name` labels; Grafana dashboard `uid`) | 8.13 (BREAKING) -- **SHIPPED 2026-05-13** | Companion to 8.9. Atomic rename of the publishing surface so the project no longer carries the old identity outside the rc.1/rc.2 CHANGELOG history. Old ghcr image stays in place but receives no further updates. |
+| OWASP Top-10 self-audit gate | 8.12 | Final close-out before Phase 8 marked COMPLETE. |
+
+---
+
+## Update 2026-05-12: Fresh pre-red-team review and remediation
+
+A second pre-red-team assessment was conducted on 2026-05-12, grounded
+in the post-Phase-8.5 codebase. It surfaced seven previously-unflagged
+or partially-remediated issues plus several Go code-review findings.
+The full assessment is preserved in conversation; the items below
+record what was fixed in the codebase.
+
+### Top-10 attack paths (2026-05-12 review)
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | Credential stuffing -- rate limiter was post-auth | **Remediated** -- new `IPFailRateLimiter` (pre-auth, per source IP) in `internal/mcp/failrate.go`; `AuthMiddleware` calls `Penalize` on every 401. |
+| 2 | Unbounded growth of per-client rate-limiter map | **Remediated** -- `ClientRateLimiter` now bounded by `DefaultLimiterMaxClients` (10000) with LRU eviction and a TTL janitor; same pattern applied to `IPFailRateLimiter`. |
+| 3 | HTTP transport failed open with no keys configured | **Remediated** -- `loadAPIKeys` now returns `config.ErrHTTPAuthRequired` when `Transport=="http"` and no validator can be constructed. Test asserts the fail-closed path. |
+| 4 | API-key store written non-atomically | **Remediated** -- `SaveKeysFile` now writes to a sibling `.tmp-*` file (`0o600`, fsync'd) and renames over the target. Test asserts the previous file is preserved when the rename fails. |
+| 5 | Admin REST `:8081` lacked defense-in-depth | **Remediated** -- default bind moved to `127.0.0.1:8081` (BREAKING for deploys that exposed it cluster-wide). Admin auth now compares SHA-256 hashes (fixed length) so `subtle.ConstantTimeCompare`'s "fast on length mismatch" shortcut cannot probe the admin-key length. NetworkPolicy template includes an example for in-cluster admin access. |
+| 6 | K8s `Deployment` pulled `:latest` | **Documented** -- `deployment.yaml` carries an explicit TODO + comment block describing how to substitute `@sha256:<digest>` once the release pipeline emits a digest-stable image; the existing Dockerfile already digest-pins both base images. (Real fix requires a release-pipeline change outside this commit set.) |
+| 7 | CI license allowlist permitted GPL-3.0 / LGPL-3.0 | **Remediated** -- allowlist narrowed to MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/Unlicense/CC0-1.0/0BSD/Zlib/EPL-2.0/CDDL-1.0. Matches the proprietary-commercial policy in CLAUDE.md. CI is the safety net; if a transitive GPL-3 dep exists today it will surface on the next run. |
+| 8 | ConfigMap shape encouraged secret-in-ConfigMap | **Remediated** -- new `deploy/k8s/secret.yaml.example` documents the Secret pattern; `deployment.yaml` wires both `configMapRef` (non-sensitive) and `secretRef` (credentials), plus a volume mount for `MCP_API_KEYS_FILE` from a separate Secret. `configmap.yaml` cleaned of credential-shaped fields and `INVENIAM_EVM_RPC_URL` removed. `.gitignore` now excludes `deploy/k8s/secret.yaml`. |
+| 9 | `OTLP_INSECURE` default was `true` | **Remediated** -- default flipped to `false` (BREAKING for sidecar/localhost-collector deploys that did not explicitly set the var). Comment on the new default explains the rationale and the opt-in path. |
+| 10 | Approval prompt opaque on method + signer | **Remediated** -- `DecodeTxSummary` now extracts the first 4 bytes of calldata as a `method_selector` field, recovers the signer address from the signature, and threads the chain environment ("testnet"/"mainnet") through `NewServer` so the prompt renders chain ID with a human label. `formatApprovalMessage` shows `Signer (recovered)`, `Method selector`, and a `wei (≈ X ETH)` value formatted with thousand separators. |
+
+### Go code review findings (2026-05-12)
+
+| Finding | Status |
+|---|---|
+| ConstantTimeCompare on raw admin key length-leaked the key length | **Remediated** -- admin now hashes both sides with SHA-256 before constant-time compare; the apikey-validator placebo is left for Phase 8.7 as planned. |
+| Telemetry middleware comment claimed errors were not recorded -- but `span.RecordError(err)` does record them | **Remediated** -- comment corrected to describe the actual privacy model (errors on span, sanitized to client). |
+| `auth.go` returned 403 for invalid bearer (should be 401 per RFC 7235) | **Remediated** -- all bearer-failure paths now return 401 in both `AuthMiddleware` and `adminAuth`. Tests updated. |
+| `OriginAllowlist.Resolved` used a hand-rolled insertion sort | **Remediated** -- replaced with `sort.Strings`. |
+| `anchor_prepare_*` annotated `OpenWorldReadOnly` but required write role -- semantic mismatch flagged | **Re-examined and kept** -- annotation is correct per MCP spec (no environment modification). Tool description now explicitly documents the role requirement so connector-directory reviewers don't mis-read the annotation. |
+| Audit log line message inconsistent across write tools (`audit: foo`, `audit: foo phase`) | **Remediated** -- all five write-handler audit lines now use `slog.Group("audit", ...)` with stable `tool`, `phase`, and `client_id` keys. |
+| Chain-environment silent fallback to testnet when chain ID unrecognized | **Remediated** -- `Validate()` now refuses to start when no environment can be resolved; operators on private forks must set `NVNM_CHAIN_ENVIRONMENT` explicitly. |
+| Dockerfile build image version vs `go.mod` toolchain drift | **Remediated** -- Dockerfile sets `GOTOOLCHAIN=go1.26.3` in the build stage so reproducible builds do not depend on `GOTOOLCHAIN=auto` downloading whatever point release happens to be current. |
+| New tests | `failrate_test.go`, `keys_atomic_test.go`, `parsehex_fuzz_test.go`, `apikey_bench_test.go`, plus `cmd/nvnm-mcp-server/main_test.go` covering fail-closed HTTP startup. |
+
+### AI/agent-specific (2026-05-12)
+
+| Finding | Status |
+|---|---|
+| Indirect prompt injection via on-chain string fields | **Documented** -- `docs/SECURITY_CONSUMER_GUIDANCE.md` describes the threat, the server's stance ("we don't sanitize on-chain truth"), and the defenses consumers should apply. |
+| Approval-substitution attack via signed-tx swap | **Mitigated** -- approval prompt now shows recovered signer + method selector so the user has the surface to spot a substituted transaction. |
+
+### Breaking-config callouts (operators read this)
+
+Three changes in this remediation set are intentionally breaking for
+existing deployments:
+
+1. **`ADMIN_API_ADDR` default is now `127.0.0.1:8081`.** Deploys that
+   expected cluster-wide access on `:8081` must explicitly set
+   `ADMIN_API_ADDR=:8081` AND restrict it via NetworkPolicy.
+2. **`OTLP_INSECURE` default is now `false`.** Sidecar / localhost
+   collector deploys that previously relied on the insecure default
+   must set `OTLP_INSECURE=true` explicitly.
+3. **`NVNM_CHAIN_ENVIRONMENT` is required when chain ID is not
+   recognized.** Deploys against private forks or unfamiliar chain
+   IDs must set this explicitly; the previous silent fallback to
+   testnet is gone.
+
+### Summary (refreshed 2026-05-12)
+
+| Tier | Total | Remediated | Documented Only | Backlog |
+|---|---|---|---|---|
+| 2026-04-01 audit (re-audited) | 18 | 17 | 0 | 1 |
+| 2026-05-12 audit (top-10) | 10 | 9 | 1 (image digest -- needs release pipeline) | 0 |
+| 2026-05-12 Go code review | 9 | 9 | 0 | 0 |
+| 2026-05-12 AI/agent | 2 | 1 doc + 1 mitigated | 0 | 0 |
+
+Phase 8.6 (API-key hashing at rest) and Phase 8.7 (constant-time auth
+on the hashed bytes) shipped together on 2026-05-13 -- see the entry
+below. Phase 8.9 (env-var hard cut) and Phase 8.12 (OWASP self-audit
+gate) remain on the Phase 8 roadmap as originally scoped.
+
+---
+
+## Update 2026-05-13: go-ethereum replaced by defiweb/go-eth
 
 The license-allowlist tightening committed on 2026-05-12 (commit
 `6580ddc`) failed CI because `github.com/ethereum/go-ethereum` is
@@ -750,83 +863,9 @@ licensing exposure that vendoring closes off.
    through `evm.AddressHex(...)` which calls `Address.Checksum(...)`
    to produce the EIP-55 form. Tests assert the EIP-55 output.
 
-## Updates since 2026-05-12 (fresh pre-red-team review + remediation)
-
-A second pre-red-team assessment was conducted on 2026-05-12, grounded
-in the post-Phase-8.5 codebase. It surfaced seven previously-unflagged
-or partially-remediated issues plus several Go code-review findings.
-The full assessment is preserved in conversation; the items below
-record what was fixed in the codebase.
-
-### Top-10 attack paths (2026-05-12 review)
-
-| # | Finding | Status |
-|---|---|---|
-| 1 | Credential stuffing -- rate limiter was post-auth | **Remediated** -- new `IPFailRateLimiter` (pre-auth, per source IP) in `internal/mcp/failrate.go`; `AuthMiddleware` calls `Penalize` on every 401. |
-| 2 | Unbounded growth of per-client rate-limiter map | **Remediated** -- `ClientRateLimiter` now bounded by `DefaultLimiterMaxClients` (10000) with LRU eviction and a TTL janitor; same pattern applied to `IPFailRateLimiter`. |
-| 3 | HTTP transport failed open with no keys configured | **Remediated** -- `loadAPIKeys` now returns `config.ErrHTTPAuthRequired` when `Transport=="http"` and no validator can be constructed. Test asserts the fail-closed path. |
-| 4 | API-key store written non-atomically | **Remediated** -- `SaveKeysFile` now writes to a sibling `.tmp-*` file (`0o600`, fsync'd) and renames over the target. Test asserts the previous file is preserved when the rename fails. |
-| 5 | Admin REST `:8081` lacked defense-in-depth | **Remediated** -- default bind moved to `127.0.0.1:8081` (BREAKING for deploys that exposed it cluster-wide). Admin auth now compares SHA-256 hashes (fixed length) so `subtle.ConstantTimeCompare`'s "fast on length mismatch" shortcut cannot probe the admin-key length. NetworkPolicy template includes an example for in-cluster admin access. |
-| 6 | K8s `Deployment` pulled `:latest` | **Documented** -- `deployment.yaml` carries an explicit TODO + comment block describing how to substitute `@sha256:<digest>` once the release pipeline emits a digest-stable image; the existing Dockerfile already digest-pins both base images. (Real fix requires a release-pipeline change outside this commit set.) |
-| 7 | CI license allowlist permitted GPL-3.0 / LGPL-3.0 | **Remediated** -- allowlist narrowed to MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/Unlicense/CC0-1.0/0BSD/Zlib/EPL-2.0/CDDL-1.0. Matches the proprietary-commercial policy in CLAUDE.md. CI is the safety net; if a transitive GPL-3 dep exists today it will surface on the next run. |
-| 8 | ConfigMap shape encouraged secret-in-ConfigMap | **Remediated** -- new `deploy/k8s/secret.yaml.example` documents the Secret pattern; `deployment.yaml` wires both `configMapRef` (non-sensitive) and `secretRef` (credentials), plus a volume mount for `MCP_API_KEYS_FILE` from a separate Secret. `configmap.yaml` cleaned of credential-shaped fields and `INVENIAM_EVM_RPC_URL` removed. `.gitignore` now excludes `deploy/k8s/secret.yaml`. |
-| 9 | `OTLP_INSECURE` default was `true` | **Remediated** -- default flipped to `false` (BREAKING for sidecar/localhost-collector deploys that did not explicitly set the var). Comment on the new default explains the rationale and the opt-in path. |
-| 10 | Approval prompt opaque on method + signer | **Remediated** -- `DecodeTxSummary` now extracts the first 4 bytes of calldata as a `method_selector` field, recovers the signer address from the signature, and threads the chain environment ("testnet"/"mainnet") through `NewServer` so the prompt renders chain ID with a human label. `formatApprovalMessage` shows `Signer (recovered)`, `Method selector`, and a `wei (≈ X ETH)` value formatted with thousand separators. |
-
-### Go code review findings (2026-05-12)
-
-| Finding | Status |
-|---|---|
-| ConstantTimeCompare on raw admin key length-leaked the key length | **Remediated** -- admin now hashes both sides with SHA-256 before constant-time compare; the apikey-validator placebo is left for Phase 8.7 as planned. |
-| Telemetry middleware comment claimed errors were not recorded -- but `span.RecordError(err)` does record them | **Remediated** -- comment corrected to describe the actual privacy model (errors on span, sanitized to client). |
-| `auth.go` returned 403 for invalid bearer (should be 401 per RFC 7235) | **Remediated** -- all bearer-failure paths now return 401 in both `AuthMiddleware` and `adminAuth`. Tests updated. |
-| `OriginAllowlist.Resolved` used a hand-rolled insertion sort | **Remediated** -- replaced with `sort.Strings`. |
-| `anchor_prepare_*` annotated `OpenWorldReadOnly` but required write role -- semantic mismatch flagged | **Re-examined and kept** -- annotation is correct per MCP spec (no environment modification). Tool description now explicitly documents the role requirement so connector-directory reviewers don't mis-read the annotation. |
-| Audit log line message inconsistent across write tools (`audit: foo`, `audit: foo phase`) | **Remediated** -- all five write-handler audit lines now use `slog.Group("audit", ...)` with stable `tool`, `phase`, and `client_id` keys. |
-| Chain-environment silent fallback to testnet when chain ID unrecognized | **Remediated** -- `Validate()` now refuses to start when no environment can be resolved; operators on private forks must set `NVNM_CHAIN_ENVIRONMENT` explicitly. |
-| Dockerfile build image version vs `go.mod` toolchain drift | **Remediated** -- Dockerfile sets `GOTOOLCHAIN=go1.26.3` in the build stage so reproducible builds do not depend on `GOTOOLCHAIN=auto` downloading whatever point release happens to be current. |
-| New tests | `failrate_test.go`, `keys_atomic_test.go`, `parsehex_fuzz_test.go`, `apikey_bench_test.go`, plus `cmd/nvnm-mcp-server/main_test.go` covering fail-closed HTTP startup. |
-
-### AI/agent-specific (2026-05-12)
-
-| Finding | Status |
-|---|---|
-| Indirect prompt injection via on-chain string fields | **Documented** -- `docs/SECURITY_CONSUMER_GUIDANCE.md` describes the threat, the server's stance ("we don't sanitize on-chain truth"), and the defenses consumers should apply. |
-| Approval-substitution attack via signed-tx swap | **Mitigated** -- approval prompt now shows recovered signer + method selector so the user has the surface to spot a substituted transaction. |
-
-### Breaking-config callouts (operators read this)
-
-Three changes in this remediation set are intentionally breaking for
-existing deployments:
-
-1. **`ADMIN_API_ADDR` default is now `127.0.0.1:8081`.** Deploys that
-   expected cluster-wide access on `:8081` must explicitly set
-   `ADMIN_API_ADDR=:8081` AND restrict it via NetworkPolicy.
-2. **`OTLP_INSECURE` default is now `false`.** Sidecar / localhost
-   collector deploys that previously relied on the insecure default
-   must set `OTLP_INSECURE=true` explicitly.
-3. **`NVNM_CHAIN_ENVIRONMENT` is required when chain ID is not
-   recognized.** Deploys against private forks or unfamiliar chain
-   IDs must set this explicitly; the previous silent fallback to
-   testnet is gone.
-
-### Summary (refreshed 2026-05-12)
-
-| Tier | Total | Remediated | Documented Only | Backlog |
-|---|---|---|---|---|
-| 2026-04-01 audit (re-audited) | 18 | 17 | 0 | 1 |
-| 2026-05-12 audit (top-10) | 10 | 9 | 1 (image digest -- needs release pipeline) | 0 |
-| 2026-05-12 Go code review | 9 | 9 | 0 | 0 |
-| 2026-05-12 AI/agent | 2 | 1 doc + 1 mitigated | 0 | 0 |
-
-Phase 8.6 (API-key hashing at rest) and Phase 8.7 (constant-time auth
-on the hashed bytes) shipped together on 2026-05-13 -- see the entry
-below. Phase 8.9 (env-var hard cut) and Phase 8.12 (OWASP self-audit
-gate) remain on the Phase 8 roadmap as originally scoped.
-
 ---
 
-## Updates since 2026-05-13 (Phase 8.6 + 8.7: hashed-at-rest + constant-time auth)
+## Update 2026-05-13: Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)
 
 API keys are now stored hashed at rest, indexed by hash in memory,
 and compared by hash bytes under constant time. The earlier
@@ -914,24 +953,3 @@ defeating timing-based distinction by a remote attacker.
   still in the legacy shape. The next admin CRUD will re-persist;
   if no admin CRUD is expected, fix the underlying filesystem issue
   and restart the server.
-
-## Updates since 2026-05-11 (Phase 8 in progress)
-
-Phase 8 is layering additional security and onboarding controls on top of the Phase 5–7 baseline. As of 2026-05-11 the following Phase 8 items have shipped on `main`:
-
-| Item | Phase 8 task | Commit | Notes |
-|---|---|---|---|
-| **Tool annotations on every tool** (`ReadOnlyHint` / `DestructiveHint` / `OpenWorldHint` profiles) | 8.2 | `d0cc16f` | Lets MCP clients and connector-directory reviewers tell read-only from state-changing tools without relying on spec defaults. `evm_send_raw_transaction` is the only `DestructiveHint=true` tool; `anchor_info` is the one `OpenWorldHint=false` tool. |
-| **`next_actions` envelope on every tool response** | 8.3 | `3b88f3b` | Static AST reachability test prevents stale tool-name references in hint strings. |
-| **EIP-1559 (type-2) prepare-tools by default** | 8.4 | `2e9e751` | Backwards-compat: `gas_price` field dual-populated on type-2 responses; `prefer_legacy_tx` input parameter for opt-out. Verified end-to-end against testnet for both transaction types. |
-| **Origin-header validation on HTTP transport** | 8.5 | `cc8ca80` | DNS-rebinding defense per the MCP spec. Outermost middleware so rejection short-circuits before auth or rate-limit work. Allowlist via `NVNM_ALLOWED_ORIGINS`; localhost-only default. |
-
-Phase 8 also tracks the following security items still pending:
-
-| Item | Phase 8 task | Notes |
-|---|---|---|
-| **API-key hashing at rest** with `.pre-migration` backup + atomic tmp-rename writes | 8.6 (IRREVERSIBLE) | Current `main` stores raw bearer tokens on disk in operator-managed key stores. Any earlier "stored hashed at rest" claim in this document is **not yet accurate** -- the migration in 8.6 will make it true. Until 8.6 ships, operators should treat the key store file as a high-sensitivity secret comparable to `.env`-style credentials. |
-| Constant-time auth comparison on the hash bytes | 8.7 | Defense-in-depth alongside the hash-lookup path. |
-| Server identity rename + `INVENIAM_*` → `NVNM_*` env-var hard cut with fail-loud guard | 8.9 (BREAKING) -- **SHIPPED 2026-05-13** | Eliminates the dual-prefix transient state. Strict policy: legacy var detected at startup fails loud even when the matching `NVNM_*` is also set. See `docs/RUNBOOK.md#env-var-migration`. |
-| Binary + Docker artifact identity rename (`cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`; ghcr image `inveniamcapital/inveniam-mcp-server` → `inveniamcapital/nvnm-mcp-server`; K8s `metadata.name` and `app.kubernetes.io/name` labels; Grafana dashboard `uid`) | 8.13 (BREAKING) -- **SHIPPED 2026-05-13** | Companion to 8.9. Atomic rename of the publishing surface so the project no longer carries the old identity outside the rc.1/rc.2 CHANGELOG history. Old ghcr image stays in place but receives no further updates. |
-| OWASP Top-10 self-audit gate | 8.12 | Final close-out before Phase 8 marked COMPLETE. |
