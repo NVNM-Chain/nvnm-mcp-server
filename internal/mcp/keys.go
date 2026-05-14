@@ -50,8 +50,8 @@ type KeyEntry struct {
 // NewKeyEntry is the only constructor for KeyEntry in production code.
 // It computes the hash and prefix once and never retains the raw key.
 // Direct KeyEntry literals with Key: set are reserved for the migration
-// helper in this file and the migration regression tests; CI should
-// grep-enforce that constraint.
+// helper in this file and the migration regression tests;
+// TestNoRawKeyLiteralsOutsideMigrationTests grep-enforces that constraint.
 func NewKeyEntry(id, rawKey, writeApproval string, roles []string) KeyEntry {
 	return KeyEntry{
 		ID:            id,
