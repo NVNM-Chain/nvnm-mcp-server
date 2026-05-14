@@ -1,7 +1,7 @@
 # Pre-Red-Team Security Assessment: NVNM Chain MCP Server
 
 **Date:** 2026-04-01
-**Last reviewed:** 2026-05-13 (Phase 8.1-8.8 + API key sha256-hashing + defiweb swap; see the "Update log" at the end)
+**Last reviewed:** 2026-05-14 (Phase 8.12 OWASP Top 10 self-audit; see the "Update log" at the end)
 **Scope:** Full repository defensive security review
 **Status:** Assessment complete; remediation complete (see Phase 4)
 
@@ -666,6 +666,7 @@ The sections below record changes made after the original 2026-04-01 pre-red-tea
 - [2026-05-12 — Fresh pre-red-team review and remediation](#update-2026-05-12-fresh-pre-red-team-review-and-remediation)
 - [2026-05-13 — go-ethereum replaced by defiweb/go-eth](#update-2026-05-13-go-ethereum-replaced-by-defiwebgo-eth)
 - [2026-05-13 — Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)](#update-2026-05-13-phase-86-and-87-hashed-at-rest-constant-time-auth)
+- [2026-05-14 — Phase 8.12 OWASP Top 10 self-audit](#update-2026-05-14-phase-812-owasp-top-10-self-audit)
 
 ---
 
@@ -953,3 +954,42 @@ defeating timing-based distinction by a remote attacker.
   still in the legacy shape. The next admin CRUD will re-persist;
   if no admin CRUD is expected, fix the underlying filesystem issue
   and restart the server.
+
+---
+
+## Update 2026-05-14: Phase 8.12 OWASP Top 10 self-audit
+
+Phase 8.12 (the Phase 8 close-out gate) produced a categorized OWASP
+Top 10:2021 coverage matrix for the current `main` posture. It lives
+in its own document, [`docs/OWASP_AUDIT.md`](OWASP_AUDIT.md), rather
+than as an entry here, because it has a different lifecycle: this
+document is an append-only dated log, while the OWASP matrix is a
+**living document** that Phase 9 and Phase 10 extend in place as new
+surface lands.
+
+The two are complementary and cross-referenced: this log records
+*what changed and when*; the OWASP matrix records *how the current
+posture maps to the framework*, and cites the relevant findings here
+inline.
+
+### Disposition summary (see `docs/OWASP_AUDIT.md` for the full matrix)
+
+| # | Category | Disposition |
+|---|---|---|
+| A01 | Broken Access Control | PARTIAL — `:9090` auth + conditional RBAC noted |
+| A02 | Cryptographic Failures | PARTIAL — transport TLS is a reverse-proxy responsibility |
+| A03 | Injection | COVERED |
+| A04 | Insecure Design | COVERED |
+| A05 | Security Misconfiguration | PARTIAL — K8s `:latest` pinning → Phase 10 |
+| A06 | Vulnerable and Outdated Components | COVERED |
+| A07 | Identification and Authentication Failures | COVERED |
+| A08 | Software and Data Integrity Failures | PARTIAL — image-digest signing → Phase 10 |
+| A09 | Security Logging and Monitoring Failures | PARTIAL — append-only audit stream → Phase 10 |
+| A10 | Server-Side Request Forgery | COVERED |
+
+No new Critical or High findings were surfaced by the self-audit. The
+PARTIAL dispositions are all either documented operator-boundary
+responsibilities or named deferrals to Phase 9 / Phase 10; none is a
+silent gap. The green-target sweep run as part of the same close-out
+(`make test`, integration suite against testnet, `govulncheck`,
+`golangci-lint` full-tree covering `gosec` + `staticcheck`) passed.
