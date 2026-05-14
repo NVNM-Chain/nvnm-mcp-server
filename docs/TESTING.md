@@ -10,8 +10,8 @@ The project uses a layered testing approach: unit tests with mocks for fast feed
 
 | Metric | Count |
 |--------|-------|
-| Test files | 45 |
-| Test functions (top-level) | 333 |
+| Test files | 47 |
+| Test functions (top-level) | 334 |
 | Subtests (table-driven cases) | 136 |
 | Integration test files (`-tags integration`) | 8 |
 | Packages with tests | 9 of 13 |
@@ -58,7 +58,8 @@ Fast, deterministic tests using mocks and stubs. Run with `make test`.
 
 | Package | Test file(s) | Tests | What's covered |
 |---------|-------------|-------|----------------|
-| `internal/mcp` | `tools_test.go` | 46 | The 16 EVM + anchor MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`); onboarding tools (the 5 added in Phase 8.8) have dedicated `tools_overview_test.go`, `tools_wallet_test.go`, `tools_setup_wizard_test.go`, `tools_setup_verify_test.go` |
+| `internal/mcp` | `tools_test.go` | 48 | The 16 EVM + anchor MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`) |
+| `internal/mcp` | `tools_onboarding_test.go` | 18 | The 5 Phase 8.8 onboarding tools (`nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`) — state derivation, input validation, `next_actions` |
 | `internal/mcp` | `server_test.go` | 6 | HTTP E2E via `httptest.NewServer`: `ListTools` (all 21 tools), `CallTool` (success + error propagation) |
 | `internal/mcp` | `server_e2e_test.go` | 20 | Write approval E2E (auto/required/declined/canceled/no-elicitation/prompt-details/RPC-error), API key auth E2E (valid/invalid/missing/disabled/no-keys), per-client approval overrides (auto-overrides-required/required-overrides-auto/auth+elicitation), tx decoding, approval message formatting, sentinel error tests |
 | `internal/mcp` | `managed_keys_test.go` | 12 | `ManagedKeyStore` CRUD: create+lookup, duplicate rejection, list redaction, enable/disable, approval update, delete, persistence across reloads, counters, empty store, file permissions |
@@ -280,7 +281,7 @@ ok  internal/mcp       1.555s
 ok  internal/telemetry 1.736s
 ```
 
-All 469 tests pass (333 top-level + 136 subtests, across 45 test files in 9 packages). Zero failures. Includes the protocol E2E suite, admin/managed-keys coverage, and the Phase 8 onboarding-tool tests in `internal/mcp`.
+All 470 tests pass (334 top-level + 136 subtests, across 47 test files in 9 packages). Zero failures. Includes the protocol E2E suite, admin/managed-keys coverage, and the Phase 8 onboarding-tool tests in `internal/mcp`.
 
 ### Integration Tests
 
