@@ -38,7 +38,9 @@ Thumbs.db
 .env.*
 .chain_credentials.txt
 .mcp-keys.json
+.test-wallet-key
 test_oauth.sh
+test_create_wallet.sh
 
 # Operator-local K8s secrets (the .example file IS committed)
 deploy/k8s/secret.yaml
@@ -48,6 +50,11 @@ deploy/k8s/secret.yaml
 
 # Build
 /build/
+
+# Python (sample-code testing, ad-hoc scripts)
+.venv/
+venv/
+__pycache__/
 
 # Local per-developer scratch (HANDOFF notes, throwaway files)
 .local/
