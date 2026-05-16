@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -59,6 +60,35 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 	t.Cleanup(func() { _ = session.Close() })
 
 	return session
+}
+
+// TestE2E_Initialize_IncludesInstructions guarantees the MCP
+// initialize-response carries a server-level instructions string.
+// The string is the protocol-level signpost to nvnm_overview and
+// the verbatim privacy-by-design caveat -- a defense-in-depth layer
+// for clients whose model never reads the full tools/list payload.
+// Asserting on substrings (not the whole text) keeps the test stable
+// against wording refinements; the two substrings checked are the
+// load-bearing parts.
+func TestE2E_Initialize_IncludesInstructions(t *testing.T) {
+	session := startTestServer(t)
+
+	res := session.InitializeResult()
+	if res == nil {
+		t.Fatal("InitializeResult is nil after successful Connect")
+	}
+	if res.Instructions == "" {
+		t.Fatal("Instructions field is empty; expected a server-level orientation string")
+	}
+	// The string MUST point an agent at the lobby tool.
+	if !strings.Contains(res.Instructions, "nvnm_overview") {
+		t.Errorf("Instructions should reference nvnm_overview, got: %q", res.Instructions)
+	}
+	// The string MUST surface the privacy-by-design property, since
+	// that property shapes everything an agent can/cannot expect.
+	if !strings.Contains(res.Instructions, "emits no events") {
+		t.Errorf("Instructions should mention the no-events privacy property, got: %q", res.Instructions)
+	}
 }
 
 func TestE2E_ListTools_Returns21(t *testing.T) {

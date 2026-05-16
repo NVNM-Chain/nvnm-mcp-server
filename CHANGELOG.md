@@ -19,6 +19,11 @@ Phase 9.1: OSS foundation documents shipped (LICENSE, NOTICE,
 CODE_OF_CONDUCT, CONTRIBUTING, SECURITY). Sequencing step 1 of Phase 9
 (OSS Readiness); no behavior change.
 
+Phase 9 prep (PR #23): surface a server-level `instructions` string
+in the MCP initialize response so first-contact agents receive the
+lobby pointer and the privacy-by-design caveat at session start, even
+if their client compresses or omits tool descriptions.
+
 Phase 8.9: hard cut from the legacy `INVENIAM_*` env-var prefix to
 `NVNM_*` and matching server-identity rename. Single coordinated
 BREAKING change.
@@ -74,6 +79,38 @@ All mail-alias references use the disambiguating placeholder form
 Pre-merge grep for the literal substring `EMAIL_TBD` still catches
 every occurrence and is a Phase 9 exit criterion before the public
 repo flip (Phase 9.15).
+
+#### MCP initialize-response `instructions` string (PR #23)
+
+- `internal/mcp/server.go`: `NewServer` now passes a populated
+  `mcp.ServerOptions{Instructions: ...}` to the SDK constructor
+  (previously `nil`). The SDK propagates the string into the
+  `initialize` response per the MCP spec field
+  `InitializeResult.instructions`; clients are expected to treat it
+  like a system-prompt hint the model sees before any tool
+  description is processed.
+- Content: a three-sentence orientation that names the server, states
+  the no-events privacy property, and points first-time agents at
+  `nvnm_overview` for the canonical six-step journey. Kept terse on
+  purpose -- the richer chain summary, prereqs, and journey still
+  live in the `nvnm_overview` tool response; the instructions string
+  points at that tool rather than duplicating it. Future changes to
+  the chain summary or journey only need to update one place
+  (`tools_overview.go`).
+- Why: defense in depth for the lobby-tool pattern. The existing
+  design relies on the agent noticing "Call this first if you have
+  never used this server before" inside the `nvnm_overview` tool
+  description; that works in clients that surface full descriptions
+  to the model but fails silently in clients that compress them or
+  feed tool names only. The instructions field lands at the protocol
+  level and is much more likely to be read before the agent picks a
+  tool. Same reasoning that motivated repeating the privacy caveat
+  in `funded_active` wizard messages -- instructions is just the
+  highest-leverage place to repeat it.
+- Test: `TestE2E_Initialize_IncludesInstructions` asserts the field
+  is non-empty and contains both `nvnm_overview` and `emits no
+  events`. Wording-stable (substring check, not full-string match)
+  so future copy edits do not break the test.
 
 ### Changed (BREAKING)
 

@@ -22,6 +22,29 @@ import (
 
 const serverName = "nvnm-chain"
 
+// initializeInstructions is the per-server "instructions" string the
+// MCP SDK surfaces in the initialize response (see the MCP spec field
+// InitializeResult.instructions). Clients are expected to treat it
+// like a system-prompt hint -- the model sees it before any tool
+// description. This is defense in depth for the lobby-tool pattern:
+// agents whose client compresses tool descriptions, or who skip
+// browsing tools/list, still receive the privacy-by-design caveat
+// and a pointer to nvnm_overview at session start.
+//
+// Keep this string terse (a few sentences). The richer chain
+// summary, prereqs, and canonical journey live in the nvnm_overview
+// tool response, which this string deliberately points at rather
+// than duplicates.
+const initializeInstructions = "NVNM Chain MCP server -- typed " +
+	"access to NVNM Chain, an EVM L2 on MANTRA Chain used as a " +
+	"neutral notary for document anchoring. The anchoring " +
+	"precompile deliberately emits no events: this server can " +
+	"report whether a wallet has been funded or has sent " +
+	"transactions, but never what those transactions did. If you " +
+	"have never used this server before, call nvnm_overview first " +
+	"for chain identity, prereqs, and a recommended 6-step agent " +
+	"journey."
+
 // Server wraps the MCP server with its dependencies.
 type Server struct {
 	mcpServer *mcp.Server
@@ -60,7 +83,7 @@ func NewServer(
 			Name:    serverName,
 			Version: version.Version,
 		},
-		nil,
+		&mcp.ServerOptions{Instructions: initializeInstructions},
 	)
 
 	for _, mw := range middleware {
