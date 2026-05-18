@@ -43,6 +43,37 @@ BREAKING change.
 
 ### Changed
 
+#### Phase 9.11: README polish for OSS audience
+
+- Added a one-paragraph elevator above the existing first lines: what
+  the server is, who it is for, and why an unfamiliar reader should
+  care. Existing intro paragraph preserved underneath.
+- Added a status-badge row at the top: CI status (GitHub Actions on
+  `main`), license (Apache 2.0), latest release (shields.io GitHub
+  release tag), Cosign-signed (release pipeline).
+- Added an ASCII "Request Flow" diagram of the HTTP middleware chain
+  (`originGuard` -> `failGuarded` -> `limitRequestBody` ->
+  `AuthMiddleware` -> `rateLimitMiddleware` -> MCP SDK -> tool handler
+  -> EVM client). Sourced verbatim from
+  [`internal/mcp/server.go`](internal/mcp/server.go).
+- Added a "Documentation" link tree pointing at the OSS foundation
+  files (`LICENSE`, `NOTICE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+  `SECURITY.md`, `CHANGELOG.md`) and the deeper technical references
+  (`docs/DESIGN.md`, `docs/RUNBOOK.md`, `docs/SECURITY_AUDIT.md`,
+  `docs/DATA_HANDLING.md`, `docs/KEY_CUSTODY_THREAT_MODEL.md`,
+  `docs/TOOL_REFERENCE.md`, `docs/IMPLEMENTATION_PLAN.md`).
+- Added a "What this server is not" scope-statement section that
+  mirrors `CLAUDE.md`'s private list (not a chain node, not a wallet,
+  not a custodian, not an orchestrator), adapted to public-audience
+  wording.
+- Drive-by: flipped the License footer from the stale "Proprietary.
+  All rights reserved." to Apache 2.0 with a pointer to the LICENSE
+  file shipped by Phase 9.1.
+
+No behavior change. Status paragraph, tools listing, configuration
+env-var tables, and `docs/` structure listing left untouched per
+Phase 9.11 scope.
+
 #### Bump `github.com/modelcontextprotocol/go-sdk` 1.5.0 -> 1.6.0
 
 - Direct dep `github.com/modelcontextprotocol/go-sdk` upgraded from

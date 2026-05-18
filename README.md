@@ -1,8 +1,73 @@
 # NVNM Chain MCP Server
 
+[![CI](https://github.com/inveniamcapital/NVNM_MCP_Server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/inveniamcapital/NVNM_MCP_Server/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/inveniamcapital/NVNM_MCP_Server?include_prereleases&sort=semver)](https://github.com/inveniamcapital/NVNM_MCP_Server/releases)
+[![Cosign Signed](https://img.shields.io/badge/cosign-signed-2496ed)](.github/workflows/release.yml)
+
+A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and the NVNM Chain (Inveniam's L2 on MANTRA). It exposes 21 curated tools — EVM reads, anchor reads, prepare-sign-submit writes, and guided onboarding — with normalized responses, per-tool authorization, and zero key custody. Intended for application developers, LLM-agent authors, and pipeline operators who need a stable, audited surface against an EVM chain rather than raw JSON-RPC.
+
 A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the NVNM Chain (Inveniam's L2 on MANTRA) through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
 
 This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-value MCP tools with normalized responses designed for both human and LLM consumers.
+
+## Request Flow
+
+The HTTP transport layers defense-in-depth middleware around the MCP SDK. Order is outermost first; each layer can short-circuit before the request reaches a tool handler.
+
+```
+                  ┌─────────────────────────────────────────────┐
+   MCP client ──▶ │ originGuard         DNS-rebinding defense   │
+                  │ failGuarded         pre-auth IP rate limit  │
+                  │ limitRequestBody    body size cap           │
+                  │ AuthMiddleware      apikey or fusionauth    │
+                  │ rateLimitMiddleware per-client bucket       │
+                  │ mcp.Server (SDK)    JSON-RPC dispatch       │
+                  │ tool handler        ABI encode / decode     │
+                  │ evm client          retry, breaker, trace   │
+                  └──────────────────────┬──────────────────────┘
+                                         ▼
+                                  EVM JSON-RPC
+                            (https://evm.testnet.nvnmchain.io)
+```
+
+Source: [`internal/mcp/server.go`](internal/mcp/server.go).
+
+## Documentation
+
+This README is the technical entry point. For deeper context, follow the links below.
+
+**OSS foundation (repo root):**
+
+| File | Purpose |
+|---|---|
+| [`LICENSE`](LICENSE) | Apache 2.0 license text |
+| [`NOTICE`](NOTICE) | Required attribution notice |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution workflow, DCO, branch / PR conventions |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Community standards |
+| [`SECURITY.md`](SECURITY.md) | Vulnerability disclosure policy |
+| [`CHANGELOG.md`](CHANGELOG.md) | Per-release notes (Keep a Changelog format) |
+
+**Technical references (`docs/`):**
+
+| File | Purpose |
+|---|---|
+| [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture decisions; multi-chain deployment model; target-chain reference |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational guide — startup, env-var migration, admin REST API |
+| [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
+| [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
+| [`docs/KEY_CUSTODY_THREAT_MODEL.md`](docs/KEY_CUSTODY_THREAT_MODEL.md) | Rationale for the zero-key-custody design — no agent-mediated signing |
+| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
+| [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased roadmap with goal / depends-on / tasks / exit criteria |
+
+## What this server is not
+
+Cold-reader assumptions to head off up front. The server is deliberately scoped narrow.
+
+- **Not a chain node.** The server talks JSON-RPC to an upstream EVM RPC endpoint. It does not consensus, mine, or hold state beyond connection caches.
+- **Not a wallet.** No private keys are ever held server-side. Write tools build complete unsigned transactions and return both a `raw_tx` (for HSM / CLI signers) and a `wallet_tx_request` (for MetaMask / EIP-1193 wallets); the caller signs and broadcasts.
+- **Not a custodian or escrow.** The server stores no per-user balance, no document content, no off-chain user records. The only persistent state is the API key store (hashed at rest). All "onboarding state" surfaced by the wizard tools is derived from on-chain balance + nonce at call time.
+- **Not an orchestrator.** Tools return a `next_actions` hint array so agents can chain calls themselves. The server does not call other tools internally and does not run multi-step flows on the caller's behalf.
 
 ## Target Chain
 
@@ -473,4 +538,4 @@ docs/
 
 ## License
 
-Proprietary. All rights reserved.
+Apache License 2.0 -- see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Contributions are accepted under the same terms; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
