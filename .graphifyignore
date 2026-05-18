@@ -1,0 +1,13 @@
+# graphify-specific ignores (gitignore syntax)
+# See https://github.com/safishamsi/graphify for the tool itself.
+
+# Go vendored dependencies — third-party code, not ours.
+# Workaround for upstream gap: graphify's hardcoded _SKIP_DIRS doesn't include vendor/.
+# Without this rule, ~1700 files of vendored deps dominate the graph.
+vendor/
+
+# Operator credentials file. Graphify's secret-detection regex
+# (\b(credential|secret|...)s?\b) misses this filename because `_` is a
+# word character in regex, so there's no word boundary inside
+# `chain_credentials`. File is chmod 600 + gitignored, but belt-and-braces.
+.chain_credentials.txt
