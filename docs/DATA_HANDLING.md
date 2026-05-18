@@ -8,8 +8,8 @@ lives.
 
 **Audience:** engineers, security reviewers, operators deploying the
 OSS, and counsel pairing the policy with auditable technical detail.
-**Currency:** reflects the code as of commit `36b12de`
-(Phase 8.12, 2026-05-15). Revise alongside any change to the surfaces
+**Currency:** reflects the code as of commit `5927adb` (Phase 8
+close-out, 2026-05-15). Revise alongside any change to the surfaces
 described.
 
 ## 1. Scope
@@ -22,26 +22,71 @@ repository. Does not cover:
 - the upstream EVM RPC endpoint (separately operated);
 - the upstream FusionAuth identity provider when configured.
 
+**Privacy posture in one sentence.** By design, the server holds no
+personal data about end-users; the only identity information it sees
+is what the operator's chosen auth provider supplies — an
+operator-issued API key (which is not tied to a user identity unless
+the operator chooses to label it so) or the `sub` claim from a
+FusionAuth JWT (which is the FusionAuth user's identifier, not their
+PII). The server also holds **zero blockchain private keys** and
+performs **zero signing** — see
+[docs/KEY_CUSTODY_THREAT_MODEL.md](KEY_CUSTODY_THREAT_MODEL.md) for
+the threat-model rationale.
+
 ## 2. Authentication credentials
 
-Two providers, selected at startup via `AUTH_PROVIDER` (default
-`apikey`).
+Every inbound MCP request must authenticate; there is no anonymous
+read path. The server supports two interchangeable providers, chosen
+at startup via the `AUTH_PROVIDER` environment variable (default
+`apikey`):
+
+- **`apikey`** — operator-managed Bearer tokens minted by the
+  server's own admin REST API. The operator is the sole key issuer;
+  there is no user-facing signup flow. Best for automation, internal
+  deployments, and small operator-controlled caller populations.
+- **`fusionauth`** — JSON Web Tokens (JWTs) minted by an external
+  FusionAuth identity provider the operator already runs. Callers
+  must already have a registered user account (userid + password) at
+  that FusionAuth instance; they authenticate there, receive a JWT,
+  and present the JWT to this server. The MCP server never sees the
+  password and never authenticates the user itself — it only
+  validates the JWT signature against FusionAuth's public keys and
+  trusts the identity claims inside.
+
+All credentials and configuration described below live on the
+**server host** (wherever the operator runs this binary), not on
+caller machines. Callers hold exactly one secret: the Bearer token
+(API key or JWT) they present in the `Authorization: Bearer <token>`
+HTTP header on every request.
 
 ### 2.1 API-key provider
 
-Three related env vars govern API-key auth; each has a different
-on-disk footprint.
+Three environment variables govern API-key authentication. **All
+three are read from the server's environment** (the host running the
+MCP server binary), not from the caller's machine:
 
-| Env var              | Behavior                                              | On disk?                      |
-|----------------------|-------------------------------------------------------|-------------------------------|
-| `MCP_API_KEYS_FILE`  | Path to managed multi-key JSON store                  | Yes: hashed entries           |
-| `MCP_API_KEY`        | Single-key bypass; key resident in process env        | No                            |
-| `ADMIN_API_KEY`      | Gates admin REST API; requires `MCP_API_KEYS_FILE`    | No (env-only)                 |
+| Env var              | What it controls                                                                                                                                | On disk?                |
+|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
+| `MCP_API_KEYS_FILE`  | Path to the managed multi-key JSON store — the production path. Holds many issued keys, each with roles + write-approval policy; hot-reloaded.  | Yes: hashed entries     |
+| `MCP_API_KEY`        | Single-key dev-mode override: accepts exactly one Bearer token, value taken directly from this env var. No roles, no admin API. Local-run only. | No                      |
+| `ADMIN_API_KEY`      | Bearer token that gates the admin REST API at `/admin/keys` (mint / list / patch / revoke caller-facing keys). Requires `MCP_API_KEYS_FILE`.    | No (env-only)           |
 
-The multi-key store is the primary case. Each entry contains:
+A **Bearer token** in this context is a hex string the caller puts in
+the `Authorization: Bearer <token>` HTTP header. The server compares
+its SHA-256 hash against the on-disk store (or the single
+`MCP_API_KEY` value) and accepts or rejects. The token is the
+caller's only credential — there is no password, no challenge, no
+multi-factor step.
+
+The multi-key store (`MCP_API_KEYS_FILE`) is the primary path. Each
+entry contains:
 
 - internal `id` (stable);
-- **SHA-256 hash** of the key — raw key never persisted (Phase 8.6);
+- **SHA-256 hash** of the key — raw key never written to disk (Phase
+  8.6); the `KeyEntry` struct can transiently hold a raw key in
+  process memory during creation or one-time migration, but
+  `NewKeyEntry` (the only production constructor) hashes immediately
+  and never retains the raw value;
 - `key_prefix` (first 8 characters) for operator identification;
 - `enabled` flag, `created_at` (UTC), `roles` slice, `write_approval`
   policy.
@@ -65,10 +110,21 @@ key exactly once. Each admin operation logs `client_id` and
 
 ### 2.2 FusionAuth provider
 
-Activated by `AUTH_PROVIDER=fusionauth`. JWKS public keys are fetched
-once at startup from `$FUSIONAUTH_JWKS_URL` (or derived from
+Activated by `AUTH_PROVIDER=fusionauth`. **The MCP server does not
+authenticate users itself in this mode** — it delegates entirely to
+the operator's FusionAuth installation. A caller must already have a
+registered user account (userid + password, optionally with
+multi-factor authentication configured at FusionAuth) on that
+FusionAuth instance. They log in to FusionAuth out-of-band, receive a
+JWT, and present that JWT to this server on every request. The MCP
+server never sees the userid or password.
+
+JWKS public keys are fetched once at startup from
+`$FUSIONAUTH_JWKS_URL` (or derived from
 `$FUSIONAUTH_URL/.well-known/jwks.json`) and cached in process memory
-by the `keyfunc` library.
+by the `keyfunc` library. JWKS = JSON Web Key Set, the set of public
+keys FusionAuth publishes so downstream verifiers can validate JWT
+signatures without contacting FusionAuth on every request.
 
 Per request: `jwt.Parse` with `WithLeeway(ClockSkew)` enforces the
 standard validity claims; if those pass, the validator manually checks
@@ -140,9 +196,11 @@ Used to throttle credential stuffing. Entries expire after
 
 Source-IP derivation: `X-Forwarded-For` is honored only when
 `$NVNM_TRUST_PROXY_HEADERS=true`; otherwise the socket peer. Rejected
-requests emit a WARN log line containing the derived IP, method, and
-path — no token bytes
-([internal/mcp/failrate.go](../internal/mcp/failrate.go)).
+requests emit a WARN log line containing the derived source IP and
+(for missing-Authorization rejections) the request method; the
+request path, token bytes, and request body are never logged
+([internal/mcp/auth.go:49-84](../internal/mcp/auth.go#L49-L84) and
+[internal/mcp/failrate.go:150-153](../internal/mcp/failrate.go#L150-L153)).
 
 ## 6. Logging
 
@@ -231,12 +289,60 @@ No analytics, advertising, or third-party tracking destinations.
 
 **Cookies:** none read, none set.
 
-## 11. Cross-references
+## 11. Transport security
+
+TLS termination is the **operator's responsibility**, not the
+server's. The server binary speaks plaintext HTTP/JSON on its
+configured listen address and expects to be deployed behind a reverse
+proxy, ingress controller, or load balancer that terminates TLS
+upstream of it. This is a deliberate design choice — wire encryption
+is a deployment concern that varies by operator (Let's Encrypt
+managed certificates, internal CA, mTLS) and lives at a different
+layer than this binary. The Helm chart in `deploy/helm/` shows the
+Kubernetes ingress pattern; operators running outside Kubernetes
+should terminate at nginx, Caddy, an AWS ALB, or equivalent.
+
+Data at rest is covered above: API-key entries are SHA-256-hashed
+(§2.1); logs and metrics are operator-routed to operator-chosen
+sinks (§6, §7); no other runtime data is written to local storage.
+The server itself does not encrypt files it writes — the only file
+it writes is the API-key store, whose entries are already hashed.
+
+## 12. Data subject perspective
+
+For privacy-policy and regulatory framing (GDPR, CCPA, equivalents):
+
+- **There is no end-user account database in this server.** Nothing
+  to subject to access, portability, rectification, or deletion
+  requests directly on the MCP server. The only persisted identity
+  data is the hashed API-key entries described in §2.1, which are
+  operator-managed administrative records, not end-user records.
+- **For FusionAuth-authenticated callers,** the data controller for
+  the caller's identity is the operator's FusionAuth installation,
+  not this server. Data-subject requests for that identity route to
+  FusionAuth. The MCP server only observes the `sub` claim per
+  request (held in process memory for the lifetime of the request;
+  see §4) and emits it to logs only at DEBUG level (§2.2).
+- **For API-key callers,** the operator is the data controller. The
+  operator's revocation of a key via the admin REST API (§2.1)
+  terminates this server's recognition of that identity. There is no
+  separate "delete user" operation because there is no user record
+  beyond the key.
+- **Logs may contain caller-supplied data** at the levels described
+  in §6 (source IP at WARN; FusionAuth `sub` at DEBUG). Log retention
+  is operator-controlled — the server emits to stderr; the operator's
+  log shipper and storage policy determine how long log data lives.
+
+## 13. Cross-references
 
 - [docs/SECURITY_AUDIT.md](SECURITY_AUDIT.md) — point-in-time security
   snapshot; the hashed-at-rest migration is described under "Update
   2026-05-13: Phase 8.6 and 8.7."
 - [docs/OWASP_AUDIT.md](OWASP_AUDIT.md) — OWASP Top 10 coverage matrix.
+- [docs/KEY_CUSTODY_THREAT_MODEL.md](KEY_CUSTODY_THREAT_MODEL.md) —
+  rationale for the server holding zero blockchain private keys and
+  performing zero signing; canonical rebuttal to any "let the server
+  hold the key" proposal.
 - [CHANGELOG.md](../CHANGELOG.md) — releases that change any of the
   surfaces above.
 - [docs/PRIVACY_DISCUSSION.md](PRIVACY_DISCUSSION.md) — working notes
