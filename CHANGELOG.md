@@ -24,9 +24,42 @@ in the MCP initialize response so first-contact agents receive the
 lobby pointer and the privacy-by-design caveat at session start, even
 if their client compresses or omits tool descriptions.
 
+Dependency bumps (2026-05-18): three workflow / base-image bumps
+landed via Dependabot (golang 1.26.2 -> 1.26.3 alpine,
+actions/download-artifact v7 -> v8, softprops/action-gh-release v2
+-> v3). Plus a manual go-sdk bump 1.5.0 -> 1.6.0 (this PR) after
+Dependabot's auto-rebase repeatedly failed on stale vendor/ state.
+
 Phase 8.9: hard cut from the legacy `INVENIAM_*` env-var prefix to
 `NVNM_*` and matching server-identity rename. Single coordinated
 BREAKING change.
+
+### Changed
+
+#### Bump `github.com/modelcontextprotocol/go-sdk` 1.5.0 -> 1.6.0
+
+- Direct dep `github.com/modelcontextprotocol/go-sdk` upgraded from
+  1.5.0 to 1.6.0. Transitive: `github.com/google/jsonschema-go`
+  0.4.2 -> 0.4.3.
+- `vendor/` regenerated; 91 files changed (-1289 net lines as the
+  vendor tree contracted around upstream cleanup).
+- Manually applied because Dependabot's PR #19 auto-update repeatedly
+  failed at the dependency-resolution level ("Dependabot failed to
+  update your dependencies"). #19 is closed in favor of this PR.
+
+Two upstream behavior changes in 1.6.0 were reviewed against this
+codebase before merge:
+
+- **Default cross-origin protection moved from on to off** in the
+  SDK. Verified non-applicable: our own `originGuard` middleware sits
+  at the *outermost* position in the HTTP handler chain (see
+  [`internal/mcp/server.go:183`](internal/mcp/server.go#L183)),
+  before the SDK ever sees a request. The SDK-level default change
+  is independent of our enforcement.
+- **`SetError` no longer overwrites `CallToolResult.Content`**.
+  Verified non-applicable: `grep -rn "SetError\b" --include='*.go'
+  cmd/ internal/` returns zero matches. We do not call `SetError`
+  anywhere.
 
 ### Added
 
