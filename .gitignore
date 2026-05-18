@@ -36,6 +36,7 @@ Thumbs.db
 # Environment & credentials
 .env
 .env.*
+!.env.example
 .chain_credentials.txt
 .mcp-keys.json
 .test-wallet-key

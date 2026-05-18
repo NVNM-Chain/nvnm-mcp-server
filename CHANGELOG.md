@@ -9,9 +9,48 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.1: OSS foundation documents shipped (LICENSE, NOTICE,
+CODE_OF_CONDUCT, CONTRIBUTING, SECURITY). Sequencing step 1 of Phase 9
+(OSS Readiness); no behavior change.
+
 Phase 8.9: hard cut from the legacy `INVENIAM_*` env-var prefix to
 `NVNM_*` and matching server-identity rename. Single coordinated
 BREAKING change.
+
+### Added
+
+#### OSS foundation documents (Phase 9.1)
+
+- `LICENSE` -- standard Apache 2.0 text (canonical SHA-256
+  `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`,
+  no trailing whitespace).
+- `NOTICE` -- minimal Apache attribution declaring Inveniam Capital
+  Partners as the original copyright holder.
+- `CODE_OF_CONDUCT.md` -- Contributor Covenant 2.1, verbatim.
+  Enforcement contact reserved with placeholder
+  `<EMAIL_TBD:conduct@nvnmchain.io>` until the alias is provisioned.
+- `CONTRIBUTING.md` -- dev setup, build & test, test layers,
+  commit/PR norms, DCO sign-off requirement, security-disclosure
+  policy, and vendor-directory rules. 8 sections per
+  `docs/PHASE_9_DESIGN.md` § 3.2. Maintainer contact reserved with
+  placeholder `<EMAIL_TBD:maintainers@nvnmchain.io>`.
+- `SECURITY.md` -- private-disclosure path (GitHub Security Advisories
+  primary; `<EMAIL_TBD:security@nvnmchain.io>` fallback). Enumerates
+  deliberate hardening invariants so researchers don't report design
+  properties as bugs. Response SLO: 3-day acknowledgement, 7-day
+  initial severity assessment, 90-day coordinated disclosure window.
+  Explicit "no monetary bug bounty" per Phase 9 decision D4.
+- `.env.example` -- starter template covering required chain config,
+  HTTP transport, both auth providers, write-tool gating, integration-
+  test credentials, and observability. All sensitive fields are
+  `PLACEHOLDER`; `.env` itself is gitignored.
+
+All mail-alias references use the disambiguating placeholder form
+`<EMAIL_TBD:foo@nvnmchain.io>` so eventual substitution is mechanical
+(`sed -i 's/<EMAIL_TBD:foo@nvnmchain.io>/foo@nvnmchain.io/g'`).
+Pre-merge grep for the literal substring `EMAIL_TBD` still catches
+every occurrence and is a Phase 9 exit criterion before the public
+repo flip (Phase 9.15).
 
 ### Changed (BREAKING)
 
