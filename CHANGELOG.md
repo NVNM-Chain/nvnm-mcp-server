@@ -9,6 +9,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.3: per-file SPDX license headers added to every .go file
+under `cmd/` and `internal/` (100 files). Mechanical bulk rewrite
+recorded in `.git-blame-ignore-revs`; CI lint enforces the header on
+future additions. Sequencing step 3 of Phase 9 (OSS Readiness); no
+behavior change.
+
 Phase 9.1: OSS foundation documents shipped (LICENSE, NOTICE,
 CODE_OF_CONDUCT, CONTRIBUTING, SECURITY). Sequencing step 1 of Phase 9
 (OSS Readiness); no behavior change.
@@ -18,6 +24,23 @@ Phase 8.9: hard cut from the legacy `INVENIAM_*` env-var prefix to
 BREAKING change.
 
 ### Added
+
+#### Per-file SPDX license headers (Phase 9.3)
+
+- Every `.go` file under `cmd/` and `internal/` now carries a
+  two-line SPDX header (`SPDX-License-Identifier: Apache-2.0`
+  + copyright). 100 files; `vendor/` excluded.
+- `scripts/add_license_headers.sh` -- idempotent prepend; safe to
+  re-run.
+- `scripts/check_license_headers.sh` -- CI guard invoked from
+  `.github/workflows/ci.yml`'s new "License headers" step; fails
+  the build if any `.go` file under `cmd/` or `internal/` is
+  missing the header.
+- `.git-blame-ignore-revs` -- created at repo root with the
+  rewrite commit's full hash. GitHub's blame view honors this
+  automatically; local users opt in via `git config
+  blame.ignoreRevsFile .git-blame-ignore-revs` (documented in
+  `CONTRIBUTING.md` § 5).
 
 #### OSS foundation documents (Phase 9.1)
 

@@ -127,6 +127,15 @@ re-run when the change crosses the boundary they exercise.
   how you verified the change; check the DCO sign-off and "docs and tests
   updated" boxes; mark BREAKING if applicable. The PR template prompts
   for these.
+- **`git blame` and bulk rewrites:** mechanical rewrites that touch many
+  files (e.g., the Phase 9.3 SPDX-header addition) are recorded in
+  [`.git-blame-ignore-revs`](.git-blame-ignore-revs). GitHub's blame
+  view honors this file automatically; to make local `git blame`
+  honor it, run once per clone:
+
+  ```sh
+  git config blame.ignoreRevsFile .git-blame-ignore-revs
+  ```
 
 ## 6. Developer Certificate of Origin (DCO)
 

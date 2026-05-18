@@ -1,0 +1,14 @@
+# Revisions listed here are skipped by `git blame` so bulk mechanical
+# rewrites do not obscure the real authors of the surrounding code.
+#
+# GitHub's blame view honors this file automatically. To enable it
+# locally, run once per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Add new entries in chronological order, with a one-line comment
+# above each hash describing what the commit did.
+
+# Phase 9.3 (2026-05-18): add SPDX license headers to every .go file
+# under cmd/ and internal/. 100 files; +3 lines each. Mechanical.
+462894b75b4211648907cecb15ea5040b328a60d
