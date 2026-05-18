@@ -9,8 +9,8 @@ LDFLAGS := -s -w
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build run run-http run-local healthz readyz metrics mcp-init mcp-chain-id \
-        mcp-registries mcp-anchor-info seed-test-data \
+.PHONY: all build run run-http run-local healthz readyz metrics \
+        mcp-probe mcp-probe-help seed-test-data \
         test test-unit test-integration test-coverage test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
@@ -35,49 +35,95 @@ run-http: build
 
 ## Local dev
 
-MCP_ADDR := http://localhost:8080
-HEALTH_ADDR := http://localhost:9090
+# Defaults match `.env.example`. Override via environment if the server
+# was started on non-default ports. `run-local` sources `.env` so the
+# operator's chain config is the single source of truth; the Makefile
+# embeds no chain values.
+MCP_HTTP_ADDR ?= :8180
+METRICS_ADDR  ?= :9190
 
 run-local: build
-	NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-	NVNM_CHAIN_ID=58887 \
-	ANCHOR_ABI_PATH="$(CURDIR)/abi/anchoring.json" \
-	ENABLE_WRITE_TOOLS=true \
-	LOG_LEVEL=debug \
-	"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
+	@if [ ! -f .env ]; then \
+		echo "ERROR: .env not found. Copy .env.example to .env and fill in values (see CONTRIBUTING.md § 2)."; \
+		exit 1; \
+	fi
+	@set -a && . ./.env && set +a && \
+		"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
 
 healthz:
-	@curl -s $(HEALTH_ADDR)/healthz | python3 -m json.tool
+	@curl -sSf http://localhost$(METRICS_ADDR)/healthz | python3 -m json.tool
 
 readyz:
-	@curl -s $(HEALTH_ADDR)/readyz | python3 -m json.tool
+	@curl -sSf http://localhost$(METRICS_ADDR)/readyz | python3 -m json.tool
 
 metrics:
-	@curl -s $(HEALTH_ADDR)/metrics | head -50
+	@curl -sSf http://localhost$(METRICS_ADDR)/metrics | head -50
 
-mcp-init:
-	@curl -s -X POST $(MCP_ADDR)/ \
+## MCP probe -- exercise the running HTTP MCP server with one parameterized
+## target. Replaces the four broken per-tool curl targets that hardcoded
+## ports and skipped the `Mcp-Session-Id` handshake.
+##
+## The recipe inlines the three-step handshake (init -> notifications/initialized
+## -> tools/call) since each MCP HTTP session is short-lived and shell state
+## doesn't survive between `make` recipe lines. jq is used for pretty-printing
+## when available; falls back to raw stdout.
+##
+## Usage:
+##   make mcp-probe TOOL=evm_get_chain_id ARGS='{}'
+##   make mcp-probe TOOL=nvnm_overview ARGS='{}'
+##   make mcp-probe TOOL=evm_get_balance ARGS='{"address":"0x..."}'
+
+mcp-probe:
+ifndef TOOL
+	$(error TOOL is required. Run `make mcp-probe-help` for examples.)
+endif
+	@ARGS_VAL='$(if $(ARGS),$(ARGS),{})'; \
+	BASE_URL="http://localhost$(MCP_HTTP_ADDR)/"; \
+	echo "POST $$BASE_URL  (initialize)" >&2; \
+	INIT_HEADERS=$$(mktemp); \
+	INIT_BODY=$$(curl -sS -D "$$INIT_HEADERS" -X POST "$$BASE_URL" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"make-test","version":"1.0.0"}}}' | python3 -m json.tool
-
-mcp-chain-id:
-	@curl -s -X POST $(MCP_ADDR)/ \
+		-d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"make-mcp-probe","version":"1.0.0"}}}'); \
+	SESSION_ID=$$(grep -i '^mcp-session-id:' "$$INIT_HEADERS" | head -1 | awk '{print $$2}' | tr -d '\r\n'); \
+	rm -f "$$INIT_HEADERS"; \
+	if [ -z "$$SESSION_ID" ]; then \
+		echo "ERROR: server did not return Mcp-Session-Id header. Is the server running on $(MCP_HTTP_ADDR)?" >&2; \
+		echo "initialize response: $$INIT_BODY" >&2; \
+		exit 1; \
+	fi; \
+	echo "  session: $$SESSION_ID" >&2; \
+	curl -sS -X POST "$$BASE_URL" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"evm_get_chain_id","arguments":{}}}' | python3 -m json.tool
-
-mcp-registries:
-	@curl -s -X POST $(MCP_ADDR)/ \
+		-H "Mcp-Session-Id: $$SESSION_ID" \
+		-d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' > /dev/null; \
+	echo "tools/call $(TOOL) $$ARGS_VAL" >&2; \
+	RESP=$$(curl -sS -X POST "$$BASE_URL" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"anchor_get_registries","arguments":{}}}' | python3 -m json.tool
+		-H "Mcp-Session-Id: $$SESSION_ID" \
+		-d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":2,\"params\":{\"name\":\"$(TOOL)\",\"arguments\":$$ARGS_VAL}}"); \
+	if command -v jq >/dev/null 2>&1; then \
+		echo "$$RESP" | jq .; \
+	else \
+		echo "$$RESP"; \
+	fi
 
-mcp-anchor-info:
-	@curl -s -X POST $(MCP_ADDR)/ \
-		-H "Content-Type: application/json" \
-		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"anchor_info","arguments":{}}}' | python3 -m json.tool
+mcp-probe-help:
+	@echo "make mcp-probe -- call any registered MCP tool via the HTTP transport."
+	@echo ""
+	@echo "Usage: make mcp-probe TOOL=<tool_name> [ARGS='<json>']"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make mcp-probe TOOL=evm_get_chain_id ARGS='{}'"
+	@echo "  make mcp-probe TOOL=nvnm_overview ARGS='{}'"
+	@echo "  make mcp-probe TOOL=anchor_get_registries ARGS='{}'"
+	@echo "  make mcp-probe TOOL=anchor_info ARGS='{}'"
+	@echo "  make mcp-probe TOOL=evm_get_balance ARGS='{\"address\":\"0x0000000000000000000000000000000000000000\"}'"
+	@echo ""
+	@echo "Listening address comes from MCP_HTTP_ADDR (default :8180)."
+	@echo "Override via env: MCP_HTTP_ADDR=:9999 make mcp-probe TOOL=evm_get_chain_id"
 
 seed-test-data:
 	$(GO) run ./cmd/seed-test-data
@@ -267,7 +313,7 @@ help:
 	@echo "  build            Build the server binary"
 	@echo "  run              Run with stdio transport"
 	@echo "  run-http         Run with HTTP transport"
-	@echo "  run-local        Build and run locally with HTTP + testnet config"
+	@echo "  run-local        Source .env and run with HTTP transport (see Local Dev)"
 	@echo ""
 	@echo "API Key Management:"
 	@echo "  key-create NAME=x [APPROVAL=required|auto]"
@@ -279,13 +325,13 @@ help:
 	@echo "  key-list           List all API keys and their status"
 	@echo ""
 	@echo "Local Dev:"
-	@echo "  healthz          Check liveness endpoint"
-	@echo "  readyz           Check readiness endpoint"
-	@echo "  metrics          Show first 50 lines of Prometheus metrics"
-	@echo "  mcp-init         Send MCP initialize handshake"
-	@echo "  mcp-chain-id     Call evm_get_chain_id tool"
-	@echo "  mcp-registries   Call anchor_get_registries tool"
-	@echo "  mcp-anchor-info  Call anchor_info tool"
+	@echo "  run-local        Source .env and run the server with HTTP transport"
+	@echo "  healthz          Check liveness endpoint (METRICS_ADDR, default :9190)"
+	@echo "  readyz           Check readiness endpoint (METRICS_ADDR, default :9190)"
+	@echo "  metrics          Show first 50 lines of Prometheus metrics (METRICS_ADDR)"
+	@echo "  mcp-probe TOOL=<name> [ARGS='<json>']"
+	@echo "                   Call any MCP tool via init -> notify -> tools/call handshake"
+	@echo "  mcp-probe-help   Print mcp-probe usage and examples"
 	@echo "  seed-test-data   Create a test registry with 3 phoney records on-chain"
 	@echo ""
 	@echo "Test:"

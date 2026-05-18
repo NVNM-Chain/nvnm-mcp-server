@@ -9,6 +9,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+Phase 9.9 (Makefile drift cleanup): the `run-local` target no longer
+embeds chain values; it sources `.env` (failing loud if absent) and
+runs `bin/nvnm-mcp-server --transport http`, so the operator's `.env`
+is the single source of truth (no more stale retired-testnet `58887`
+in the Makefile). Curl-probe targets (`healthz`, `readyz`, `metrics`)
+now read `METRICS_ADDR` with a default of `:9190` matching
+`.env.example` (was hardcoded `:9090`); they also switched from
+`curl -s` to `curl -sSf` so HTTP errors fail non-zero. The four
+broken per-tool probe targets (`mcp-init`, `mcp-chain-id`,
+`mcp-registries`, `mcp-anchor-info`) were removed and replaced by a
+single parameterized `make mcp-probe TOOL=<name> ARGS='<json>'` that
+performs the full `initialize` -> `Mcp-Session-Id` capture ->
+`notifications/initialized` -> `tools/call` handshake inline against
+`MCP_HTTP_ADDR` (default `:8180`); pretty-prints with `jq` when
+available. New `make mcp-probe-help` prints example usages. Help
+text in `make help` updated accordingly. Makefile only; no behavior
+change in the server.
+
 Phase 9.12: mainnet cutover playbook landed at `docs/MAINNET_CUTOVER.md`.
 Documents the testnet → mainnet config diff (`NVNM_EVM_RPC_URL`,
 `NVNM_CHAIN_ID`, `NVNM_CHAIN_ENVIRONMENT`), validation sequence,
