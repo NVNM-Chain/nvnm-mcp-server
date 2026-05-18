@@ -1,0 +1,21 @@
+{{/*
+PodDisruptionBudget. Renders only when:
+  - podDisruptionBudget.enabled is true, AND
+  - replicaCount > 1 (a PDB with minAvailable=1 against a single-replica
+    Deployment blocks node drains entirely).
+A user who explicitly wants a one-pod PDB can still set replicaCount=2
+or override the gate. We do not silently render a foot-gun.
+*/}}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nvnm-mcp-server.fullname" . }}
+  labels:
+    {{- include "nvnm-mcp-server.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "nvnm-mcp-server.selectorLabels" . | nindent 6 }}
+{{- end }}

@@ -1,7 +1,25 @@
+# Default values for the NVNM Chain MCP Server chart.
+#
+# These are starter defaults aimed at a small staging deployment.
+# Production capacity planning (true resource sizing, HPA thresholds,
+# PDB tuning) is Phase 10 territory -- override anything below for
+# your environment rather than editing the chart in place.
+#
+# Sections, in order:
+#   image / replicas / service / env / resources
+#   probes / serviceMonitor / hpa
+#   podDisruptionBudget / networkPolicy / ingress
+#   securityContext (pod + container)
+#   scheduling (nodeSelector / tolerations / affinity)
+
+# Minimum redundancy. One pod is a single point of failure during
+# rolling restarts and node drains; two is the smallest number that
+# survives a graceful eviction. HPA stays opt-in (see `hpa.enabled`).
 replicaCount: 2
 
 image:
   repository: ghcr.io/inveniamcapital/nvnm-mcp-server
+  # Image tag. Falls back to Chart.appVersion if left blank.
   tag: "0.5.0"
   pullPolicy: IfNotPresent
 
@@ -15,13 +33,18 @@ service:
     mcp: 8080
     metrics: 9090
 
+# Starter resource bounds. The MCP server's working set is dominated
+# by goroutines holding JSON-RPC sockets to the EVM endpoint; CPU is
+# spiky during signature verification and steady otherwise. Memory
+# stays well under 128Mi at idle. Production capacity comes from
+# Phase 10 load-test data -- override here, do not edit the chart.
 resources:
   requests:
-    memory: 64Mi
     cpu: 100m
+    memory: 128Mi
   limits:
-    memory: 256Mi
     cpu: 500m
+    memory: 256Mi
 
 # Non-secret configuration; injected via ConfigMap.
 #
@@ -67,23 +90,109 @@ serviceMonitor:
   enabled: false
   interval: 30s
 
+# Horizontal Pod Autoscaler. Off by default -- enabling it makes the
+# Deployment's replica count autoscaler-managed (the chart omits the
+# Deployment's `replicas:` field when hpa.enabled is true). Pair with
+# resource requests above; HPA targets CPU utilisation against them.
 hpa:
   enabled: false
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilization: 70
 
+# PodDisruptionBudget. Keeps at least one pod available during
+# voluntary disruptions (node drains, upgrades). Default keys off
+# replicaCount: a one-pod deployment cannot meaningfully satisfy
+# minAvailable=1 during eviction, so flip to false when replicaCount=1.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# NetworkPolicy. Off by default because not every cluster runs a
+# CNI that enforces NetworkPolicy (kindnet, flannel-without-policy).
+# Enable on production clusters running Calico, Cilium, or similar.
+# Egress is narrowed to HTTPS (EVM RPC, FusionAuth JWKS, OTLP/HTTPS),
+# OTLP gRPC, and DNS. Tighten further per-environment if you can
+# enumerate exact peer IPs / CIDRs.
+networkPolicy:
+  enabled: false
+  # Ingress sources. Each entry is a NetworkPolicy peer (podSelector,
+  # namespaceSelector, ipBlock). Default: empty list -- the rendered
+  # policy then permits ingress only via "from: []" on the metrics
+  # port (Prometheus scrapers + kubelet probes). Add MCP-client
+  # selectors here to allow MCP traffic in.
+  ingressFrom: []
+  # Egress destinations. Pre-populated with the three categories the
+  # server actually needs:
+  #   - 443/TCP  -- EVM RPC (HTTPS) + FusionAuth JWKS (HTTPS)
+  #   - 4317/TCP -- OTLP gRPC collector (when observability enabled)
+  #   -   53/UDP -- DNS resolution
+  #   -   53/TCP -- DNS resolution (fallback / long answers)
+  # Set to [] to drop egress restrictions entirely (not recommended).
+  egressPorts:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 4317
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+# Ingress example. Off by default -- the chart does not presuppose
+# any particular ingress controller. The shape below is a worked
+# example using cert-manager (for TLS) and the nginx ingress
+# controller. Adapt to your environment.
+#
+# ingress:
+#   enabled: true
+#   className: nginx
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt-prod
+#     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+#     nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+#   hosts:
+#     - host: mcp.example.com
+#       paths:
+#         - path: /
+#           pathType: Prefix
+#   tls:
+#     - secretName: mcp-tls
+#       hosts:
+#         - mcp.example.com
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+# Pod-level securityContext. Distroless static-debian12 supports
+# non-root execution; UID/GID 65532 is the distroless `nonroot`
+# convention (see Dockerfile).
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
   runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
+# Container-level securityContext. The server writes nothing to /
+# at runtime: logs go to stderr, the API-key store is on an operator-
+# mounted volume (see RUNBOOK), the ABI is read-only. Read-only root
+# filesystem is safe.
 containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
 nodeSelector: {}
 tolerations: []

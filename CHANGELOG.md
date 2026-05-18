@@ -9,7 +9,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
+Phase 9.6: Helm chart production polish. Chart bumped from `0.1.0`
+to `0.2.0`. Hardened pod + container `securityContext`
+(`runAsNonRoot`, distroless UID/GID 65532, `readOnlyRootFilesystem`,
+all capabilities dropped, `seccompProfile: RuntimeDefault`); added
+starter resource defaults (`100m/128Mi` request, `500m/256Mi`
+limit, documented as starter values to be re-sized in Phase 10);
+default `replicaCount: 2`; new optional templates for
+PodDisruptionBudget (gated by `replicaCount > 1`), NetworkPolicy
+(narrow egress + scoped MCP ingress), and Ingress (off by default,
+cert-manager + nginx worked example in values.yaml). New chart
+README at `deploy/helm/nvnm-mcp-server/README.md` covering values,
+mainnet-vs-testnet, and gotchas. `helm lint` clean; `helm template`
+renders 4 objects at defaults and 8 with all features enabled.
+Sequencing step 6 of Phase 9 (OSS Readiness); no runtime behavior
+change to the server binary.
 
 Phase 9.9 (Makefile drift cleanup): the `run-local` target no longer
 embeds chain values; it sources `.env` (failing loud if absent) and
@@ -62,6 +76,53 @@ Phase 8.9: hard cut from the legacy `INVENIAM_*` env-var prefix to
 BREAKING change.
 
 ### Changed
+
+#### Phase 9.6: Helm chart production polish
+
+- `deploy/helm/nvnm-mcp-server/Chart.yaml`: chart `version` bumped
+  from `0.1.0` to `0.2.0` (semver-meaningful chart change:
+  added templates, new values keys, hardened defaults). `appVersion`
+  left at `0.5.0` to match `values.image.tag`; Phase 10 will retag
+  against the canonical app version in
+  [`internal/version/version.go`](internal/version/version.go) at
+  the next multi-arch release.
+- `deploy/helm/nvnm-mcp-server/values.yaml`: structural rewrite
+  with section-level comments explaining intent and override
+  guidance. Notable defaults:
+  - `replicaCount: 2` (minimum redundancy during voluntary
+    disruptions; one pod cannot survive a node drain).
+  - `resources.requests: {cpu: 100m, memory: 128Mi}` and
+    `resources.limits: {cpu: 500m, memory: 256Mi}`. Documented as
+    *starter* values aimed at staging; real capacity planning is
+    Phase 10. Override per-environment.
+  - `podDisruptionBudget.enabled: true` (with the rendering
+    double-gated by `replicaCount > 1` -- a one-pod deployment
+    cannot meaningfully satisfy `minAvailable=1`).
+  - `networkPolicy.enabled: false` (off because not every CNI
+    enforces NetworkPolicy; flip on for Calico / Cilium / etc.).
+    Egress pre-populated for HTTPS (EVM RPC + FusionAuth JWKS),
+    OTLP gRPC (4317), and DNS.
+  - `ingress.enabled: false` with a worked cert-manager +
+    nginx-ingress example commented in-file.
+  - Pod- and container-level `securityContext` blocks expanded to
+    cover `runAsNonRoot: true`, `runAsUser/Group: 65532`,
+    `fsGroup: 65532`, `allowPrivilegeEscalation: false`,
+    `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]`,
+    and `seccompProfile.type: RuntimeDefault`. UID 65532 matches
+    the distroless `nonroot` convention used by
+    `gcr.io/distroless/static-debian12` (see [Dockerfile](Dockerfile)).
+- `deploy/helm/nvnm-mcp-server/templates/deployment.yaml`: pod-
+  level `securityContext` now renders the full block via `toYaml`
+  so additions in `values.yaml` (notably `fsGroup` and
+  `seccompProfile`) flow through without template edits.
+
+Validation: `helm lint` clean (only the informational "icon is
+recommended" hint); `helm template` smoke-tested in two modes
+(default-values render produces 4 objects: ConfigMap, Service,
+Deployment, PDB; full-feature render with NetworkPolicy + Ingress
++ HPA + ServiceMonitor enabled produces 8). No runtime behavior
+change to the server binary. New templates (PDB, NetworkPolicy,
+Ingress) are catalogued under `### Added` below.
 
 #### Phase 9.11: README polish for OSS audience
 
@@ -120,6 +181,28 @@ codebase before merge:
   anywhere.
 
 ### Added
+
+#### Phase 9.6: New Helm templates
+
+- `deploy/helm/nvnm-mcp-server/templates/poddisruptionbudget.yaml` --
+  optional PDB at `minAvailable: 1`. Gated by
+  `podDisruptionBudget.enabled` AND `replicaCount > 1` so the
+  template does not render an undrainable single-pod PDB by
+  default.
+- `deploy/helm/nvnm-mcp-server/templates/networkpolicy.yaml` --
+  optional `networking.k8s.io/v1 NetworkPolicy`. Ingress opens the
+  metrics port (9090) for in-cluster scrapers + kubelet probes and
+  scopes the MCP port (8080) to peers listed in
+  `networkPolicy.ingressFrom`. Egress is narrowed to HTTPS, OTLP
+  gRPC, and DNS by default; override `networkPolicy.egressPorts`
+  for tighter rules. The admin REST listener (default loopback) is
+  intentionally omitted; the inline comment points operators at
+  the example admin rule in
+  [`deploy/k8s/networkpolicy.yaml`](deploy/k8s/networkpolicy.yaml).
+- `deploy/helm/nvnm-mcp-server/templates/ingress.yaml` -- optional
+  `networking.k8s.io/v1 Ingress`. Off by default; the chart does
+  not presuppose an ingress controller. Worked example in the
+  `values.yaml` comments uses cert-manager + nginx.
 
 #### Mainnet cutover playbook (Phase 9.12)
 

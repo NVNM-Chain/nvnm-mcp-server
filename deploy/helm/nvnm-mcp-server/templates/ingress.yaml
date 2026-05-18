@@ -1,0 +1,45 @@
+{{/*
+Ingress example. Off by default. Worked example for cert-manager +
+nginx-ingress lives in values.yaml comments; this template renders
+whatever shape the operator drops into .Values.ingress.
+
+The chart does not presuppose an ingress controller. If your cluster
+uses something other than nginx (gateway-api, traefik, ALB), keep
+ingress.enabled=false and ship your own manifest -- the templating
+above only covers the common path.
+*/}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "nvnm-mcp-server.fullname" . }}
+  labels:
+    {{- include "nvnm-mcp-server.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "nvnm-mcp-server.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.ports.mcp }}
+          {{- end }}
+    {{- end }}
+{{- end }}

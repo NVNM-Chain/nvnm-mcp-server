@@ -1,0 +1,56 @@
+{{/*
+NetworkPolicy. Off by default; enable on clusters with a policy-
+enforcing CNI (Calico, Cilium, etc.).
+
+Ingress: metrics port (9090) is open ("from: []") so Prometheus
+scrapers and the kubelet's probe machinery can reach /healthz,
+/readyz, and /metrics without naming each source. The MCP port
+(8080) is gated by .Values.networkPolicy.ingressFrom -- if empty,
+the policy is restrictive (no MCP ingress); operators add peer
+selectors there to admit traffic.
+
+The admin REST listener (default 127.0.0.1:8081) is intentionally
+omitted: it binds to loopback by default and only operators that
+explicitly flip ADMIN_API_ADDR to a non-loopback address need a rule
+here. See deploy/k8s/networkpolicy.yaml for an example admin rule.
+
+Egress: narrowed to the three categories the server actually needs
+(HTTPS for EVM RPC + FusionAuth JWKS, OTLP gRPC, DNS). Override
+.Values.networkPolicy.egressPorts to retarget.
+*/}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "nvnm-mcp-server.fullname" . }}
+  labels:
+    {{- include "nvnm-mcp-server.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "nvnm-mcp-server.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Metrics + health probes -- open to any source in-cluster.
+    - from: []
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.ports.metrics }}
+    {{- with .Values.networkPolicy.ingressFrom }}
+    # MCP HTTP -- restricted to the configured peers.
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.service.ports.mcp }}
+    {{- end }}
+  egress:
+    {{- range .Values.networkPolicy.egressPorts }}
+    - to: []
+      ports:
+        - protocol: {{ .protocol }}
+          port: {{ .port }}
+    {{- end }}
+{{- end }}

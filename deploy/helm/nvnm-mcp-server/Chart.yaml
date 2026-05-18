@@ -2,5 +2,13 @@ apiVersion: v2
 name: nvnm-mcp-server
 description: Helm chart for the NVNM Chain MCP Server
 type: application
-version: 0.1.0
+# Chart version. Bumped to 0.2.0 in Phase 9.6 (production polish:
+# resource defaults, PDB, NetworkPolicy, ingress example, hardened
+# securityContext). Bump independently of appVersion when chart
+# templates / values change in a way that affects rendered output.
+version: 0.2.0
+# App version (image tag the chart pulls by default). Aligns with
+# values.image.tag. Phase 9.6 leaves this untouched at 0.5.0;
+# Phase 10's first multi-arch release will retag against the
+# canonical app version in internal/version/version.go.
 appVersion: "0.5.0"
