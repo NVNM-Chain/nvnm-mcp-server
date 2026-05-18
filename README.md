@@ -22,7 +22,7 @@ This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-
 
 ## Status
 
-**Phases 0–7 complete; Phase 8 in progress (10 of 13 tasks landed as of 2026-05-13).** 8.1–8.5 (foundation types, tool annotations, `next_actions` envelope, EIP-1559 default, Origin-header validation), 8.6 (API-key hashing migration), 8.7 (constant-time auth on hashed bytes), 8.8 (five onboarding tools), 8.9 (BREAKING env-var hard cut `INVENIAM_*` → `NVNM_*` plus server-identity rename — see `docs/RUNBOOK.md#env-var-migration`), and 8.13 (BREAKING binary + Docker artifact rename — `cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`, image at `ghcr.io/inveniamcapital/nvnm-mcp-server`) have shipped. 8.10 (privacy-by-design doc statement), 8.11 (test-fixture cleanup), and 8.12 (OWASP self-audit close-out) remain. A comprehensive security assessment has been performed -- see `docs/SECURITY_AUDIT.md` for findings, remediation results, and the 2026-05-13 update sections for the most recent migrations.
+**Phases 0–8 complete; Phase 9 (OSS Readiness) planned and unstarted as of 2026-05-18.** Phase 8 closed out on 2026-05-15 (`5927adb`). Highlights: foundation types and tool annotations (8.1–8.5), API-key hashing-at-rest migration and constant-time auth (8.6–8.7), five onboarding tools (8.8), the BREAKING env-var hard cut `INVENIAM_*` → `NVNM_*` plus server-identity rename (8.9 — see `docs/RUNBOOK.md#env-var-migration`), the BREAKING binary + Docker artifact rename (8.13 — `cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`, image at `ghcr.io/inveniamcapital/nvnm-mcp-server`), the OWASP Top 10 self-audit (8.12), and a comprehensive security assessment — see `docs/SECURITY_AUDIT.md` for findings, remediation results, and the 2026-05-13 update sections for the most recent migrations. The privacy-by-design technical reference is at [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md). Phase 9 will land OSS foundation docs, SPDX headers, multi-arch Cosign-signed images, a self-serve key request endpoint, and the public-repo flip — see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) § Phase 9 and [`docs/PHASE_9_DESIGN.md`](docs/PHASE_9_DESIGN.md).
 
 HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all audit logs and OTel spans. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`); the prompt shows the recovered signer address, the first 4 bytes of calldata (method selector), and the chain environment label so consumers can spot signature-substitution attacks. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
 
@@ -132,7 +132,8 @@ All configuration is via environment variables. No config files required.
 | Variable | Description |
 |---|---|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `NVNM_CHAIN_ID` | Expected chain ID (`787111` for NVNM testnet) |
+| `NVNM_CHAIN_ID` | Expected chain ID (`787111` for NVNM testnet, `1611` for mainnet) |
+| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Required to disambiguate the per-instance chain pin; legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
 
 ### Authentication (HTTP transport)
 
@@ -445,12 +446,23 @@ deploy/
 tests/
   load/                      k6 load test scripts
 docs/
-  DESIGN.md                  Architecture and design decisions
-  IMPLEMENTATION_PLAN.md     Phased implementation plan
-  SECURITY_AUDIT.md          Security assessment and remediation results
-  TESTING.md                 Test framework, strategy, and results
-  TOOL_REFERENCE.md          MCP tool schema reference
-  RUNBOOK.md                 Operational runbook
+  DESIGN.md                       Architecture and design decisions
+  IMPLEMENTATION_PLAN.md          Phased implementation plan
+  PHASE_8_DESIGN.md               Phase 8 design contract (closed out)
+  PHASE_9_DESIGN.md               Phase 9 design contract (OSS Readiness)
+  SECURITY_AUDIT.md               Security assessment and remediation results
+  OWASP_AUDIT.md                  OWASP Top 10 self-audit (Phase 8.12)
+  DATA_HANDLING.md                Privacy-by-design technical reference
+  PRIVACY_DISCUSSION.md           Working notes for the privacy policy
+  KEY_CUSTODY_THREAT_MODEL.md     Rationale for zero-key-custody design
+  SECURITY_CONSUMER_GUIDANCE.md   Operator-facing security guidance
+  LICENSE_EXCEPTIONS.md           Project-scoped license exception register
+  METAMASK_GUIDE.md               End-user MetaMask integration walkthrough
+  OVERVIEW.md                     Product-level overview
+  WALLET_GENERATOR_PAGE_NOTES.md  Phase 10/11 wallet-page design notes
+  TESTING.md                      Test framework, strategy, and results
+  TOOL_REFERENCE.md               MCP tool schema reference
+  RUNBOOK.md                      Operational runbook
 .github/
   workflows/ci.yml           CI pipeline
   dependabot.yml             Automated dependency updates
