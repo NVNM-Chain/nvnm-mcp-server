@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Inveniam Capital Partners
+
 package auth
 
 // Claims holds the authenticated identity produced by any auth provider.

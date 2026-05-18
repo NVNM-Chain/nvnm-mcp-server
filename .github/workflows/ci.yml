@@ -27,6 +27,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: License headers
+        # Phase 9.3: every .go file under cmd/ and internal/ must
+        # carry the SPDX-License-Identifier header on its first line.
+        # Cheap check; placed before lint so missing-header drift
+        # fails fast.
+        run: bash scripts/check_license_headers.sh
+
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:

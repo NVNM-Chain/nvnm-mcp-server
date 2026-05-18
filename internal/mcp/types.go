@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Inveniam Capital Partners
+
 package mcp
 
 // NextAction is a hint embedded in tool responses that points an agent at

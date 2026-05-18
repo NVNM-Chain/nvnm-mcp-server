@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Inveniam Capital Partners
+
 //go:build integration
 
 package evm_test

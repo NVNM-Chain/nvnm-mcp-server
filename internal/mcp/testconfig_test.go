@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Inveniam Capital Partners
+
 package mcp
 
 import "github.com/inveniam/nvnm-mcp-server/internal/config"
