@@ -9,6 +9,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.12: mainnet cutover playbook landed at `docs/MAINNET_CUTOVER.md`.
+Documents the testnet → mainnet config diff (`NVNM_EVM_RPC_URL`,
+`NVNM_CHAIN_ID`, `NVNM_CHAIN_ENVIRONMENT`), validation sequence,
+rollback path, and the open precompile-pagination question parked for
+Phase 10 staging. Doc only; execution is Phase 10. Sequencing step 12
+of Phase 9 (OSS Readiness); no behavior change.
+
 Phase 9.3: per-file SPDX license headers added to every .go file
 under `cmd/` and `internal/` (100 files). Mechanical bulk rewrite
 recorded in `.git-blame-ignore-revs`; CI lint enforces the header on
@@ -62,6 +69,21 @@ codebase before merge:
   anywhere.
 
 ### Added
+
+#### Mainnet cutover playbook (Phase 9.12)
+
+- `docs/MAINNET_CUTOVER.md` -- new operator-facing playbook for moving a
+  Helm/k8s deployment from testnet (`nvnm-testnet-1` / `787111`) to mainnet
+  (`nvnm-1` / `1611`). Five sections: preconditions (RPC reachable,
+  precompile present, FusionAuth if used, DNS, legacy `INVENIAM_*`
+  hygiene), config changes (the three pinned env vars + ConfigMap and Helm
+  diffs), validation sequence (pre-cutover sandbox + post-cutover
+  production probes against `nvnm_overview`, `wallet_status`, `anchor_info`,
+  `readyz`, and `evm.rpc.errors`), rollback (revert + redeploy; no
+  on-chain unwind needed), and the open question about mainnet precompile
+  pagination parked for Phase 10 staging.
+- `README.md`: `docs/` listing updated to include `MAINNET_CUTOVER.md`.
+- `docs/IMPLEMENTATION_PLAN.md` § 9.12: marked DONE.
 
 #### Per-file SPDX license headers (Phase 9.3)
 

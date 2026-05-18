@@ -457,6 +457,7 @@ docs/
   KEY_CUSTODY_THREAT_MODEL.md     Rationale for zero-key-custody design
   SECURITY_CONSUMER_GUIDANCE.md   Operator-facing security guidance
   LICENSE_EXCEPTIONS.md           Project-scoped license exception register
+  MAINNET_CUTOVER.md              Mainnet cutover playbook (Phase 10 input)
   METAMASK_GUIDE.md               End-user MetaMask integration walkthrough
   OVERVIEW.md                     Product-level overview
   WALLET_GENERATOR_PAGE_NOTES.md  Phase 10/11 wallet-page design notes
