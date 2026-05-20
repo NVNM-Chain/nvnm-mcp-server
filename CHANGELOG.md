@@ -21,6 +21,19 @@ CONTRIBUTING.md §5's existing forward-reference to "the PR template."
 Contributor-facing only; no runtime behavior change. Sequencing step 2
 of Phase 9 (OSS Readiness).
 
+Phase 9.5 (CORS middleware): added `internal/mcp/CORSMiddleware`, wired
+as the outermost HTTP layer, so browser-hosted MCP clients can make
+cross-origin requests. It shares the existing `NVNM_ALLOWED_ORIGINS`
+allowlist but is a distinct concern from the Phase 8 Origin guard (CORS
+*grants* browser permission; the Origin guard *rejects* spoofed origins —
+both run). Answers `OPTIONS` preflight (`204` with `Allow-Origin`,
+`Allow-Methods`, `Allow-Headers: Authorization, Content-Type,
+Mcp-Session-Id`, `Max-Age`); exposes `Mcp-Session-Id` on actual
+responses; `Access-Control-Allow-Credentials: false` (no cookies);
+`Vary: Origin` when echoing. Server-to-server callers (no `Origin`
+header) are unaffected. No new config. Built test-first. Docs:
+`docs/RUNBOOK.md` "CORS (cross-origin browser access)" section.
+
 Phase 9.6: Helm chart production polish. Chart bumped from `0.1.0`
 to `0.2.0`. Hardened pod + container `securityContext`
 (`runAsNonRoot`, distroless UID/GID 65532, `readOnlyRootFilesystem`,

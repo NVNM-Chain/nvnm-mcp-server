@@ -113,6 +113,22 @@ Multiple origins, comma-separated, whitespace tolerated. Matching is case-insens
 
 Rejected requests produce a structured warning log line with the origin, remote address, method, and path. Operators can audit recent rejections with their log aggregator's filter on `"rejecting request with disallowed Origin"`.
 
+### CORS (cross-origin browser access, Phase 9.5)
+
+CORS and the Origin guard above use the **same** `NVNM_ALLOWED_ORIGINS` allowlist but answer different questions, and **both** run:
+
+- **Origin guard** is a server-side anti-spoof / DNS-rebinding defense — it *rejects* requests from a disallowed `Origin` with `403`.
+- **CORS** is the browser-facing permission grant — it tells a compliant browser it is *allowed* to read the response. It is needed only by browser-hosted MCP clients (e.g. an agent running in a web page); server-to-server callers (no `Origin` header) are unaffected.
+
+CORS sits **outermost** in the middleware chain so it can answer `OPTIONS` preflight before the Origin guard or any parser runs. Behavior:
+
+- **Preflight (`OPTIONS` with `Access-Control-Request-Method`):** an allowed origin gets `204` with `Access-Control-Allow-Origin: <origin>`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Authorization, Content-Type, Mcp-Session-Id`, and `Access-Control-Max-Age: 600`. A disallowed origin gets `403` with no allow headers.
+- **Actual requests:** an allowed origin gains `Access-Control-Allow-Origin: <origin>` and `Access-Control-Expose-Headers: Mcp-Session-Id` (so the browser can read the session id the server issues on `initialize` and echo it back on later requests).
+- **Credentials:** `Access-Control-Allow-Credentials: false` — the server uses no cookies; browser clients authenticate writes with a bearer token in the `Authorization` header, not credentialed CORS.
+- **`Vary: Origin`** is set whenever the origin is echoed, so a shared cache never serves one origin's permission headers to another.
+
+No configuration beyond `NVNM_ALLOWED_ORIGINS` is required; the same production override shown above enables CORS for those origins. CORS rejections are not separately metered (same cardinality concern as the Origin guard).
+
 ### Authentication (HTTP transport)
 
 | Variable | Default | Purpose |

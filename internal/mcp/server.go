@@ -164,6 +164,7 @@ func (s *Server) RunHTTP(
 	}, nil)
 
 	// Chain (outermost first):
+	//   CORSMiddleware       → browser preflight + cross-origin permission
 	//   originGuard          → cheap string lookup, DNS-rebinding defense
 	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
 	//   limitRequestBody     → cap body before any parser sees it
@@ -180,7 +181,11 @@ func (s *Server) RunHTTP(
 	if failLimiter != nil {
 		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
 	}
-	handler := originGuard(failGuarded, allowedOrigins, s.logger)
+	guarded := originGuard(failGuarded, allowedOrigins, s.logger)
+	// CORS sits outermost so it answers browser OPTIONS preflight before
+	// the Origin guard or any parser. It shares the same allowlist but
+	// grants cross-origin permission rather than rejecting (see cors.go).
+	handler := CORSMiddleware(guarded, allowedOrigins, s.logger)
 
 	srv := &http.Server{
 		Addr:              addr,
