@@ -9,6 +9,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.2 (Issue + PR templates): added `.github/ISSUE_TEMPLATE/`
+(`bug_report.md`, `feature_request.md` with a thin-proxy / no-custody
+scope-fit checklist, `question.md` with a `docs/RUNBOOK.md` pre-flight)
+plus `config.yml` (blank issues disabled; security reports routed to the
+GitHub private-advisory flow per `SECURITY.md` rather than a raw email;
+Discussions + docs contact links per the GitHub Discussions decision),
+and `.github/PULL_REQUEST_TEMPLATE.md` (DCO sign-off, required
+linked-issue/design field, docs/tests/CHANGELOG sync checklist). Honors
+CONTRIBUTING.md §5's existing forward-reference to "the PR template."
+Contributor-facing only; no runtime behavior change. Sequencing step 2
+of Phase 9 (OSS Readiness).
+
 Phase 9.6: Helm chart production polish. Chart bumped from `0.1.0`
 to `0.2.0`. Hardened pod + container `securityContext`
 (`runAsNonRoot`, distroless UID/GID 65532, `readOnlyRootFilesystem`,
