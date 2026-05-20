@@ -437,6 +437,19 @@ path changes:
   dashboard `uid` (`nvnm-mcp-server`); direct `/d/inveniam-mcp-server/`
   URLs will 404.
 
+Phase 9.16 (part 1 — FusionAuth client_id privacy): the FusionAuth JWT
+`sub` is no longer logged. It is now hashed into `client_id` via a keyed
+HMAC-SHA256 (`MCP_CLIENT_ID_HMAC_KEY`), so the logged identifier is stable
+for audit correlation but not reversible to a real-world identity without
+the server-held key; and the former DEBUG `subject` log line was removed
+entirely. **Breaking for FusionAuth deployments:** `MCP_CLIENT_ID_HMAC_KEY`
+is now REQUIRED when `AUTH_PROVIDER=fusionauth` — startup fails loud if
+unset (at both config validation and validator construction). `client_id`
+values change from the raw `sub` to its HMAC, so historical log
+correlation across this upgrade is broken (acceptable). apikey deployments
+are unaffected. Implements privacy-policy decisions §2.1 D4/D9. (Remaining
+9.16 work — the keyless-read middleware split — lands separately.)
+
 ---
 
 ## [1.0.0-rc.2] -- 2026-05-13

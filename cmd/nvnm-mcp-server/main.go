@@ -235,12 +235,13 @@ func loadFusionAuth(
 	logger *slog.Logger,
 ) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
 	validator, err := auth.NewFusionAuthValidator(&auth.FusionAuthConfig{
-		BaseURL:       cfg.FusionAuthURL,
-		ApplicationID: cfg.FusionAuthAppID,
-		Issuer:        cfg.GetFusionAuthIssuer(),
-		JWKSURL:       cfg.GetFusionAuthJWKSURL(),
-		ClockSkew:     cfg.JWTClockSkew,
-		RolesClaim:    cfg.JWTRolesClaim,
+		BaseURL:         cfg.FusionAuthURL,
+		ApplicationID:   cfg.FusionAuthAppID,
+		Issuer:          cfg.GetFusionAuthIssuer(),
+		JWKSURL:         cfg.GetFusionAuthJWKSURL(),
+		ClockSkew:       cfg.JWTClockSkew,
+		RolesClaim:      cfg.JWTRolesClaim,
+		ClientIDHMACKey: []byte(cfg.FusionAuthClientIDHMACKey),
 	}, logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("FusionAuth init: %w", err)

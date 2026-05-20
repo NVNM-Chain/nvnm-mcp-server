@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -15,6 +16,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -272,16 +274,57 @@ func TestExtractRolesFromValue(t *testing.T) {
 // FusionAuth JWT validation tests
 // ---------------------------------------------------------------------------
 
+// The raw JWT sub is email-reversible personal data and must never reach
+// a log sink — not even at DEBUG. This runs Validate with a DEBUG-level
+// logger (so any sub log line would fire) and asserts the sub is absent.
+func TestFusionAuth_DoesNotLogRawSub(t *testing.T) {
+	key, jwksServer := setupTestJWKS(t)
+	defer jwksServer.Close()
+
+	var buf bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	v, err := NewFusionAuthValidator(&FusionAuthConfig{
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
+	}, debugLogger)
+	if err != nil {
+		t.Fatalf("NewFusionAuthValidator: %v", err)
+	}
+	defer v.Close()
+
+	const rawSub = "super-secret-subject-uuid-9f8a2b40"
+	token := signTestJWT(t, key, jwt.MapClaims{
+		"sub": rawSub,
+		"iss": "https://auth.example.com",
+		"aud": "test-app",
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	})
+
+	if _, err := v.Validate(token); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	if strings.Contains(buf.String(), rawSub) {
+		t.Errorf("validator logged the raw sub %q; it must never reach a log sink, even at DEBUG", rawSub)
+	}
+}
+
 func TestFusionAuth_AutomationRoleMapsToAutoApproval(t *testing.T) {
 	key, jwksServer := setupTestJWKS(t)
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		Issuer:        "https://auth.example.com",
-		JWKSURL:       jwksServer.URL,
-		RolesClaim:    "roles",
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
+		RolesClaim:      "roles",
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -304,8 +347,13 @@ func TestFusionAuth_AutomationRoleMapsToAutoApproval(t *testing.T) {
 	if claims.WriteApproval != "auto" {
 		t.Errorf("WriteApproval = %q, want %q (automation role)", claims.WriteApproval, "auto")
 	}
-	if claims.ClientID != "pipeline-agent" {
-		t.Errorf("ClientID = %q, want %q", claims.ClientID, "pipeline-agent")
+	// ClientID is the keyed HMAC of the sub, never the raw sub — that is
+	// the privacy guarantee that keeps the email-reversible sub out of logs.
+	if claims.ClientID == "pipeline-agent" {
+		t.Error("ClientID must not be the raw sub")
+	}
+	if want := hmacClientID("pipeline-agent", []byte("test-client-id-hmac-key")); claims.ClientID != want {
+		t.Errorf("ClientID = %q, want HMAC(sub) = %q", claims.ClientID, want)
 	}
 	if !claims.HasRole("writer") || !claims.HasRole("automation") {
 		t.Errorf("roles = %v, want writer and automation", claims.Roles)
@@ -317,10 +365,11 @@ func TestFusionAuth_NonAutomationRoleMapsToRequired(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		Issuer:        "https://auth.example.com",
-		JWKSURL:       jwksServer.URL,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -350,10 +399,11 @@ func TestFusionAuth_InvalidIssuer(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		Issuer:        "https://auth.example.com",
-		JWKSURL:       jwksServer.URL,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -378,10 +428,11 @@ func TestFusionAuth_InvalidAudience(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		Issuer:        "https://auth.example.com",
-		JWKSURL:       jwksServer.URL,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -406,11 +457,12 @@ func TestFusionAuth_ExpiredToken(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		Issuer:        "https://auth.example.com",
-		JWKSURL:       jwksServer.URL,
-		ClockSkew:     1 * time.Second,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
+		ClockSkew:       1 * time.Second,
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -435,10 +487,11 @@ func TestFusionAuth_AppScopedRoles(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "app-uuid-123",
-		Issuer:        "https://auth.example.com",
-		JWKSURL:       jwksServer.URL,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "app-uuid-123",
+		Issuer:          "https://auth.example.com",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -472,9 +525,10 @@ func TestFusionAuth_BadSignature(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		JWKSURL:       jwksServer.URL,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)
@@ -503,9 +557,10 @@ func TestFusionAuth_GarbageToken(t *testing.T) {
 	defer jwksServer.Close()
 
 	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:       "https://auth.example.com",
-		ApplicationID: "test-app",
-		JWKSURL:       jwksServer.URL,
+		BaseURL:         "https://auth.example.com",
+		ApplicationID:   "test-app",
+		JWKSURL:         jwksServer.URL,
+		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
 	}, discardLogger())
 	if err != nil {
 		t.Fatalf("NewFusionAuthValidator: %v", err)

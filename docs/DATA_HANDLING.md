@@ -139,16 +139,18 @@ otherwise `required`.
 | `iat`                | RFC 7519 §4.1.6   | Parsed, unused                                   | Nowhere                                                                                                           |
 | `iss`                | RFC 7519 §4.1.1   | Compared via `matchIssuer`                       | Nowhere                                                                                                           |
 | `aud`                | RFC 7519 §4.1.3   | Compared via `validateAudience`                  | Nowhere                                                                                                           |
-| `sub`                | RFC 7519 §4.1.2   | Extracted as `Claims.ClientID`                   | Request memory; **DEBUG log** at [fusionauth.go:138](../internal/auth/fusionauth.go#L138); `mcp.client.id` span attribute |
-| roles (configurable) | Custom            | Extracted as `Claims.Roles`                      | Same as `sub`                                                                                                     |
+| `sub`                | RFC 7519 §4.1.2   | Hashed into `Claims.ClientID` via keyed HMAC-SHA256 (`hmacClientID`, key `MCP_CLIENT_ID_HMAC_KEY`) | Raw `sub` lives in request-scope memory only and is **never logged**. The HMAC'd value appears as `client_id` in logs and as the `mcp.client.id` span attribute. |
+| roles (configurable) | Custom            | Extracted as `Claims.Roles`                      | Request memory                                                                                                    |
 | `jti`                | RFC 7519 §4.1.7   | Not read                                         | Nowhere                                                                                                           |
 
-**DEBUG-level caveat.** The FusionAuth validator emits
-`slog.String("subject", sub)` at DEBUG level. Production should run at
-INFO; ad-hoc DEBUG sessions for troubleshooting will write subject
-identifiers to stderr. Candidate code change worth weighing during
-Phase 9 / 10: redact like `SafeAddr` does for EVM addresses, or drop
-entirely.
+**Sub handling (resolved Phase 9.16, 2026-05-20).** The validator no
+longer logs the `sub` at any level: the former DEBUG `subject` line was
+removed, and the `sub` reaches logs and traces only as a keyed HMAC
+(`client_id`), which is stable for audit correlation but not reversible
+to a real-world identity without the server-held `MCP_CLIENT_ID_HMAC_KEY`.
+The key is mandatory under `AUTH_PROVIDER=fusionauth` — startup fails
+loud (`ErrMissingClientIDHMACKey`) if it is unset. See
+[`docs/PRIVACY_DISCUSSION.md`](PRIVACY_DISCUSSION.md) § 2.1 D4/D9.
 
 ## 3. Request inputs forwarded to upstream
 

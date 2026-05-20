@@ -5,6 +5,9 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,12 +24,18 @@ const RoleAutomation = "automation"
 
 // Sentinel errors for FusionAuth validation failures.
 var (
-	ErrMissingBaseURL  = errors.New("FusionAuth base URL is required")
-	ErrMissingAppID    = errors.New("FusionAuth application ID is required")
-	ErrTokenInvalid    = errors.New("token is not valid")
-	ErrClaimsExtract   = errors.New("failed to extract claims")
-	ErrInvalidIssuer   = errors.New("invalid issuer")
-	ErrInvalidAudience = errors.New("invalid audience: token not issued for this application")
+	ErrMissingBaseURL = errors.New("FusionAuth base URL is required")
+	ErrMissingAppID   = errors.New("FusionAuth application ID is required")
+	// ErrMissingClientIDHMACKey is returned when FusionAuth validation is
+	// requested without a client-id HMAC key. The key is mandatory: it is
+	// what keeps the JWT sub out of logs (the sub is hashed into client_id
+	// before it is ever logged). Failing loud here prevents a
+	// misconfiguration from silently logging raw, email-reversible subs.
+	ErrMissingClientIDHMACKey = errors.New("client-id HMAC key is required for FusionAuth (set MCP_CLIENT_ID_HMAC_KEY)")
+	ErrTokenInvalid           = errors.New("token is not valid")
+	ErrClaimsExtract          = errors.New("failed to extract claims")
+	ErrInvalidIssuer          = errors.New("invalid issuer")
+	ErrInvalidAudience        = errors.New("invalid audience: token not issued for this application")
 )
 
 // FusionAuthConfig holds the settings needed to validate FusionAuth JWTs.
@@ -37,6 +46,10 @@ type FusionAuthConfig struct {
 	JWKSURL       string
 	ClockSkew     time.Duration
 	RolesClaim    string
+	// ClientIDHMACKey keys the one-way transform applied to the JWT sub
+	// before it becomes Claims.ClientID. Required (see
+	// ErrMissingClientIDHMACKey). Sourced from MCP_CLIENT_ID_HMAC_KEY.
+	ClientIDHMACKey []byte
 }
 
 // FusionAuthValidator validates JWTs issued by FusionAuth using JWKS.
@@ -54,6 +67,11 @@ func NewFusionAuthValidator(cfg *FusionAuthConfig, logger *slog.Logger) (*Fusion
 	}
 	if cfg.ApplicationID == "" {
 		return nil, ErrMissingAppID
+	}
+	// Checked before the JWKS network fetch so a missing key fails loud
+	// at startup without requiring a reachable FusionAuth instance.
+	if len(cfg.ClientIDHMACKey) == 0 {
+		return nil, ErrMissingClientIDHMACKey
 	}
 	if cfg.RolesClaim == "" {
 		cfg.RolesClaim = "roles"
@@ -137,16 +155,29 @@ func (v *FusionAuthValidator) Validate(tokenString string) (*Claims, error) {
 		}
 	}
 
-	v.logger.Debug("validated FusionAuth token",
-		slog.String("subject", sub),
-		slog.Any("roles", roles),
-	)
-
+	// The raw sub is never logged (privacy: it is email-reversible). It
+	// flows only into request-scope memory and into client_id as a keyed
+	// HMAC. See docs/PRIVACY_DISCUSSION.md § 2.1 D4/D9.
 	return &Claims{
-		ClientID:      sub,
+		ClientID:      hmacClientID(sub, v.config.ClientIDHMACKey),
 		Roles:         roles,
 		WriteApproval: writeApproval,
 	}, nil
+}
+
+// hmacClientID maps a JWT sub to the per-customer identifier recorded in
+// logs and telemetry. It is a keyed HMAC-SHA256, hex-encoded: stable
+// (same sub + key -> same id, for audit correlation) but one-way (the
+// id cannot be reversed to the sub, and thus to a real identity, without
+// the server-held key). An empty sub yields an empty id so that tokens
+// without a subject do not collapse to a single constant pseudo-identity.
+func hmacClientID(sub string, key []byte) string {
+	if sub == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(sub))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // Close releases JWKS resources.

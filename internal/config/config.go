@@ -39,6 +39,7 @@ var (
 	ErrInvalidAuthProvider     = errors.New("AUTH_PROVIDER must be \"apikey\" or \"fusionauth\"")
 	ErrMissingFusionAuthURL    = errors.New("FUSIONAUTH_URL is required when AUTH_PROVIDER is \"fusionauth\"")
 	ErrMissingFusionAuthAppID  = errors.New("FUSIONAUTH_APPLICATION_ID is required when AUTH_PROVIDER is \"fusionauth\"")
+	ErrMissingClientIDHMACKey  = errors.New("MCP_CLIENT_ID_HMAC_KEY is required when AUTH_PROVIDER is \"fusionauth\"")
 	ErrInvalidFusionAuthURL    = errors.New("FUSIONAUTH_URL must start with http:// or https://")
 	ErrInvalidChainEnvironment = errors.New(`NVNM_CHAIN_ENVIRONMENT must be "testnet" or "mainnet" when set`)
 )
@@ -93,12 +94,16 @@ type Config struct {
 	AuthProvider string
 
 	// FusionAuth settings (required when AuthProvider == "fusionauth")
-	FusionAuthURL     string        // FUSIONAUTH_URL: base URL of the FusionAuth instance
-	FusionAuthAppID   string        // FUSIONAUTH_APPLICATION_ID: application UUID
-	FusionAuthIssuer  string        // FUSIONAUTH_ISSUER: expected JWT issuer (defaults to FusionAuthURL)
-	FusionAuthJWKSURL string        // FUSIONAUTH_JWKS_URL: JWKS endpoint (defaults to BaseURL/jwks.json)
-	JWTClockSkew      time.Duration // JWT_CLOCK_SKEW: leeway for token expiry checks (default 60s)
-	JWTRolesClaim     string        // JWT_ROLES_CLAIM: name of the roles claim in JWT (default "roles")
+	FusionAuthURL     string // FUSIONAUTH_URL: base URL of the FusionAuth instance
+	FusionAuthAppID   string // FUSIONAUTH_APPLICATION_ID: application UUID
+	FusionAuthIssuer  string // FUSIONAUTH_ISSUER: expected JWT issuer (defaults to FusionAuthURL)
+	FusionAuthJWKSURL string // FUSIONAUTH_JWKS_URL: JWKS endpoint (defaults to BaseURL/jwks.json)
+	// FusionAuthClientIDHMACKey (MCP_CLIENT_ID_HMAC_KEY) keys the one-way
+	// transform applied to the JWT sub before it becomes the logged
+	// client_id. Required when AuthProvider == "fusionauth".
+	FusionAuthClientIDHMACKey string
+	JWTClockSkew              time.Duration // JWT_CLOCK_SKEW: leeway for token expiry checks (default 60s)
+	JWTRolesClaim             string        // JWT_ROLES_CLAIM: name of the roles claim in JWT (default "roles")
 
 	// Chain environment (NVNM-prefixed; introduced in Phase 8).
 	// ChainEnvironment selects between testnet and mainnet token naming
@@ -233,6 +238,7 @@ func Load() (*Config, error) {
 	cfg.FusionAuthAppID = os.Getenv("FUSIONAUTH_APPLICATION_ID")
 	cfg.FusionAuthIssuer = os.Getenv("FUSIONAUTH_ISSUER")
 	cfg.FusionAuthJWKSURL = os.Getenv("FUSIONAUTH_JWKS_URL")
+	cfg.FusionAuthClientIDHMACKey = os.Getenv("MCP_CLIENT_ID_HMAC_KEY")
 	cfg.JWTRolesClaim = envOrDefault("JWT_ROLES_CLAIM", "roles")
 
 	clockSkewStr := envOrDefault("JWT_CLOCK_SKEW", "60s")
@@ -378,6 +384,9 @@ func (c *Config) validateAuth() error {
 		}
 		if c.FusionAuthAppID == "" {
 			return ErrMissingFusionAuthAppID
+		}
+		if c.FusionAuthClientIDHMACKey == "" {
+			return ErrMissingClientIDHMACKey
 		}
 	}
 	return nil

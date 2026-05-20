@@ -58,6 +58,7 @@ func clearEnv(t *testing.T) {
 		"NVNM_EXPLORER_URL",
 		"NVNM_BRIDGE_URL",
 		"NVNM_ALLOWED_ORIGINS",
+		"MCP_CLIENT_ID_HMAC_KEY",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -107,6 +108,41 @@ func TestLoad_Minimal(t *testing.T) {
 	}
 	if cfg.EnableWriteTools {
 		t.Error("EnableWriteTools should default to false")
+	}
+}
+
+// FusionAuth mode requires MCP_CLIENT_ID_HMAC_KEY: the key is what keeps
+// the JWT sub out of logs (the sub is hashed into client_id before it is
+// ever logged), so a missing key must fail loud at config time.
+func TestValidate_FusionAuthRequiresClientIDHMACKey(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "fusionauth")
+	t.Setenv("FUSIONAUTH_URL", "https://fusionauth.example.com")
+	t.Setenv("FUSIONAUTH_APPLICATION_ID", "app-uuid")
+	// MCP_CLIENT_ID_HMAC_KEY deliberately unset.
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingClientIDHMACKey) {
+		t.Fatalf("want ErrMissingClientIDHMACKey, got %v", err)
+	}
+}
+
+// With the HMAC key set, FusionAuth config loads and the key is captured.
+func TestValidate_FusionAuthWithClientIDHMACKey(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("AUTH_PROVIDER", "fusionauth")
+	t.Setenv("FUSIONAUTH_URL", "https://fusionauth.example.com")
+	t.Setenv("FUSIONAUTH_APPLICATION_ID", "app-uuid")
+	t.Setenv("MCP_CLIENT_ID_HMAC_KEY", "a-server-held-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.FusionAuthClientIDHMACKey != "a-server-held-secret" {
+		t.Fatalf("FusionAuthClientIDHMACKey = %q, want it captured from env", cfg.FusionAuthClientIDHMACKey)
 	}
 }
 
@@ -523,6 +559,7 @@ func TestLoad_AuthProviderFusionAuth(t *testing.T) {
 	t.Setenv("FUSIONAUTH_JWKS_URL", "https://auth.example.com/custom-jwks")
 	t.Setenv("JWT_CLOCK_SKEW", "30s")
 	t.Setenv("JWT_ROLES_CLAIM", "app_roles")
+	t.Setenv("MCP_CLIENT_ID_HMAC_KEY", "test-client-id-hmac-key")
 
 	cfg, err := Load()
 	if err != nil {
