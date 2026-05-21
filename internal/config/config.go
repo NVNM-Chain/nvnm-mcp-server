@@ -31,6 +31,8 @@ var (
 	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
 	ErrInvalidMCPRateLimit    = errors.New("MCP_RATE_LIMIT must be positive")
 	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
+	ErrInvalidAnonRateLimit   = errors.New("MCP_ANON_RATE_LIMIT must be positive")
+	ErrInvalidAnonRateBurst   = errors.New("MCP_ANON_RATE_BURST must be positive")
 	ErrAdminKeyWithoutFile    = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
 	ErrHTTPAuthRequired       = errors.New(
 		"HTTP transport requires an authentication provider; " +
@@ -89,6 +91,16 @@ type Config struct {
 	// Per-client MCP rate limiting
 	MCPRateLimit float64 // MCP_RATE_LIMIT: requests/second per client (default 60)
 	MCPRateBurst int     // MCP_RATE_BURST: burst capacity per client (default 10)
+
+	// Keyless reads (HTTP only). When true, read tools may be called
+	// without authentication; write tools keep the auth chain. See
+	// docs/superpowers/specs/2026-05-21-keyless-read-auth-middleware-design.md.
+	KeylessReads bool // MCP_KEYLESS_READS: allow unauthenticated read tools (default false)
+
+	// Per-IP rate limit for anonymous reads. Must be tighter than the
+	// per-client limits above (documented invariant; not enforced here).
+	AnonRateLimit float64 // MCP_ANON_RATE_LIMIT: requests/second per source IP (default 5)
+	AnonRateBurst int     // MCP_ANON_RATE_BURST: burst capacity per source IP (default 5)
 
 	// Authentication provider: "apikey" (default) or "fusionauth"
 	AuthProvider string
@@ -230,6 +242,10 @@ func Load() (*Config, error) {
 	cfg.WriteApprovalDefault = envOrDefault("WRITE_APPROVAL_DEFAULT", "required")
 
 	if loadErr := cfg.loadMCPRateConfig(); loadErr != nil {
+		return nil, loadErr
+	}
+
+	if loadErr := cfg.loadKeylessConfig(); loadErr != nil {
 		return nil, loadErr
 	}
 
@@ -417,6 +433,12 @@ func (c *Config) validateResilience() error {
 	if c.MCPRateBurst <= 0 {
 		return ErrInvalidMCPRateBurst
 	}
+	if c.AnonRateLimit <= 0 {
+		return ErrInvalidAnonRateLimit
+	}
+	if c.AnonRateBurst <= 0 {
+		return ErrInvalidAnonRateBurst
+	}
 	return nil
 }
 
@@ -434,6 +456,28 @@ func (c *Config) loadMCPRateConfig() error {
 		return fmt.Errorf("invalid MCP_RATE_BURST %q: %w", rateBurstStr, err)
 	}
 	c.MCPRateBurst = rateBurst
+	return nil
+}
+
+// loadKeylessConfig parses the keyless-reads flag and the anonymous
+// per-IP rate-limit knobs. Anon defaults are deliberately tighter than
+// the per-client defaults.
+func (c *Config) loadKeylessConfig() error {
+	c.KeylessReads = envOrDefault("MCP_KEYLESS_READS", "false") == "true"
+
+	anonLimitStr := envOrDefault("MCP_ANON_RATE_LIMIT", "5")
+	anonLimit, err := strconv.ParseFloat(anonLimitStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_ANON_RATE_LIMIT %q: %w", anonLimitStr, err)
+	}
+	c.AnonRateLimit = anonLimit
+
+	anonBurstStr := envOrDefault("MCP_ANON_RATE_BURST", "5")
+	anonBurst, err := strconv.Atoi(anonBurstStr)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_ANON_RATE_BURST %q: %w", anonBurstStr, err)
+	}
+	c.AnonRateBurst = anonBurst
 	return nil
 }
 

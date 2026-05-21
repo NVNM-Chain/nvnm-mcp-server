@@ -59,6 +59,9 @@ func clearEnv(t *testing.T) {
 		"NVNM_BRIDGE_URL",
 		"NVNM_ALLOWED_ORIGINS",
 		"MCP_CLIENT_ID_HMAC_KEY",
+		"MCP_KEYLESS_READS",
+		"MCP_ANON_RATE_LIMIT",
+		"MCP_ANON_RATE_BURST",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -821,6 +824,64 @@ func TestLoad_AllowedOrigins_NilWhenUnset(t *testing.T) {
 	}
 	if cfg.AllowedOrigins != nil {
 		t.Errorf("AllowedOrigins = %v, want nil when NVNM_ALLOWED_ORIGINS is unset", cfg.AllowedOrigins)
+	}
+}
+
+func TestLoad_KeylessDefaults(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.KeylessReads {
+		t.Error("KeylessReads should default to false")
+	}
+	if cfg.AnonRateLimit != 5 {
+		t.Errorf("AnonRateLimit default = %v, want 5", cfg.AnonRateLimit)
+	}
+	if cfg.AnonRateBurst != 5 {
+		t.Errorf("AnonRateBurst default = %v, want 5", cfg.AnonRateBurst)
+	}
+}
+
+func TestLoad_KeylessEnabled(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_READS", "true")
+	t.Setenv("MCP_ANON_RATE_LIMIT", "3")
+	t.Setenv("MCP_ANON_RATE_BURST", "2")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.KeylessReads {
+		t.Error("KeylessReads should be true")
+	}
+	if cfg.AnonRateLimit != 3 || cfg.AnonRateBurst != 2 {
+		t.Errorf("anon limits = %v/%v, want 3/2", cfg.AnonRateLimit, cfg.AnonRateBurst)
+	}
+}
+
+func TestLoad_AnonRateLimitMustBePositive(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_ANON_RATE_LIMIT", "0")
+
+	if _, err := Load(); !errors.Is(err, ErrInvalidAnonRateLimit) {
+		t.Errorf("got %v, want ErrInvalidAnonRateLimit", err)
+	}
+}
+
+func TestLoad_AnonRateBurstMustBePositive(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_ANON_RATE_BURST", "0")
+
+	if _, err := Load(); !errors.Is(err, ErrInvalidAnonRateBurst) {
+		t.Errorf("got %v, want ErrInvalidAnonRateBurst", err)
 	}
 }
 
