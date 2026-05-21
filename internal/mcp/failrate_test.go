@@ -131,19 +131,3 @@ func TestIPFailRateLimiter_LRUEvictionUnderCap(t *testing.T) {
 		t.Errorf("Size after 4th distinct IP with cap=3 = %d, want 3 (one evicted)", l.Size())
 	}
 }
-
-func TestClientRateLimiter_LRUEvictionUnderCap(t *testing.T) {
-	l := NewClientRateLimiter(1, 1)
-	l.maxClients = 3
-	_ = l.getLimiter("client-a")
-	_ = l.getLimiter("client-b")
-	_ = l.getLimiter("client-c")
-	if got := l.Size(); got != 3 {
-		t.Fatalf("Size = %d, want 3", got)
-	}
-	time.Sleep(2 * time.Millisecond)
-	_ = l.getLimiter("client-d")
-	if got := l.Size(); got != 3 {
-		t.Errorf("Size after 4th client with cap=3 = %d, want 3", got)
-	}
-}

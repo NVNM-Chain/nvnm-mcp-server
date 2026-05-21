@@ -20,11 +20,11 @@ func TestClientRateLimiter_AllowsUnderLimit(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-
 	handler := limiter.Middleware(next, logger)
+	authCtx := auth.ContextWithClaims(t.Context(), &auth.Claims{ClientID: "client-x"})
 
 	for i := range 5 {
-		req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+		req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody).WithContext(authCtx)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
@@ -40,23 +40,41 @@ func TestClientRateLimiter_BlocksOverBurst(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-
 	handler := limiter.Middleware(next, logger)
+	authCtx := auth.ContextWithClaims(t.Context(), &auth.Claims{ClientID: "client-x"})
 
-	// First request consumes the burst token
-	req1 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+	req1 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody).WithContext(authCtx)
 	w1 := httptest.NewRecorder()
 	handler.ServeHTTP(w1, req1)
 	if w1.Code != http.StatusOK {
 		t.Fatalf("first request should succeed, got %d", w1.Code)
 	}
 
-	// Second request should be rate limited
-	req2 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+	req2 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody).WithContext(authCtx)
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusTooManyRequests {
 		t.Errorf("second request should be rate limited (429), got %d", w2.Code)
+	}
+}
+
+func TestClientRateLimiter_AnonymousPassesThrough(t *testing.T) {
+	limiter := NewClientRateLimiter(0.0001, 1) // burst=1: would block a 2nd bucketed req
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := limiter.Middleware(next, logger)
+
+	// No claims => anonymous => client limiter must NOT bucket it; both pass.
+	for i := range 2 {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("anonymous request %d: got %d, want 200 (pass-through)", i, w.Code)
+		}
 	}
 }
 
