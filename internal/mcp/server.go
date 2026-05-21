@@ -47,8 +47,9 @@ const initializeInstructions = "NVNM Chain MCP server -- typed " +
 
 // Server wraps the MCP server with its dependencies.
 type Server struct {
-	mcpServer *mcp.Server
-	logger    *slog.Logger
+	mcpServer    *mcp.Server
+	logger       *slog.Logger
+	keylessReads bool
 }
 
 // NewServer creates a new MCP server and registers all tools.
@@ -90,9 +91,18 @@ func NewServer(
 		mcpSrv.AddReceivingMiddleware(mw)
 	}
 
+	// Keyless reads are HTTP-only; stdio is local/trusted and has no
+	// AuthMiddleware. Gate on transport so a stdio+keyless combo cannot
+	// reject local write-tool calls.
+	keyless := cfg.KeylessReads && cfg.Transport == "http"
+	if cfg.KeylessReads && cfg.Transport != "http" {
+		logger.Warn("MCP_KEYLESS_READS set but transport is not HTTP; ignored (stdio is local-trusted)")
+	}
+
 	s := &Server{
-		mcpServer: mcpSrv,
-		logger:    logger,
+		mcpServer:    mcpSrv,
+		logger:       logger,
+		keylessReads: keyless,
 	}
 
 	// 1. Onboarding tools first so they appear at the top of tools/list.
@@ -132,6 +142,10 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // RunHTTP runs the MCP server over Streamable HTTP on the given address.
 // When validator is non-nil, requests must include a valid
 // "Authorization: Bearer <token>" header.
+// Keyless read mode (cfg.KeylessReads, fixed at construction time) relaxes
+// this: requests with no Authorization header are admitted anonymously and
+// per-tool enforcement gates write tools. A present-but-invalid credential
+// is still rejected.
 // When limiter is non-nil, per-client rate limiting is enforced.
 // When failLimiter is non-nil, pre-auth failure-rate limiting per
 // source IP is enforced (defeats credential stuffing).
@@ -175,7 +189,7 @@ func (s *Server) RunHTTP(
 	if limiter != nil {
 		inner = limiter.Middleware(mcpHandler, s.logger)
 	}
-	authed := AuthMiddleware(inner, validator, failLimiter, s.logger)
+	authed := AuthMiddleware(inner, validator, failLimiter, s.keylessReads, s.logger)
 	bodyLimited := limitRequestBody(authed)
 	failGuarded := bodyLimited
 	if failLimiter != nil {

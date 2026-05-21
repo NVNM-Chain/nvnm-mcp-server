@@ -473,7 +473,7 @@ func startAuthTestServer(
 		return srv.mcpServer
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
-	handler := AuthMiddleware(mcpHandler, validator, nil, logger)
+	handler := AuthMiddleware(mcpHandler, validator, nil, false, logger)
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)

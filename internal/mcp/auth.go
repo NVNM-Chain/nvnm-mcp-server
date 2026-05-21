@@ -30,10 +30,17 @@ import (
 // return 401 (the caller must (re)authenticate); credentials that
 // authenticate but fail policy return 403. Here every failure is a
 // validation failure -> 401.
+//
+// When keylessReads is true, a request with NO Authorization header
+// passes through anonymously (no claims in context) so downstream
+// per-tool enforcement can admit read tools and reject auth-required
+// tools. A present-but-invalid token is STILL rejected 401 regardless
+// of keylessReads: anonymity requires sending no credential at all.
 func AuthMiddleware(
 	next http.Handler,
 	validator auth.TokenValidator,
 	failLimiter *IPFailRateLimiter,
+	keylessReads bool,
 	logger *slog.Logger,
 ) http.Handler {
 	if validator == nil {
@@ -50,6 +57,13 @@ func AuthMiddleware(
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
+			if keylessReads {
+				// Anonymous: no Authorization header at all. Per-tool
+				// enforcement downstream rejects auth-required tools; read
+				// tools proceed. Anonymity requires sending no credential.
+				next.ServeHTTP(w, r)
+				return
+			}
 			penalize(r)
 			logger.Warn("rejected unauthenticated request",
 				slog.String("remote_addr", r.RemoteAddr),
