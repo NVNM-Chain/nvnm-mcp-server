@@ -114,6 +114,57 @@ func TestIPFailRateLimiter_IPFromRequest_TrustProxyOn(t *testing.T) {
 	}
 }
 
+func TestClientIP_Helper(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		xff        string // empty => header not set
+		trustProxy bool
+		want       string
+	}{
+		{
+			name:       "trust proxy off ignores XFF, uses RemoteAddr host",
+			remoteAddr: "10.0.0.9:8080",
+			xff:        "1.2.3.4, 5.6.7.8",
+			trustProxy: false,
+			want:       "10.0.0.9",
+		},
+		{
+			name:       "trust proxy on uses leftmost XFF entry",
+			remoteAddr: "10.0.0.9:8080",
+			xff:        "1.2.3.4, 5.6.7.8",
+			trustProxy: true,
+			want:       "1.2.3.4",
+		},
+		{
+			name:       "trust proxy on but XFF absent falls back to RemoteAddr host",
+			remoteAddr: "10.0.0.9:8080",
+			xff:        "",
+			trustProxy: true,
+			want:       "10.0.0.9",
+		},
+		{
+			name:       "RemoteAddr without port returns raw value",
+			remoteAddr: "10.0.0.9", // no port => SplitHostPort errors
+			xff:        "",
+			trustProxy: false,
+			want:       "10.0.0.9",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.xff != "" {
+				req.Header.Set("X-Forwarded-For", tt.xff)
+			}
+			if got := clientIP(req, tt.trustProxy); got != tt.want {
+				t.Errorf("clientIP(trustProxy=%v) = %q, want %q", tt.trustProxy, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIPFailRateLimiter_LRUEvictionUnderCap(t *testing.T) {
 	l := newTestFailLimiter(t, 1, 1, false)
 	l.maxIPs = 3 // shrink the cap for the test

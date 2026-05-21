@@ -107,14 +107,14 @@ func (l *IPFailRateLimiter) sweep(now time.Time) {
 	}
 }
 
-// IPFromRequest extracts the source IP per the limiter's trust-proxy
-// setting. Exported so the inner auth middleware can use the same
-// derivation when calling Penalize.
-func (l *IPFailRateLimiter) IPFromRequest(r *http.Request) string {
-	if l.trustProxy {
+// clientIP derives the source IP for rate-limiting. trustProxy=true
+// honors the leftmost X-Forwarded-For entry (deploy behind a reverse
+// proxy that strips client-supplied entries); false uses r.RemoteAddr.
+// Single source of truth shared by the fail-rate limiter and the
+// anonymous-read limiter, fed by NVNM_TRUST_PROXY_HEADERS.
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// Take the leftmost address; trust-but-verify the proxy
-			// removes any client-supplied entries.
 			for i, c := range xff {
 				if c == ',' {
 					return trimSpace(xff[:i])
@@ -128,6 +128,13 @@ func (l *IPFailRateLimiter) IPFromRequest(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// IPFromRequest extracts the source IP per the limiter's trust-proxy
+// setting. Exported so the inner auth middleware can use the same
+// derivation when calling Penalize.
+func (l *IPFailRateLimiter) IPFromRequest(r *http.Request) string {
+	return clientIP(r, l.trustProxy)
 }
 
 func trimSpace(s string) string {
