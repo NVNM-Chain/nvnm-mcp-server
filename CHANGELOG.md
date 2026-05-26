@@ -9,6 +9,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.7 (multi-arch container image + Cosign keyless signing):
+added `.github/workflows/image.yml` building `linux/amd64` +
+`linux/arm64` container images via Docker buildx (QEMU
+cross-compile) and pushing to GHCR
+(`ghcr.io/inveniamcapital/nvnm-mcp-server`). Triggers: `push` to
+`main` (publishes `:main` + `:sha-<7>` tags), tag `v*` (publishes
+`:<version>` + `:<major>.<minor>` + `:sha-<7>`), and `pull_request`
+(builds only, no push). Manifest digest is keyless-signed via
+`sigstore/cosign-installer@v3` with identity bound to
+`token.actions.githubusercontent.com`; buildx SLSA provenance and
+SBOM attestations are attached to the manifest. The Dockerfile was
+already multi-arch-ready (`TARGETARCH` -> `GOARCH`). Dedicated
+workflow file so QEMU's slow cross-compile path does not slow the
+fast Go-test feedback loop in `ci.yml`. First push exercises the
+path end-to-end.
+
+Phase 9.4 (DCO sign-off CI hook): added
+`.github/workflows/dco.yml` enforcing
+`Signed-off-by: Name <email>` trailers on every non-merge commit in
+a pull request. Failures print the offending SHAs and a fix recipe
+(`git commit --amend -s` or `git rebase --signoff`). Workflow form
+chosen over GitHub-App form because App installations are ephemeral
+across the planned Phase 9.14 NVNM-Chain org transfer; a workflow
+moves with the repo. `CONTRIBUTING.md` § 6 (DCO) updated to point at
+the workflow file. The optional DCO GitHub App for per-commit
+comment threading can be added later without changing the workflow.
+
 Phase 9.16 (keyless-read auth middleware split): split the HTTP auth
 chain so read tools can run anonymously while write tools keep their
 existing auth requirement. New env vars `MCP_KEYLESS_READS=false`
