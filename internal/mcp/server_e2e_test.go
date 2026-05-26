@@ -367,10 +367,11 @@ func TestSafeForClient_PassesThroughApprovalErrors(t *testing.T) {
 }
 
 // TestSafeForClient_PassesThroughAuthRequired locks the contract that an
-// anonymous caller hitting an auth-gated tool sees "authentication required"
-// at the client boundary, not the generic upstream-fail sentinel. Without
-// this passthrough, the enforcement-middleware rejection would be sanitized
-// into a misleading "service temporarily unavailable" reply.
+// anonymous caller hitting an auth-gated tool sees the "authentication
+// required" sentinel at the client boundary, not the generic upstream-fail
+// sentinel. Without this passthrough, the enforcement-middleware rejection
+// would be sanitized into a misleading "service temporarily unavailable"
+// reply.
 func TestSafeForClient_PassesThroughAuthRequired(t *testing.T) {
 	wrapped := fmt.Errorf("%w: tool %q", apperrors.ErrAuthRequired, "evm_send_raw_transaction")
 	safe := apperrors.SafeForClient(wrapped)
@@ -444,6 +445,11 @@ func (bt *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 type authE2EConfig struct {
 	keys            []KeyEntry
 	approvalDefault string
+	// keylessReads, when true, configures the test server with
+	// cfg.KeylessReads=true and cfg.Transport="http" so NewServer
+	// registers the enforcement middleware, AND passes keylessReads=true
+	// to AuthMiddleware. Default false preserves existing test behavior.
+	keylessReads bool
 }
 
 func startAuthTestServer(
@@ -481,13 +487,18 @@ func startAuthTestServer(
 		validator = auth.NewAPIKeyValidator(adapter)
 	}
 
-	srv := NewServer(evmClient, anchorClient, testServerConfig(true, approval), nil, logger)
+	serverCfg := testServerConfig(true, approval)
+	if cfg.keylessReads {
+		serverCfg.KeylessReads = true
+		serverCfg.Transport = "http"
+	}
+	srv := NewServer(evmClient, anchorClient, serverCfg, nil, logger)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
-	handler := AuthMiddleware(mcpHandler, validator, nil, false, logger)
+	handler := AuthMiddleware(mcpHandler, validator, nil, cfg.keylessReads, logger)
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
@@ -761,5 +772,128 @@ func TestE2E_Auth_ValidKey_SendTx_WithElicitation(t *testing.T) {
 	}
 	if !strings.Contains(capturedMessage, "Submitted by:       write-client") {
 		t.Errorf("approval prompt should contain client identity, got:\n%s", capturedMessage)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Keyless-read E2E tests (Phase 9.16)
+//
+// These exercise the full keyless stack end-to-end: AuthMiddleware admits
+// anonymous requests when the Authorization header is absent; the
+// enforcement middleware (registered in NewServer for HTTP+keyless) rejects
+// anonymous calls to auth-gated tools; SafeForClient preserves the
+// ErrAuthRequired identity through the telemetry/error chain so the client
+// sees a meaningful rejection.
+// ---------------------------------------------------------------------------
+
+// resultText concatenates the text content from an MCP CallToolResult
+// into a single string for substring assertions. Works for both
+// success and error results (the SDK puts both kinds of content in
+// the same Content slice).
+func resultText(result *mcp.CallToolResult) string {
+	if result == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range result.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			b.WriteString(tc.Text)
+		}
+	}
+	return b.String()
+}
+
+func TestE2E_Keyless_AnonReadAllowed(t *testing.T) {
+	// Non-obvious: even though we're testing the anonymous code path,
+	// startAuthTestServer only constructs an auth.TokenValidator when
+	// cfg.keys is non-empty. Without a validator, AuthMiddleware
+	// short-circuits and the keyless behavior is not exercised. So we
+	// configure a key but the client sends no Authorization header
+	// (clientToken == "").
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
+	session, err := startAuthTestServer(t, authE2EConfig{
+		keys:            keys,
+		keylessReads:    true,
+		approvalDefault: ApprovalAuto,
+	}, "", nil) // empty token -> bearerTransport omits the Authorization header
+	if err != nil {
+		t.Fatalf("anon connect under keyless: %v", err)
+	}
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_get_chain_id",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("anon read tool must succeed under keyless; got error: %v", result.Content)
+	}
+}
+
+func TestE2E_Keyless_AnonWriteRejected(t *testing.T) {
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
+	session, err := startAuthTestServer(t, authE2EConfig{
+		keys:            keys,
+		keylessReads:    true,
+		approvalDefault: ApprovalAuto,
+	}, "", nil)
+	if err != nil {
+		t.Fatalf("anon connect under keyless: %v", err)
+	}
+
+	signedTx := buildSignedTxHex(t)
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_send_raw_transaction",
+		Arguments: map[string]any{"signed_tx": signedTx},
+	})
+	// The enforcement middleware returns (nil, error) from the method
+	// handler. The SDK surfaces this as a call-level err (not as a tool
+	// result with IsError=true, which is the shape RBAC rejection uses
+	// because RBAC runs INSIDE the tool handler). Accept either form so
+	// the test stays correct if the SDK changes its surfacing.
+	var msg string
+	switch {
+	case err != nil:
+		msg = err.Error()
+	case result != nil && result.IsError:
+		msg = resultText(result)
+	default:
+		t.Fatalf("anon write tool must be rejected; got success: %v", result.Content)
+	}
+	if !strings.Contains(msg, apperrors.ErrAuthRequired.Error()) {
+		t.Errorf("rejection must mention 'authentication required'; got: %s", msg)
+	}
+}
+
+func TestE2E_Keyless_AuthedWriteReachesHandler(t *testing.T) {
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
+	session, err := startAuthTestServer(t, authE2EConfig{
+		keys:            keys,
+		keylessReads:    true,
+		approvalDefault: ApprovalAuto,
+	}, "valid-key-123", nil)
+	if err != nil {
+		t.Fatalf("authed connect under keyless: %v", err)
+	}
+
+	signedTx := buildSignedTxHex(t)
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_send_raw_transaction",
+		Arguments: map[string]any{"signed_tx": signedTx},
+	})
+	// Domain success or non-auth domain error are both acceptable; an
+	// auth-required surface (in either err or result content) is the
+	// regression we guard against. Check both shapes.
+	var msg string
+	switch {
+	case err != nil:
+		msg = err.Error()
+	case result != nil && result.IsError:
+		msg = resultText(result)
+	}
+	if strings.Contains(msg, apperrors.ErrAuthRequired.Error()) {
+		t.Fatalf("authed write must not see auth-required rejection; got: %s", msg)
 	}
 }
