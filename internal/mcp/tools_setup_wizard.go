@@ -241,7 +241,6 @@ func needsWalletSamples() []sampleCode {
 			Language: "python",
 			Title:    "Generate an EVM wallet and store the key via the `keyring` library",
 			Code: `# pip install eth-account keyring
-import os
 from eth_account import Account
 import keyring
 
