@@ -87,16 +87,24 @@ func NewServer(
 		&mcp.ServerOptions{Instructions: initializeInstructions},
 	)
 
-	for _, mw := range middleware {
-		mcpSrv.AddReceivingMiddleware(mw)
-	}
-
 	// Keyless reads are HTTP-only; stdio is local/trusted and has no
 	// AuthMiddleware. Gate on transport so a stdio+keyless combo cannot
 	// reject local write-tool calls.
 	keyless := cfg.KeylessReads && cfg.Transport == "http"
 	if cfg.KeylessReads && cfg.Transport != "http" {
 		logger.Warn("MCP_KEYLESS_READS set but transport is not HTTP; ignored (stdio is local-trusted)")
+	}
+
+	// Per-tool auth enforcement is registered BEFORE caller-supplied
+	// middleware. The SDK composes successive AddReceivingMiddleware
+	// calls later-added=outer, so telemetry added in the loop below
+	// wraps this layer and still observes anonymous-write rejections.
+	// No-op when keyless is off (AuthMiddleware then guarantees claims
+	// are present for every tools/call).
+	mcpSrv.AddReceivingMiddleware(NewAuthEnforcementMiddleware(keyless, logger))
+
+	for _, mw := range middleware {
+		mcpSrv.AddReceivingMiddleware(mw)
 	}
 
 	s := &Server{
