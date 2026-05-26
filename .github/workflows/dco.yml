@@ -1,0 +1,69 @@
+name: DCO
+
+# Developer Certificate of Origin sign-off check. Every non-merge commit
+# in a pull request must carry a "Signed-off-by: Name <email>" trailer
+# (the trailer the standard `git commit -s` flag adds). The legal text the
+# trailer attests to is at https://developercertificate.org/ and is
+# also reproduced in CONTRIBUTING.md.
+#
+# This workflow is the CI half of Phase 9.4. The complementary GitHub App
+# (https://github.com/probot/dco) would auto-post a status check on every
+# PR commit individually; the App is org-installed and ephemeral across
+# org transfers, so the workflow form is the durable enforcement.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: DCO sign-off check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need full history of the PR range so git rev-list can walk
+          # base..head without complaining about missing parents.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify Signed-off-by on every PR commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+
+          # Walk every non-merge commit between the PR base and head.
+          # Merge commits are exempt because GitHub-generated merges
+          # don't carry a sign-off and asking maintainers to sign them
+          # post-hoc is just friction.
+          missing=0
+          while IFS= read -r sha; do
+            [ -z "$sha" ] && continue
+            msg=$(git log -1 --format=%B "$sha")
+            author=$(git log -1 --format='%an <%ae>' "$sha")
+            short=$(git log -1 --format='%h %s' "$sha")
+            if ! printf '%s' "$msg" | grep -qE '^Signed-off-by: .+ <.+@.+>$'; then
+              echo "::error::Missing Signed-off-by trailer on commit $short (author: $author)"
+              missing=$((missing + 1))
+            fi
+          done < <(git rev-list --no-merges "${BASE}..${HEAD}")
+
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "::error::$missing commit(s) without DCO sign-off."
+            echo "Fix by adding a Signed-off-by trailer to each unsigned commit:"
+            echo "  git commit --amend -s            # for the latest commit"
+            echo "  git rebase --signoff HEAD~N      # for the last N commits"
+            echo "Then force-push the branch:"
+            echo "  git push --force-with-lease"
+            echo "See CONTRIBUTING.md for the full DCO policy."
+            exit 1
+          fi
+
+          echo "All non-merge commits in PR range carry a DCO Signed-off-by trailer."

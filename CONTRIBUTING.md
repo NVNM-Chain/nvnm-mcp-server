@@ -156,8 +156,12 @@ This appends a line to your commit message:
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-CI enforces DCO via the standard DCO GitHub App. PRs without sign-off
-fail the check; the bot's comment includes the fix recipe.
+CI enforces DCO via [`.github/workflows/dco.yml`](.github/workflows/dco.yml).
+Every non-merge commit in a pull request must carry the trailer; the
+workflow walks `base..head` and prints the specific commit SHA on
+failure. Merge commits are exempt. Operators may additionally install
+the standard DCO GitHub App for per-commit status comments, but the
+workflow alone is sufficient to gate merges.
 
 If you forgot to sign off an earlier commit, fix it with
 `git commit --amend -s` (latest commit) or `git rebase --signoff`
