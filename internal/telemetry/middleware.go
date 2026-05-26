@@ -52,14 +52,17 @@ func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 			toolName := extractToolName(method, req)
 			clientID := auth.ClientIDFromContext(ctx)
 
+			spanAttrs := []attribute.KeyValue{
+				attribute.String("mcp.method", method),
+				attribute.String("mcp.tool.name", toolName),
+				attribute.String("mcp.request.id", reqID),
+			}
+			if clientID != "" {
+				spanAttrs = append(spanAttrs, attribute.String("mcp.client.id", clientID))
+			}
 			ctx, span := tracer.Start(ctx, method,
 				trace.WithSpanKind(trace.SpanKindServer),
-				trace.WithAttributes(
-					attribute.String("mcp.method", method),
-					attribute.String("mcp.tool.name", toolName),
-					attribute.String("mcp.request.id", reqID),
-					attribute.String("mcp.client.id", clientID),
-				),
+				trace.WithAttributes(spanAttrs...),
 			)
 			defer span.End()
 
@@ -93,14 +96,17 @@ func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 				),
 			)
 
-			logger.LogAttrs(ctx, slog.LevelInfo, "tool call",
+			logAttrs := []slog.Attr{
 				slog.String("method", method),
 				slog.String("tool", toolName),
 				slog.String("request_id", reqID),
-				slog.String("client_id", clientID),
 				slog.Duration("duration", elapsed),
 				slog.String("status", status),
-			)
+			}
+			if clientID != "" {
+				logAttrs = append(logAttrs, slog.String("client_id", clientID))
+			}
+			logger.LogAttrs(ctx, slog.LevelInfo, "tool call", logAttrs...)
 
 			return result, apperrors.SafeForClient(err)
 		}
