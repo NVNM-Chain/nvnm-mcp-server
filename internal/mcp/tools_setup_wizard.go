@@ -172,6 +172,12 @@ func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWiz
 				Hint: "Re-call with the generated address to derive the next state " +
 					"(likely `unfunded`).",
 			},
+			{
+				Tool: "nvnm_setup_verify_hash",
+				Hint: "Optional: prove off-chain hashing before funding the wallet. " +
+					"Surfaced here so an agent that never funds the wallet still " +
+					"knows the verify step exists.",
+			},
 		},
 	}
 }
