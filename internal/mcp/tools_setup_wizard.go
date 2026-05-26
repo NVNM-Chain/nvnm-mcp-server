@@ -267,9 +267,15 @@ import fs from "fs";
 // Generates a new wallet. Write the private key into a .env file
 // excluded from version control; do not print it to stdout.
 const w = Wallet.createRandom();
-fs.appendFileSync(".env", ` + "`NVNM_PRIVATE_KEY=${w.privateKey}\n`" + `, {
-    mode: 0o600,
-});
+// The "mode" option to appendFileSync is only honored when the file
+// is created -- on an existing .env it is silently a no-op. Set 0o600
+// explicitly when we created the file; leave a pre-existing .env's
+// mode alone (the user may have intentionally chosen different perms).
+const existed = fs.existsSync(".env");
+fs.appendFileSync(".env", ` + "`NVNM_PRIVATE_KEY=${w.privateKey}\n`" + `);
+if (!existed) {
+    fs.chmodSync(".env", 0o600);
+}
 console.log("Address:", w.address);
 // In your app, load via process.env.NVNM_PRIVATE_KEY (dotenv).
 `,
