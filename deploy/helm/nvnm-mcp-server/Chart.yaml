@@ -7,8 +7,9 @@ type: application
 # securityContext). Bump independently of appVersion when chart
 # templates / values change in a way that affects rendered output.
 version: 0.2.0
-# App version (image tag the chart pulls by default). Aligns with
-# values.image.tag. Phase 9.6 leaves this untouched at 0.5.0;
-# Phase 10's first multi-arch release will retag against the
-# canonical app version in internal/version/version.go.
-appVersion: "0.5.0"
+# App version (image tag the chart pulls by default). Tracks
+# internal/version/version.go (the canonical app version) and is
+# bumped on each release alongside it. Phase 9.7's multi-arch image
+# publishing makes this tag pull a Cosign-signed manifest from
+# ghcr.io/inveniamcapital/nvnm-mcp-server.
+appVersion: "1.0.0-rc.1"

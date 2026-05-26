@@ -21,7 +21,7 @@ spec:
   groups:
     - name: nvnm-mcp-server
       rules:
-        - alert: InveniamMCPHighErrorRate
+        - alert: NvnmMCPHighErrorRate
           expr: |
             (
               sum(rate(mcp_server_tool_errors_total[5m]))
@@ -37,7 +37,7 @@ spec:
             description: "The ratio of tool errors to tool calls has exceeded 5% for 5 minutes (current value: {{ $value | humanizePercentage }})."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-error-rate"
 
-        - alert: InveniamMCPCriticalErrorRate
+        - alert: NvnmMCPCriticalErrorRate
           expr: |
             (
               sum(rate(mcp_server_tool_errors_total[5m]))
@@ -53,7 +53,7 @@ spec:
             description: "The ratio of tool errors to tool calls has exceeded 15% for 5 minutes (current value: {{ $value | humanizePercentage }})."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-critical-error-rate"
 
-        - alert: InveniamMCPHighP99Latency
+        - alert: NvnmMCPHighP99Latency
           expr: |
             histogram_quantile(
               0.99,
@@ -68,7 +68,7 @@ spec:
             description: "The 99th percentile of mcp_server_tool_duration_milliseconds has been above 5000ms for 5 minutes (current value: {{ $value }}ms)."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-p99-latency"
 
-        - alert: InveniamMCPHealthCheckFailing
+        - alert: NvnmMCPHealthCheckFailing
           expr: up{job="nvnm-mcp-server"} == 0
           for: 2m
           labels:
@@ -79,7 +79,7 @@ spec:
             description: "Prometheus cannot scrape the nvnm-mcp-server job (up == 0) for 2 minutes. Verify pods, Service, ServiceMonitor scrape config, and metrics port. Health probes: /healthz and /readyz on port 9090."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-health-check-failing"
 
-        - alert: InveniamMCPCircuitBreakerOpen
+        - alert: NvnmMCPCircuitBreakerOpen
           expr: max(evm_rpc_circuit_breaker_state) == 2
           for: 1m
           labels:
@@ -90,7 +90,7 @@ spec:
             description: "evm_rpc_circuit_breaker_state is 2 (open) for at least 1 minute. RPC calls are failing fast; investigate upstream EVM availability and backoff settings."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-circuit-breaker-open"
 
-        - alert: InveniamMCPHighRetryRate
+        - alert: NvnmMCPHighRetryRate
           expr: |
             (
               sum(rate(evm_rpc_retries_total[5m]))
@@ -106,7 +106,7 @@ spec:
             description: "The ratio of EVM RPC retries to MCP tool calls has exceeded 20% for 5 minutes (current value: {{ $value | humanizePercentage }})."
             runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-retry-rate"
 
-        - alert: InveniamMCPRateLimiting
+        - alert: NvnmMCPRateLimiting
           expr: sum(rate(evm_rpc_rate_limited_total[5m])) > 0
           for: 5m
           labels:

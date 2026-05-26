@@ -290,36 +290,36 @@ The resilient EVM client wrapper records retry attempts, circuit breaker state t
 
 Prometheus alert rules ship with the repo at **`deploy/prometheus/alerts.yaml`** (`PrometheusRule` for the Prometheus Operator, with `runbook_url` annotations pointing to the sections below). Verify exported metric names on `/metrics` before tuning thresholds; OTel-exported names follow the `prometheus/otlptranslator` rules and may include `otel_scope_*` labels.
 
-### `InveniamMCPHighErrorRate`
+### `NvnmMCPHighErrorRate`
 
 - **Likely cause:** Upstream RPC errors, timeouts, or tool-level failures.
 - **Actions:** Inspect `mcp.server.tool.errors` and `evm.rpc.errors` by label; search logs for `"status":"error"` and `level` `ERROR`; verify `NVNM_EVM_RPC_URL` reachability and provider status.
 
-### `InveniamMCPCriticalErrorRate`
+### `NvnmMCPCriticalErrorRate`
 
 - **Actions:** Same as high error rate, with higher urgency; check for sustained RPC outage, TLS/DNS issues, and recent config changes. Scale or roll back if a bad release is suspected.
 
-### `InveniamMCPHighP99Latency`
+### `NvnmMCPHighP99Latency`
 
 - **Actions:** Compare `mcp.server.tool.duration` and `evm.rpc.duration` high quantiles; check network path to RPC; review `REQUEST_TIMEOUT`; consider horizontal scale if CPU saturation correlates.
 
-### `InveniamMCPHealthCheckFailing`
+### `NvnmMCPHealthCheckFailing`
 
 - **Actions:** Confirm pod/task liveness (`/healthz`) vs readiness (`/readyz`). For 503 on `/readyz`, treat as RPC probe failure first. Confirm ABI path and file only if anchor tools misbehave or `checks.abi` is `not_configured` and that is unacceptable for the environment.
 
-### `InveniamMCPCircuitBreakerOpen`
+### `NvnmMCPCircuitBreakerOpen`
 
 - **Actions:** The circuit breaker (`sony/gobreaker`) is implemented in `internal/evm/resilient.go`. When triggered, all RPC calls fail fast with `ErrCircuitOpen`. State transitions are logged at WARN level. Check upstream RPC provider health. The breaker auto-recovers after `CIRCUIT_BREAKER_TIMEOUT` (default 30s) via a half-open probe.
 
-### `InveniamMCPHighRetryRate`
+### `NvnmMCPHighRetryRate`
 
 - **Actions:** Retries are implemented with exponential backoff and jitter on idempotent read RPCs. High retry rates indicate upstream instability. Check `evm.rpc.errors` by method; verify RPC provider status. Consider increasing `RPC_INITIAL_BACKOFF` or reducing `RPC_MAX_RETRIES` if retries are amplifying load.
 
-### `InveniamMCPRateLimiting`
+### `NvnmMCPRateLimiting`
 
 - **Actions:** The in-process token-bucket rate limiter (`golang.org/x/time/rate`) caps upstream RPC calls at `RPC_RATE_LIMIT` req/s with `RPC_RATE_BURST` burst. If clients are being throttled, increase the rate limit, add replicas with fair routing, or negotiate higher quotas with the RPC provider.
 
-### `InveniamMCPClientRateLimit429`
+### `NvnmMCPClientRateLimit429`
 
 - **Actions:** The MCP layer enforces a per-client token-bucket via `MCP_RATE_LIMIT` (req/s, default 60) and `MCP_RATE_BURST` (default 10). When exceeded, the server returns HTTP `429 Too Many Requests` keyed by the authenticated client ID. Investigate by client ID in structured logs (`client_id` attribute). Mitigations: identify the noisy client; raise the per-client limit if legitimate; rotate or disable the client key if abusive.
 
