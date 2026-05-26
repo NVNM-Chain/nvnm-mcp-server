@@ -993,3 +993,92 @@ responsibilities or named deferrals to Phase 9 / Phase 10; none is a
 silent gap. The green-target sweep run as part of the same close-out
 (`make test`, integration suite against testnet, `govulncheck`,
 `golangci-lint` full-tree covering `gosec` + `staticcheck`) passed.
+
+## Update 2026-05-26: Phase 9.13 pre-flip secrets scrub audit
+
+**Scope.** Pre-flip-to-public audit (sequencing step 13 of Phase 9 OSS
+Readiness). Strategy fixed at design time as **rotate-if-found, do
+not rewrite history** (decision D5). Three independent scanners run
+against the working tree and full git history (135 commits at
+`0926633` HEAD).
+
+**Tools and invocations.**
+
+```sh
+detect-secrets scan --all-files                                 # codebase, fresh
+gitleaks   detect --redact --no-git --source .                  # codebase second-opinion
+gitleaks   detect --redact --source .                           # full git history
+git secrets --register-aws && git secrets --scan-history        # AWS-pattern history pass
+```
+
+`git-secrets` was installed via Homebrew for this audit; previously
+absent on the audit host. The AWS pattern set was registered because
+`git secrets` ships with no built-in patterns.
+
+**Findings — tracked surface (the part that matters for the public
+flip).** Every finding falls into category (a) "test fixture /
+known-fake" per the plan's classification grid. Zero findings in
+category (b) "actual secret to rotate" and zero in category (c)
+"false positive to baseline."
+
+| File (tracked) | Tool that flagged | Disposition |
+|---|---|---|
+| `.secrets.baseline` (7 entries) | gitleaks history + detect-secrets | (a) — the file IS the secrets baseline. Each line is a hashed-secret entry by design; flagging it is scanner-meta, not a finding. |
+| `internal/mcp/server_e2e_test.go` (4 hits at historical commit `5e91f82185`, lines 467/488/498/573) | gitleaks history | (a) — fake test fixtures: `"valid-key-123"`, `"strict-key-123"`. Names self-document their fixture role. The strings persist in history but never represented real credentials at any point. Current HEAD's e2e harness uses `NewKeyEntry(...)` constructors, but the historical struct-literal form persists in `git log` (which is exactly what the history scan exists to find). |
+| `cmd/seed-test-data/main.go:49,55,61` | detect-secrets | (a) — fake SHA256-shape hex strings in `Checksum:` fields of testnet seed records. Pattern (`a1b2c3d4e5...`, `d4e5f6a7b8...`, `789abcde0...`) is obviously placeholder, not credential material. |
+| `docs/TOOL_REFERENCE.md:978` | detect-secrets | (a) — `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` is the SHA256 hash of the empty string (well-known constant, `echo -n '' \| sha256sum`). Used as the example checksum in tool documentation. Not a credential. |
+
+**Findings — gitignored working-tree files (operator-local; not part
+of the audit's repo-flip scope).** gitleaks `--no-git` walks the
+filesystem and ignores `.gitignore`, so it flagged `.env` (FUSIONAUTH
+ids, NVNM_TEST_PRIVATE_KEY), `.chain_credentials.txt`, and
+`test_oauth.sh`. All three confirmed by `git log --all --` to have
+**zero commits touching them** — never committed, never push-able.
+These are operator-local development artifacts, not repo-history
+exposure. detect-secrets additionally flagged ~40 entries under
+`graphify-out/cache/ast/*.json` and `graphify-out/graph.json`; the
+entire `graphify-out/` tree is gitignored (confirmed via
+`git check-ignore`). Operator-local responsibility.
+
+**`git secrets --scan-history` with AWS patterns: clean** (zero
+findings, exit `0`).
+
+**Disposition.**
+
+- **Rotations performed:** none. No real credentials were ever
+  committed.
+- **Baseline updates:** none. The existing `.secrets.baseline`
+  already covers the file's own hashed-entry self-flagging; the
+  remaining findings are all known-fake fixtures or SHA256(empty),
+  intentionally documented above rather than suppressed in the
+  baseline so that *why* they're acceptable is recoverable by a
+  future auditor without spelunking commit history. The "no
+  drive-by baseline updates" stance matches the project's
+  hand-curated-docs convention.
+- **History rewrite:** **not performed** (per D5). No history blob
+  contains material that warrants the irreversible cost and
+  remote-rebase burden of a rewrite.
+- **Tooling state:** `git-secrets` installed locally for the audit;
+  the project's CI does not currently invoke it. `detect-secrets`
+  remains the pre-commit hook (`.pre-commit-config.yaml:29-32`,
+  observed in Phase 1).
+
+**Audit pass status: CLEAN.** Phase 9.13's exit criterion ("repo
+history contains no rotatable real secret") is met. The repo is
+secrets-clean for the Phase 9.15 public flip.
+
+**Scope notes for future auditors.**
+
+- Re-run this exact sequence before each subsequent public-affecting
+  change (Phase 9.15 itself, any module-path rewrite that touches
+  every file, any merge of a long-running fork).
+- If `.secrets.baseline` is ever rotated to a different schema, the 7
+  scanner-meta hits will move with it; that's expected.
+- The historical `5e91f82185` server_e2e_test.go state is preserved
+  as-is because rewriting history to swap `valid-key-123` for a
+  different fake string would invalidate every downstream commit SHA
+  for zero security gain — the string was never a real credential
+  and the file no longer carries it at HEAD.
+
+Audit run at `0926633`; tooling versions: `detect-secrets 1.5.0`,
+`gitleaks` (Homebrew current), `git-secrets 1.3.0`.
