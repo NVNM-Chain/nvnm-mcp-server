@@ -115,6 +115,11 @@ func NewMCPMiddleware(metrics *Metrics, logger *slog.Logger) mcp.Middleware {
 
 // extractToolName attempts to pull the tool name from the request params.
 // For tools/call, the concrete params type is *CallToolParamsRaw which has a Name field.
+//
+// DUPLICATION: the tools/call branch mirrors internal/mcp.ToolNameFromRequest
+// verbatim. Keep them in sync. A full DRY refactor is blocked by an import
+// cycle (internal/mcp already imports internal/telemetry); see the note on
+// the mcp-side function for the trade-off analysis.
 func extractToolName(method string, req mcp.Request) string {
 	if method != "tools/call" {
 		return method

@@ -34,7 +34,7 @@ var ErrAuthRequired = errors.New("authentication required")
 // then requires auth by default).
 //
 // Never add a tool literally named "unknown" to this map. That string is
-// the fail-closed sentinel returned by toolNameFromRequest when a tool
+// the fail-closed sentinel returned by ToolNameFromRequest when a tool
 // name cannot be extracted; it must remain auth-required.
 var authExemptTools = map[string]bool{
 	"evm_get_balance":             true,
@@ -77,7 +77,7 @@ func NewAuthEnforcementMiddleware(keylessEnabled bool, logger *slog.Logger) mcp.
 			if !keylessEnabled || method != "tools/call" {
 				return next(ctx, method, req)
 			}
-			tool := toolNameFromRequest(req)
+			tool := ToolNameFromRequest(req)
 			if RequiresAuth(tool) && auth.ClaimsFromContext(ctx) == nil {
 				logger.Warn("rejected anonymous call to auth-required tool",
 					slog.String("tool", tool),
@@ -89,11 +89,20 @@ func NewAuthEnforcementMiddleware(keylessEnabled bool, logger *slog.Logger) mcp.
 	}
 }
 
-// toolNameFromRequest extracts the tool name from a tools/call request,
-// mirroring the extraction in internal/telemetry/middleware.go. Returns
-// "unknown" when the name cannot be determined — which RequiresAuth
-// treats as auth-required (fail closed).
-func toolNameFromRequest(req mcp.Request) string {
+// ToolNameFromRequest extracts the tool name from an MCP request whose
+// method is "tools/call". Returns "unknown" when the name cannot be
+// determined; RequiresAuth treats "unknown" as auth-required (fail
+// closed). Callers that operate on non-tools/call methods should
+// short-circuit before calling this.
+//
+// DUPLICATION: this body is mirrored in internal/telemetry.extractToolName.
+// Keep them in sync. A full DRY refactor is blocked today by an import
+// cycle (internal/mcp already imports internal/telemetry via resilient.go),
+// so hosting the helper in either package creates either the cycle or an
+// inverted conceptual layering. Both options were worse than this
+// intentional duplication; revisit if the mcp -> telemetry edge in
+// resilient.go is ever removed.
+func ToolNameFromRequest(req mcp.Request) string {
 	type hasName interface{ GetName() string }
 	if p, ok := req.GetParams().(hasName); ok {
 		return p.GetName()
