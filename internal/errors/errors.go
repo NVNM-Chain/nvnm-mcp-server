@@ -40,6 +40,7 @@ var (
 	ErrWriteDeclined          = errors.New("transaction broadcast declined by user")
 	ErrElicitationUnsupported = errors.New("write approval required but client does not support elicitation")
 	ErrPermissionDenied       = errors.New("permission denied")
+	ErrAuthRequired           = errors.New("authentication required")
 )
 
 // Upstream errors.
@@ -107,6 +108,9 @@ func SafeForClient(err error) error {
 		return err
 	}
 	if errors.Is(err, ErrPermissionDenied) {
+		return err
+	}
+	if errors.Is(err, ErrAuthRequired) {
 		return err
 	}
 	if errors.Is(err, ErrCircuitOpen) {

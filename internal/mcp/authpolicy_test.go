@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
 )
 
 func TestRequiresAuth_ExemptReadTools(t *testing.T) {
@@ -81,7 +82,7 @@ func TestEnforcement_AnonReadToolAllowed(t *testing.T) {
 
 func TestEnforcement_AnonWriteToolRejected(t *testing.T) {
 	method, req := callToolReq("evm_send_raw_transaction")
-	if err := runEnforcement(t.Context(), t, true, method, req); !errors.Is(err, ErrAuthRequired) {
+	if err := runEnforcement(t.Context(), t, true, method, req); !errors.Is(err, apperrors.ErrAuthRequired) {
 		t.Errorf("anon write tool must be rejected with ErrAuthRequired; got err=%v", err)
 	}
 }
@@ -94,7 +95,7 @@ func TestEnforcement_UnrecognizedToolFailsClosed(t *testing.T) {
 	req := &mcp.ServerRequest[*mcp.CallToolParamsRaw]{
 		Params: &mcp.CallToolParamsRaw{Name: ""},
 	}
-	if err := runEnforcement(t.Context(), t, true, "tools/call", req); !errors.Is(err, ErrAuthRequired) {
+	if err := runEnforcement(t.Context(), t, true, "tools/call", req); !errors.Is(err, apperrors.ErrAuthRequired) {
 		t.Errorf("unrecognized tool name must fail closed; got err=%v", err)
 	}
 }

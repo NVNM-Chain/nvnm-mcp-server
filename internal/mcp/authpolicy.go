@@ -5,18 +5,14 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
 )
-
-// ErrAuthRequired is returned by the auth-enforcement middleware when an
-// anonymous caller invokes a tool that is not in the keyless-exempt set.
-var ErrAuthRequired = errors.New("authentication required")
 
 // authExemptTools lists the tools that may run without authentication
 // when MCP_KEYLESS_READS is enabled. A tool's absence means it requires
@@ -82,7 +78,7 @@ func NewAuthEnforcementMiddleware(keylessEnabled bool, logger *slog.Logger) mcp.
 				logger.Warn("rejected anonymous call to auth-required tool",
 					slog.String("tool", tool),
 				)
-				return nil, fmt.Errorf("%w: tool %q", ErrAuthRequired, tool)
+				return nil, fmt.Errorf("%w: tool %q", apperrors.ErrAuthRequired, tool)
 			}
 			return next(ctx, method, req)
 		}

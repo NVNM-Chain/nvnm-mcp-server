@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -362,6 +363,19 @@ func TestSafeForClient_PassesThroughApprovalErrors(t *testing.T) {
 		if !errors.Is(safe, sentinel) {
 			t.Errorf("SafeForClient(%v) = %v, want original sentinel", sentinel, safe)
 		}
+	}
+}
+
+// TestSafeForClient_PassesThroughAuthRequired locks the contract that an
+// anonymous caller hitting an auth-gated tool sees "authentication required"
+// at the client boundary, not the generic upstream-fail sentinel. Without
+// this passthrough, the enforcement-middleware rejection would be sanitized
+// into a misleading "service temporarily unavailable" reply.
+func TestSafeForClient_PassesThroughAuthRequired(t *testing.T) {
+	wrapped := fmt.Errorf("%w: tool %q", apperrors.ErrAuthRequired, "evm_send_raw_transaction")
+	safe := apperrors.SafeForClient(wrapped)
+	if !errors.Is(safe, apperrors.ErrAuthRequired) {
+		t.Errorf("SafeForClient(%v) = %v, want ErrAuthRequired in chain", wrapped, safe)
 	}
 }
 
