@@ -240,7 +240,15 @@ func needsWalletSamples() []sampleCode {
 		{
 			Language: "python",
 			Title:    "Generate an EVM wallet and store the key via the `keyring` library",
-			Code: `# pip install eth-account keyring
+			Code: `# Recent Linux distros mark system Python as PEP 668 externally-
+# managed, so "pip install" outside a venv errors with
+# "error: externally-managed-environment" unless --break-system-packages
+# is passed. The supported path is a per-project venv:
+#
+#   python3 -m venv .venv
+#   source .venv/bin/activate    # Windows: .venv\Scripts\activate
+#   pip install eth-account keyring
+#
 from eth_account import Account
 import keyring
 
