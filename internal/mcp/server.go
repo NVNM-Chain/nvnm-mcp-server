@@ -165,6 +165,7 @@ func (s *Server) RunHTTP(
 	addr string,
 	validator auth.TokenValidator,
 	limiter *ClientRateLimiter,
+	anonLimiter *AnonReadRateLimiter,
 	failLimiter *IPFailRateLimiter,
 	allowedOrigins *OriginAllowlist,
 ) error {
@@ -176,7 +177,9 @@ func (s *Server) RunHTTP(
 		slog.String("transport", "http"),
 		slog.String("addr", addr),
 		slog.Bool("auth_required", validator != nil),
+		slog.Bool("keyless_reads", s.keylessReads),
 		slog.Bool("rate_limiting", limiter != nil),
+		slog.Bool("anon_rate_limiting", anonLimiter != nil),
 		slog.Bool("fail_rate_limiting", failLimiter != nil),
 		slog.Any("allowed_origins", allowedOrigins.Resolved()),
 	)
@@ -190,12 +193,20 @@ func (s *Server) RunHTTP(
 	//   originGuard          → cheap string lookup, DNS-rebinding defense
 	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
 	//   limitRequestBody     → cap body before any parser sees it
-	//   AuthMiddleware       → validates bearer; penalizes failLimiter on miss
-	//   ClientRateLimiter    → per-client bucket, requires identity from Auth
+	//   AuthMiddleware       → validates bearer (penalizes failLimiter on miss);
+	//                          under keyless mode admits anonymous when the
+	//                          Authorization header is absent
+	//   AnonReadRateLimiter  → per-IP throttle for anonymous traffic; bypasses
+	//                          authed requests (they pay ClientRateLimiter)
+	//   ClientRateLimiter    → per-client bucket; requires identity from Auth,
+	//                          passes anonymous through
 	//   mcpHandler           → MCP SDK
 	var inner http.Handler = mcpHandler
 	if limiter != nil {
-		inner = limiter.Middleware(mcpHandler, s.logger)
+		inner = limiter.Middleware(inner, s.logger)
+	}
+	if anonLimiter != nil {
+		inner = anonLimiter.Middleware(inner, s.logger)
 	}
 	authed := AuthMiddleware(inner, validator, failLimiter, s.keylessReads, s.logger)
 	bodyLimited := limitRequestBody(authed)

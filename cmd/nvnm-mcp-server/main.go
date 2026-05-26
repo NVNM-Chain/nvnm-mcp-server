@@ -156,30 +156,16 @@ func run() error {
 		defer adminShutdown()
 	}
 
-	// --- Per-client MCP rate limiter (HTTP only) ---
-	var mcpLimiter *mcpserver.ClientRateLimiter
-	var failLimiter *mcpserver.IPFailRateLimiter
+	// --- Per-client / anonymous / fail-rate limiters (HTTP only) ---
+	var (
+		mcpLimiter  *mcpserver.ClientRateLimiter
+		anonLimiter *mcpserver.AnonReadRateLimiter
+		failLimiter *mcpserver.IPFailRateLimiter
+	)
 	if cfg.Transport == "http" {
-		mcpLimiter = mcpserver.NewClientRateLimiter(cfg.MCPRateLimit, cfg.MCPRateBurst)
-		mcpLimiter.Start()
-		defer mcpLimiter.Stop()
-		logger.Info("MCP per-client rate limiter enabled",
-			slog.Float64("rps", cfg.MCPRateLimit),
-			slog.Int("burst", cfg.MCPRateBurst),
-		)
-
-		failLimiter = mcpserver.NewIPFailRateLimiter(
-			mcpserver.DefaultFailRatePerSec,
-			mcpserver.DefaultFailBurst,
-			cfg.TrustProxyHeaders,
-		)
-		failLimiter.Start()
-		defer failLimiter.Stop()
-		logger.Info("MCP pre-auth IP failure-rate limiter enabled",
-			slog.Float64("rps", mcpserver.DefaultFailRatePerSec),
-			slog.Int("burst", mcpserver.DefaultFailBurst),
-			slog.Bool("trust_proxy_headers", cfg.TrustProxyHeaders),
-		)
+		var stopLimiters func()
+		mcpLimiter, anonLimiter, failLimiter, stopLimiters = newHTTPLimiters(cfg, logger)
+		defer stopLimiters()
 	}
 
 	// --- MCP Server ---
@@ -197,11 +183,69 @@ func run() error {
 	case "stdio":
 		return srv.RunStdio(ctx)
 	case "http":
-		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter, failLimiter, buildOriginAllowlist(cfg))
+		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter, anonLimiter, failLimiter, buildOriginAllowlist(cfg))
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
 			cfg.Transport, config.ErrInvalidTransport)
 	}
+}
+
+// newHTTPLimiters constructs the three HTTP-transport limiters
+// (per-client, anonymous per-IP, pre-auth IP failure rate) and returns
+// a single stop function that drains all three on shutdown. Extracted
+// from run() so the cyclomatic-complexity budget there is not consumed
+// by limiter wiring.
+//
+// All three constructors are infallible today, so the helper returns no
+// error. If a future limiter gains a fallible Start, this signature must
+// change to (..., error) AND the caller must take ownership of stopping
+// any already-started limiter on the failure path -- the current
+// implementation would leak janitor goroutines.
+func newHTTPLimiters(cfg *config.Config, logger *slog.Logger) (
+	*mcpserver.ClientRateLimiter,
+	*mcpserver.AnonReadRateLimiter,
+	*mcpserver.IPFailRateLimiter,
+	func(),
+) {
+	mcpLimiter := mcpserver.NewClientRateLimiter(cfg.MCPRateLimit, cfg.MCPRateBurst)
+	mcpLimiter.Start()
+	logger.Info("MCP per-client rate limiter enabled",
+		slog.Float64("rps", cfg.MCPRateLimit),
+		slog.Int("burst", cfg.MCPRateBurst),
+	)
+
+	// The anon limiter is built unconditionally so request-path checks
+	// stay branch-free. When KeylessReads is off, AuthMiddleware rejects
+	// anonymous traffic upstream and the limiter never sees a request;
+	// the goroutine is idle but observable in the startup log below.
+	anonLimiter := mcpserver.NewAnonReadRateLimiter(
+		cfg.AnonRateLimit, cfg.AnonRateBurst, cfg.TrustProxyHeaders,
+	)
+	anonLimiter.Start()
+	logger.Info("MCP anonymous per-IP read limiter started",
+		slog.Float64("anon_rps", cfg.AnonRateLimit),
+		slog.Int("anon_burst", cfg.AnonRateBurst),
+		slog.Bool("keyless_reads", cfg.KeylessReads),
+	)
+
+	failLimiter := mcpserver.NewIPFailRateLimiter(
+		mcpserver.DefaultFailRatePerSec,
+		mcpserver.DefaultFailBurst,
+		cfg.TrustProxyHeaders,
+	)
+	failLimiter.Start()
+	logger.Info("MCP pre-auth IP failure-rate limiter enabled",
+		slog.Float64("rps", mcpserver.DefaultFailRatePerSec),
+		slog.Int("burst", mcpserver.DefaultFailBurst),
+		slog.Bool("trust_proxy_headers", cfg.TrustProxyHeaders),
+	)
+
+	stop := func() {
+		mcpLimiter.Stop()
+		anonLimiter.Stop()
+		failLimiter.Stop()
+	}
+	return mcpLimiter, anonLimiter, failLimiter, stop
 }
 
 // buildOriginAllowlist returns the Origin allowlist for the HTTP
