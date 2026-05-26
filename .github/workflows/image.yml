@@ -1,0 +1,108 @@
+name: Image
+
+# Builds multi-arch (linux/amd64 + linux/arm64) container images and
+# signs them keyless via Cosign / Sigstore. Tags follow docker/metadata
+# convention: branch refs (`:main`), short SHA (`:sha-<7>`), semver from
+# Git tags (`:v1.2.3`, `:1.2`, `:1`). Pull requests build but do NOT
+# push, so a Dockerfile regression fails the PR before it can land.
+#
+# Registry: GHCR (chosen 2026-05-18, Phase 9 OSS decision). The repo's
+# default GITHUB_TOKEN scopes packages:write so no PAT is required.
+#
+# Phase 9.7. Companion to the existing release.yml which signs binaries.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write   # push to ghcr.io
+  id-token: write   # Cosign keyless OIDC
+
+env:
+  REGISTRY: ghcr.io
+  # Image namespace tracks the current GitHub org. Updated at repo
+  # transfer time (Phase 9.14); the Dockerfile itself is path-agnostic.
+  IMAGE_NAME: inveniamcapital/nvnm-mcp-server
+
+jobs:
+  image:
+    name: Build & sign multi-arch image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        # QEMU emulates the non-native arch (arm64 on amd64 runners) so
+        # buildx can produce both platform artifacts from one runner.
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Login to GHCR
+        # Skip on pull_request: we build to verify, but never push from
+        # an untrusted PR head. Forks would not have packages:write
+        # anyway, so this also keeps the workflow green for outside
+        # contributors.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Buildx provenance + SBOM attestations are attached to the
+          # image manifest and surface in `docker buildx imagetools
+          # inspect`. They are the supply-chain layer above the Cosign
+          # signature.
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image manifest
+        # Sign the multi-arch manifest at its content-addressable digest.
+        # Each tag in steps.meta.outputs.tags resolves to the same
+        # digest for this build, so signing once is sufficient -- but
+        # we walk the tag list anyway so a verifier who knows only a
+        # tag (not the digest) can resolve through it.
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          for tag in $TAGS; do
+            echo "Signing ${tag}@${DIGEST}"
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
