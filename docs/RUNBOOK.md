@@ -340,6 +340,9 @@ raw ethclient → TracingClient → ResilientClient → (used by anchor + MCP ha
 | Timeouts | `REQUEST_TIMEOUT` | `15s` | Per-call context deadline on the ethclient |
 | Per-client MCP rate limit | `MCP_RATE_LIMIT` | `60` | Token-bucket cap on MCP requests per second per authenticated client. Returns HTTP `429 Too Many Requests` when exceeded. |
 | | `MCP_RATE_BURST` | `10` | Burst capacity per client. |
+| Keyless reads (HTTP only) | `MCP_KEYLESS_READS` | `false` | When `true`, read tools may be called without an `Authorization` header; write tools still require a valid Bearer token (enforced by an MCP receiving middleware that gates on a fail-closed registry — only `evm_send_raw_transaction` is auth-gated today). HTTP-only; under stdio transport the flag is ignored and a startup warning is logged. Anonymous calls leave `client_id` absent from logs and spans (not empty-string). See [`internal/mcp/authpolicy.go`](../internal/mcp/authpolicy.go) for the gated-tool registry. |
+| Per-IP anon read rate limit | `MCP_ANON_RATE_LIMIT` | `5` | Token-bucket rate (req/s) for **anonymous** reads, keyed by source IP. Authenticated traffic bypasses this limiter. **Operator-enforced invariant:** must be tighter than `MCP_RATE_LIMIT`; not validated at startup. |
+| | `MCP_ANON_RATE_BURST` | `5` | Burst capacity per source IP for anonymous reads. |
 | Upstream RPC retry | `RPC_MAX_RETRIES` | `3` | Maximum retry attempts for transient RPC errors |
 | | `RPC_INITIAL_BACKOFF` | `500ms` | Initial wait between retries |
 | | `RPC_MAX_BACKOFF` | `10s` | Maximum wait between retries |

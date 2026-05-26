@@ -35,10 +35,21 @@ the threat-model rationale.
 
 ## 2. Authentication credentials
 
-Every inbound MCP request must authenticate; there is no anonymous
-read path. The server supports two interchangeable providers, chosen
-at startup via the `AUTH_PROVIDER` environment variable (default
-`apikey`):
+By default every inbound MCP request must authenticate. When the
+operator sets `MCP_KEYLESS_READS=true` (HTTP transport only, Phase
+9.16), requests with **no** `Authorization` header are admitted
+anonymously and pass through a per-IP rate limiter
+(`MCP_ANON_RATE_LIMIT` / `MCP_ANON_RATE_BURST`); per-tool gating is
+then enforced fail-closed by an MCP receiving middleware against the
+exempt registry in [`internal/mcp/authpolicy.go`](../internal/mcp/authpolicy.go).
+The only auth-gated tool today is `evm_send_raw_transaction`; all
+other tools (anchor reads, EVM reads, onboarding helpers) are exempt.
+A present-but-invalid token is still rejected — only a fully absent
+header triggers anonymous admission. See § 6 / § 7 for the
+anonymous-traffic telemetry posture.
+
+The server supports two interchangeable providers, chosen at startup
+via the `AUTH_PROVIDER` environment variable (default `apikey`):
 
 - **`apikey`** — operator-managed Bearer tokens minted by the
   server's own admin REST API. The operator is the sole key issuer;
@@ -226,6 +237,17 @@ method, path); too-many-failures throttle decisions (remote_addr).
 **Logged at DEBUG only:** FusionAuth subject identifier (see §2.2
 caveat).
 
+**Anonymous reads (`MCP_KEYLESS_READS=true`):** the per-request
+INFO `tool call` log line has the `client_id` field **absent**
+(not empty-string), so structured-log queries cleanly distinguish
+"anonymous read" from "broken auth that nulled the field." Authed
+write traffic continues to emit `client_id`. The anonymous per-IP
+rate limiter logs `remote_addr` on 429 (and only on 429); successful
+anonymous reads are otherwise indistinguishable from authed reads in
+the log stream beyond the absent `client_id`. See the Phase 9.16
+design doc `docs/superpowers/specs/2026-05-21-keyless-read-auth-middleware-design.md`
+§6 for the full data-flow rationale.
+
 ## 7. Telemetry
 
 Optional. Enabled via `$OTEL_EXPORTER_OTLP_ENDPOINT` (OTLP gRPC),
@@ -251,8 +273,10 @@ No per-caller labels in metrics.
 
 ### 7.2 Span attributes
 
-`mcp.method`, `mcp.tool.name`, `mcp.request.id`, `mcp.client.id` (from
-`ClaimsFromContext`).
+`mcp.method`, `mcp.tool.name`, `mcp.request.id`, and `mcp.client.id`
+(from `ClaimsFromContext`). The `mcp.client.id` attribute is
+**omitted entirely** — not set to empty-string — on anonymous calls
+under `MCP_KEYLESS_READS=true`. Authed traffic carries it unchanged.
 
 Tool parameters and return values are **not** included in any metric or
 span.

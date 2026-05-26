@@ -9,6 +9,32 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.16 (keyless-read auth middleware split): split the HTTP auth
+chain so read tools can run anonymously while write tools keep their
+existing auth requirement. New env vars `MCP_KEYLESS_READS=false`
+(default), `MCP_ANON_RATE_LIMIT=5`, `MCP_ANON_RATE_BURST=5`
+(HTTP-only; stdio remains all-trusted). New components:
+`internal/mcp/authpolicy.go` introduces a fail-closed exempt-tool
+registry (20 read/prepare tools exempt; only
+`evm_send_raw_transaction` requires auth) plus an MCP receiving
+middleware that rejects anonymous calls to gated tools;
+`internal/mcp/anonrate.go` adds an `AnonReadRateLimiter` that throttles
+anonymous traffic per source IP and bypasses authed requests.
+`AuthMiddleware` now admits anonymous requests when the
+`Authorization` header is fully absent (a present-but-invalid token
+is still rejected). Telemetry omits `client_id` from logs and span
+attributes on anonymous calls (absent, not empty-string) so anonymous
+traffic carries no per-caller identifier. `apperrors.ErrAuthRequired`
+added alongside `ErrPermissionDenied` and passed through
+`SafeForClient` so the rejection reaches the MCP client with its
+identity intact. Documented in `.env.example`, `docs/RUNBOOK.md`
+env-var table, `docs/DATA_HANDLING.md` §§2/6/7.2. The Inveniam-hosted
+Draft B privacy policy can now publish honestly (its "no per-customer
+identifier on read traffic" commitment is enforced in code).
+End-to-end coverage in `internal/mcp/server_e2e_test.go`
+(`TestE2E_Keyless_*`). Backward-compatible: with the default
+`MCP_KEYLESS_READS=false`, behavior is identical to pre-9.16.
+
 Phase 9.2 (Issue + PR templates): added `.github/ISSUE_TEMPLATE/`
 (`bug_report.md`, `feature_request.md` with a thin-proxy / no-custody
 scope-fit checklist, `question.md` with a `docs/RUNBOOK.md` pre-flight)
