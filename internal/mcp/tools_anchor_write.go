@@ -9,9 +9,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
-	"github.com/inveniam/nvnm-mcp-server/internal/logging"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
 
 func registerAnchorWriteTools(

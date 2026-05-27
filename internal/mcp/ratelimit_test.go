@@ -10,7 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 func TestClientRateLimiter_AllowsUnderLimit(t *testing.T) {

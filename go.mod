@@ -1,4 +1,4 @@
-module github.com/inveniam/nvnm-mcp-server
+module github.com/NVNM-Chain/nvnm-mcp-server
 
 go 1.26.3
 

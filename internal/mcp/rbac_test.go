@@ -8,8 +8,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 func TestRequireRole_NilClaims_Passes(t *testing.T) {

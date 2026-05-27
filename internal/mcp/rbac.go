@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 // requireRole returns nil if the caller holds at least one of the given roles,

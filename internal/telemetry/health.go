@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/version"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/version"
 )
 
 const readinessCheckInterval = 30 * time.Second

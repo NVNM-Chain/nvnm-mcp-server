@@ -19,8 +19,8 @@ import (
 	gobreaker "github.com/sony/gobreaker/v2"
 	"golang.org/x/time/rate"
 
-	ierrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
-	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
+	ierrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 // ResilientConfig configures the resilience wrapper for the EVM client.

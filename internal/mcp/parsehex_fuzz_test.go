@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 // FuzzParseHexData verifies that parseHexData never panics and always

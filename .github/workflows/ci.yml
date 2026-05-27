@@ -49,7 +49,7 @@ jobs:
         run: |
           go install github.com/google/go-licenses@latest
           go-licenses check ./... \
-            --ignore github.com/inveniam/nvnm-mcp-server \
+            --ignore github.com/NVNM-Chain/nvnm-mcp-server \
             --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-2-Clause-FreeBSD,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0,0BSD,Zlib,EPL-2.0,CDDL-1.0
 
       - name: Vulnerability check

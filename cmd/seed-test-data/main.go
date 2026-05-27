@@ -15,9 +15,9 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	defiwallet "github.com/defiweb/go-eth/wallet"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
-	"github.com/inveniam/nvnm-mcp-server/internal/logging"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
 
 const (

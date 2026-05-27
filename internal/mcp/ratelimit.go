@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 // ClientRateLimiter enforces per-authenticated-client token-bucket rate

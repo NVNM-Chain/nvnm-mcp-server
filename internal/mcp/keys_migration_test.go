@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 // Phase 8.6 migration regression tests. The KeyEntry literals with

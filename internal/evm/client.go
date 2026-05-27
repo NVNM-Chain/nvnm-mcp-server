@@ -12,7 +12,7 @@ import (
 
 	defitypes "github.com/defiweb/go-eth/types"
 
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 // Client wraps defiweb/go-eth's JSON-RPC client and returns normalized

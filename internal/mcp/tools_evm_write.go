@@ -10,9 +10,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 func registerEVMWriteTools(

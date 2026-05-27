@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/config"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 )
 
 func discardLogger() *slog.Logger {

@@ -3,7 +3,7 @@
 
 package mcp
 
-import "github.com/inveniam/nvnm-mcp-server/internal/config"
+import "github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 
 // RuntimeInfo bundles the operator-config values surfaced by the
 // onboarding tools (lobby, wizard, wallet_status) and any tool that

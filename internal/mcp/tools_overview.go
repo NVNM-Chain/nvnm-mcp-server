@@ -8,7 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/config"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 )
 
 // nvnm_overview is the lobby tool an agent should call first. It

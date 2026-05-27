@@ -10,7 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 func newAnonTestHandler(l *AnonReadRateLimiter) http.Handler {

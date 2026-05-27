@@ -14,7 +14,7 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 // nvnm_setup_verify_hash and nvnm_setup_verify_signature are

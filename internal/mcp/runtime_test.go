@@ -6,7 +6,7 @@ package mcp
 import (
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/config"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 )
 
 func TestRuntimeInfoFromConfig_CopiesFields(t *testing.T) {

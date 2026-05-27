@@ -12,7 +12,7 @@ import (
 
 	defitypes "github.com/defiweb/go-eth/types"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/logging"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
 
 func TestApplyGasBuffer(t *testing.T) {

@@ -3,7 +3,7 @@
 
 package mcp
 
-import "github.com/inveniam/nvnm-mcp-server/internal/config"
+import "github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 
 // testServerConfig builds a minimal *config.Config suitable for
 // in-process server tests. Only the fields the tools actually read

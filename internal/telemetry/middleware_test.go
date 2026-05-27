@@ -13,7 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 func newTestMetrics(t *testing.T) *Metrics {

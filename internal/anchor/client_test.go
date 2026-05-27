@@ -13,8 +13,8 @@ import (
 
 	defitypes "github.com/defiweb/go-eth/types"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
-	"github.com/inveniam/nvnm-mcp-server/internal/logging"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
 
 // mockEVMClient implements evm.Client for testing without a live RPC.

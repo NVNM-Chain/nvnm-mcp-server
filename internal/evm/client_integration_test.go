@@ -16,8 +16,8 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
-	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 const (

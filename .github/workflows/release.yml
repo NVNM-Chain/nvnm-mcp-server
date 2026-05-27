@@ -46,7 +46,7 @@ jobs:
           BIN="dist/nvnm-mcp-server-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}"
           go build \
             -trimpath \
-            -ldflags "-s -w -X github.com/inveniam/nvnm-mcp-server/internal/version.Version=${{ steps.version.outputs.version }}" \
+            -ldflags "-s -w -X github.com/NVNM-Chain/nvnm-mcp-server/internal/version.Version=${{ steps.version.outputs.version }}" \
             -o "$BIN" \
             ./cmd/nvnm-mcp-server
           echo "bin=$BIN" >> "$GITHUB_ENV"

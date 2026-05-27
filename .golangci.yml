@@ -108,4 +108,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/inveniam/nvnm-mcp-server
+        - github.com/NVNM-Chain/nvnm-mcp-server

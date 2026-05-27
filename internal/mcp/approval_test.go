@@ -7,7 +7,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 func TestResolveWriteApproval(t *testing.T) {

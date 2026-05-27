@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 // AuthMiddleware wraps an http.Handler with Bearer token authentication

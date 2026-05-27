@@ -10,8 +10,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/config"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 // nvnm_setup_wizard is the prose-guided onboarding flow. It derives

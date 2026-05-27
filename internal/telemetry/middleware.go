@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

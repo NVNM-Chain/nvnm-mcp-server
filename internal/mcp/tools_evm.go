@@ -14,8 +14,8 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {

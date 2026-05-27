@@ -15,8 +15,8 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	defiwallet "github.com/defiweb/go-eth/wallet"
 
-	apperrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 // --- nvnm_overview ---

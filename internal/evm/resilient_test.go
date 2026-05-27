@@ -15,8 +15,8 @@ import (
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	ierrors "github.com/inveniam/nvnm-mcp-server/internal/errors"
-	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
+	ierrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 // failingClient wraps stubClient and fails the first failCount calls to ChainID

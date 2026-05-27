@@ -17,8 +17,8 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	defiwallet "github.com/defiweb/go-eth/wallet"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 // Phase 8.4 integration tests. Each test reads NVNM_TEST_PRIVATE_KEY

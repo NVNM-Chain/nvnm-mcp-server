@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	mcpkeys "github.com/inveniam/nvnm-mcp-server/internal/mcp"
+	mcpkeys "github.com/NVNM-Chain/nvnm-mcp-server/internal/mcp"
 )
 
 const defaultKeysFile = ".mcp-keys.json"

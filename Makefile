@@ -156,7 +156,7 @@ test-load:
 
 format:
 	gofmt -w .
-	goimports -w -local github.com/inveniam/nvnm-mcp-server .
+	goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server .
 
 vet:
 	$(GO) vet ./...

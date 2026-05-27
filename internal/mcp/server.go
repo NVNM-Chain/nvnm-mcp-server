@@ -13,11 +13,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
-	"github.com/inveniam/nvnm-mcp-server/internal/auth"
-	"github.com/inveniam/nvnm-mcp-server/internal/config"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
-	"github.com/inveniam/nvnm-mcp-server/internal/version"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/version"
 )
 
 const serverName = "nvnm-chain"

@@ -11,7 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/version"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/version"
 )
 
 type mockChecker struct {

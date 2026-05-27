@@ -14,10 +14,10 @@ import (
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
-	"github.com/inveniam/nvnm-mcp-server/internal/logging"
-	"github.com/inveniam/nvnm-mcp-server/internal/telemetry"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 const (

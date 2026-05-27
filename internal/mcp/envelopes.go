@@ -4,8 +4,8 @@
 package mcp
 
 import (
-	"github.com/inveniam/nvnm-mcp-server/internal/anchor"
-	"github.com/inveniam/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 // Per-tool envelope structs that embed the underlying response type and
