@@ -149,12 +149,33 @@ jobs:
             echo '```'
           } >> "$NOTES_FILE"
 
-      - name: Create GitHub Release
+      # Two-step pattern (draft -> publish) required by GitHub's
+      # "immutable releases" feature: once a release is published on
+      # an immutable-releases repo, no further asset uploads are
+      # allowed. action-gh-release@v3's default behavior is to
+      # publish first and then upload, which fails: zero assets land
+      # on the release. The first push of v1.0.0-rc.3 (2026-05-27)
+      # surfaced this bug. Fix per the action's own annotation:
+      #   1. Create the release as a draft with all assets attached
+      #      (asset uploads succeed because the release isn't yet
+      #      published).
+      #   2. Flip the draft to published via `gh release edit
+      #      --draft=false` as a follow-up step.
+      - name: Create GitHub Release (draft, with assets attached)
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body_path: release-notes.md
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+          draft: true
           files: release-assets/*
           fail_on_unmatched_files: true
+
+      - name: Publish release (flip draft to published)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --draft=false \
+            --repo "${{ github.repository }}"
