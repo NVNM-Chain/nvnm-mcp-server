@@ -2,18 +2,18 @@
 blank_issues_enabled: false
 contact_links:
   - name: 🔒 Report a security vulnerability
-    url: https://github.com/inveniamcapital/NVNM_MCP_Server/security/policy
+    url: https://github.com/NVNM-Chain/nvnm-mcp-server/security/policy
     about: >-
       Do NOT open a public issue for security problems. Use GitHub's private
       "Report a vulnerability" flow (see SECURITY.md) so reports stay private
       until coordinated disclosure.
   - name: 💬 Questions & discussion
-    url: https://github.com/inveniamcapital/NVNM_MCP_Server/discussions
+    url: https://github.com/NVNM-Chain/nvnm-mcp-server/discussions
     about: >-
       Usage questions, ideas, and general discussion are usually answered
       faster here than in the issue tracker.
   - name: 📖 Documentation
-    url: https://github.com/inveniamcapital/NVNM_MCP_Server/tree/main/docs
+    url: https://github.com/NVNM-Chain/nvnm-mcp-server/tree/main/docs
     about: >-
       Check docs/RUNBOOK.md (operations) and the README (quickstart) before
       filing — they answer most setup questions.

@@ -143,7 +143,7 @@ jobs:
             echo "cosign verify-blob \\"
             echo "  --certificate nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.cert.pem \\"
             echo "  --signature nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>.sig \\"
-            echo "  --certificate-identity-regexp 'https://github.com/inveniamcapital/NVNM_MCP_Server/.*' \\"
+            echo "  --certificate-identity-regexp 'https://github.com/NVNM-Chain/nvnm-mcp-server/.*' \\"
             echo "  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \\"
             echo "  nvnm-mcp-server-${GITHUB_REF_NAME}-<os>-<arch>"
             echo '```'

@@ -27,7 +27,7 @@ env:
   REGISTRY: ghcr.io
   # Image namespace tracks the current GitHub org. Updated at repo
   # transfer time (Phase 9.14); the Dockerfile itself is path-agnostic.
-  IMAGE_NAME: inveniamcapital/nvnm-mcp-server
+  IMAGE_NAME: nvnm-chain/nvnm-mcp-server
 
 jobs:
   image:

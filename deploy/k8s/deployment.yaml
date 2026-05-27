@@ -29,12 +29,12 @@ spec:
           # mutable tag; a registry-side overwrite or supply-chain push
           # silently propagates on every pod restart. Generate the
           # digest from the signed release image and substitute below:
-          #   image: ghcr.io/inveniamcapital/nvnm-mcp-server@sha256:<digest>
+          #   image: ghcr.io/nvnm-chain/nvnm-mcp-server@sha256:<digest>
           # The Dockerfile already digest-pins both base images; the
           # deployment is the missing link in the chain. CI does not
           # yet push a digest-stable image, so :latest is left here
           # explicitly as a TODO for the release pipeline (#image-pin).
-          image: ghcr.io/inveniamcapital/nvnm-mcp-server:latest
+          image: ghcr.io/nvnm-chain/nvnm-mcp-server:latest
           imagePullPolicy: IfNotPresent
           args:
             - "--transport"

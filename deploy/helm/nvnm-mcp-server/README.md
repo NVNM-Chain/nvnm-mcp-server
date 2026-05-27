@@ -1,6 +1,6 @@
 # NVNM Chain MCP Server — Helm chart
 
-Deploys the [NVNM Chain MCP Server](https://github.com/inveniamcapital/NVNM_MCP_Server) on Kubernetes. Hand-curated; matches `Chart.yaml` version `0.2.0`.
+Deploys the [NVNM Chain MCP Server](https://github.com/NVNM-Chain/nvnm-mcp-server) on Kubernetes. Hand-curated; matches `Chart.yaml` version `0.2.0`.
 
 ## What this chart deploys
 
@@ -26,7 +26,7 @@ These pin the server's chain at startup. Operators **must** set them; the server
 | `env.NVNM_EVM_RPC_URL` | `https://evm.testnet.nvnmchain.io` (testnet) or `https://evm.nvnmchain.io` (mainnet) |
 | `env.NVNM_CHAIN_ID` | `787111` (testnet) or `1611` (mainnet) |
 | `env.NVNM_CHAIN_ENVIRONMENT` | `testnet` or `mainnet` |
-| `image.repository` | `ghcr.io/inveniamcapital/nvnm-mcp-server` |
+| `image.repository` | `ghcr.io/nvnm-chain/nvnm-mcp-server` |
 | `image.tag` | Matches a released artifact tag |
 
 ## Mainnet vs testnet

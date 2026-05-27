@@ -35,7 +35,7 @@ spec:
           annotations:
             summary: "Inveniam MCP server tool error ratio is elevated"
             description: "The ratio of tool errors to tool calls has exceeded 5% for 5 minutes (current value: {{ $value | humanizePercentage }})."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-error-rate"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-error-rate"
 
         - alert: NvnmMCPCriticalErrorRate
           expr: |
@@ -51,7 +51,7 @@ spec:
           annotations:
             summary: "Inveniam MCP server tool error ratio is critically high"
             description: "The ratio of tool errors to tool calls has exceeded 15% for 5 minutes (current value: {{ $value | humanizePercentage }})."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-critical-error-rate"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-critical-error-rate"
 
         - alert: NvnmMCPHighP99Latency
           expr: |
@@ -66,7 +66,7 @@ spec:
           annotations:
             summary: "Inveniam MCP server tool p99 latency exceeds 5s"
             description: "The 99th percentile of mcp_server_tool_duration_milliseconds has been above 5000ms for 5 minutes (current value: {{ $value }}ms)."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-p99-latency"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-p99-latency"
 
         - alert: NvnmMCPHealthCheckFailing
           expr: up{job="nvnm-mcp-server"} == 0
@@ -77,7 +77,7 @@ spec:
           annotations:
             summary: "Inveniam MCP server scrape target is down"
             description: "Prometheus cannot scrape the nvnm-mcp-server job (up == 0) for 2 minutes. Verify pods, Service, ServiceMonitor scrape config, and metrics port. Health probes: /healthz and /readyz on port 9090."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-health-check-failing"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-health-check-failing"
 
         - alert: NvnmMCPCircuitBreakerOpen
           expr: max(evm_rpc_circuit_breaker_state) == 2
@@ -88,7 +88,7 @@ spec:
           annotations:
             summary: "Inveniam MCP server EVM RPC circuit breaker is open"
             description: "evm_rpc_circuit_breaker_state is 2 (open) for at least 1 minute. RPC calls are failing fast; investigate upstream EVM availability and backoff settings."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-circuit-breaker-open"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-circuit-breaker-open"
 
         - alert: NvnmMCPHighRetryRate
           expr: |
@@ -104,7 +104,7 @@ spec:
           annotations:
             summary: "Inveniam MCP server EVM RPC retry rate is high vs tool calls"
             description: "The ratio of EVM RPC retries to MCP tool calls has exceeded 20% for 5 minutes (current value: {{ $value | humanizePercentage }})."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-retry-rate"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-high-retry-rate"
 
         - alert: NvnmMCPRateLimiting
           expr: sum(rate(evm_rpc_rate_limited_total[5m])) > 0
@@ -115,4 +115,4 @@ spec:
           annotations:
             summary: "Inveniam MCP server is being EVM RPC rate limited"
             description: "evm_rpc_rate_limited_total is increasing over 5 minutes. Reduce request volume or raise RPC quota/limits with the provider."
-            runbook_url: "https://github.com/inveniam/NVNM_mcp_server/blob/main/docs/RUNBOOK.md#inveniam-mcp-rate-limiting"
+            runbook_url: "https://github.com/NVNM-Chain/nvnm-mcp-server/blob/main/docs/RUNBOOK.md#inveniam-mcp-rate-limiting"

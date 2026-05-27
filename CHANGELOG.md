@@ -9,6 +9,40 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Phase 9.14 (repo move + module-path rewrite): canonical home moved
+from `inveniamcapital/NVNM_MCP_Server` (mixed-case placeholder org)
+to `NVNM-Chain/nvnm-mcp-server` (lowercase-hyphen, matches the
+destination org). Go module path rewritten from the vanity
+placeholder `github.com/inveniam/nvnm-mcp-server` (which never
+resolved to a real GitHub org) to
+`github.com/NVNM-Chain/nvnm-mcp-server` (externally resolvable for
+the first time). 112 occurrences across 60 files: 54 Go imports +
+build/lint tooling (`.golangci.yml` local-prefixes, `Makefile`
+goimports `-local`, `ci.yml` govulncheck `--ignore`, `release.yml`
+ldflags `-X` target). Container image namespace moved from
+`ghcr.io/inveniamcapital/nvnm-mcp-server` to
+`ghcr.io/nvnm-chain/nvnm-mcp-server` (`Image` workflow `IMAGE_NAME`,
+Helm `values.yaml`, k8s `deployment.yaml`, Helm chart README,
+Phase 10 design doc, marketing brief, Privacy Policy publisher
+identity table). Cosign cert-identity verification regex in release
+notes updated to the new GitHub URL; prior releases
+(`v1.0.0-rc.1`, `v1.0.0-rc.2`) retain their original release-page
+links to `inveniamcapital/NVNM_MCP_Server` since the signed binary
+assets and Cosign certificates were published under that identity.
+Helm chart version 0.2.0 → 0.2.1 (rendered Deployment image
+repository differs). Approach: fresh push to a Mantra-team-prepared
+empty repo (full git history mirrored, `v1.0.0-rc.1` tag preserved),
+not a GitHub repo transfer; no downstream consumers existed at the
+old vanity Go path. In passing, 7 broken Prometheus `runbook_url`
+entries pointing at `github.com/inveniam/NVNM_mcp_server` (which had
+neither a valid org nor valid repo casing) were repaired to the new
+home. Five operator-facing runtime-identifier cleanups (k8s
+namespace `inveniam-mcp`, secret mount path
+`/var/run/secrets/inveniam`, `app.kubernetes.io/part-of` label,
+networkpolicy comment hygiene, marketing brand-positioning audit)
+deferred to the Backlog Outstanding table for their own
+operator-facing migration window.
+
 Phase 9.7 (multi-arch container image + Cosign keyless signing):
 added `.github/workflows/image.yml` building `linux/amd64` +
 `linux/arm64` container images via Docker buildx (QEMU
@@ -994,6 +1028,6 @@ typed JSON with `snake_case` field names.
   script must be extended.
 - Self-serve API key request workflow is on the backlog (Medium priority).
 
-[Unreleased]: https://github.com/inveniamcapital/NVNM_MCP_Server/compare/v1.0.0-rc.2...HEAD
+[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc.2...HEAD
 [1.0.0-rc.2]: https://github.com/inveniamcapital/NVNM_MCP_Server/releases/tag/v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/inveniamcapital/NVNM_MCP_Server/releases/tag/v1.0.0-rc.1

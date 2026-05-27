@@ -195,8 +195,8 @@ import (
     "github.com/modelcontextprotocol/go-sdk/mcp"
 
     // Local
-    "github.com/inveniamcapital/nvnm-mcp-server/internal/anchor"
-    "github.com/inveniamcapital/nvnm-mcp-server/internal/evm"
+    "github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+    "github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 ```
 
