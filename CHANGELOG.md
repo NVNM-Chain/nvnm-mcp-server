@@ -9,6 +9,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_No unreleased changes since v1.0.0-rc.3._
+
+## [1.0.0-rc.3] - 2026-05-27
+
+First signed release from the `NVNM-Chain/nvnm-mcp-server` home,
+validating the Phase 9.14 Cosign cert-identity path end-to-end. Helm
+chart bumps 0.2.1 → 0.2.2 to track the new image-tag default. Bundles
+all the work in the Unreleased section below (Phase 9.4 DCO workflow,
+Phase 9.7 multi-arch image + Cosign signing, Phase 9.14 repo move +
+module-path rewrite, Phase 9.16 keyless-read middleware split, plus
+the 2026-05-27 OQ-walkthrough resolutions baked into the design docs).
+
+### Detail
+
 Phase 9.14 (repo move + module-path rewrite): canonical home moved
 from `inveniamcapital/NVNM_MCP_Server` (mixed-case placeholder org)
 to `NVNM-Chain/nvnm-mcp-server` (lowercase-hyphen, matches the
@@ -1028,6 +1042,7 @@ typed JSON with `snake_case` field names.
   script must be extended.
 - Self-serve API key request workflow is on the backlog (Medium priority).
 
-[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc.2...HEAD
+[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc.3...HEAD
+[1.0.0-rc.3]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/inveniamcapital/NVNM_MCP_Server/releases/tag/v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/inveniamcapital/NVNM_MCP_Server/releases/tag/v1.0.0-rc.1

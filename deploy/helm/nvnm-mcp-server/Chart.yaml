@@ -2,16 +2,14 @@ apiVersion: v2
 name: nvnm-mcp-server
 description: Helm chart for the NVNM Chain MCP Server
 type: application
-# Chart version. Bumped to 0.2.1 in Phase 9.14 (image repository
-# changed from ghcr.io/inveniamcapital/nvnm-mcp-server to
-# ghcr.io/nvnm-chain/nvnm-mcp-server after the repo move); rendered
-# Deployment differs, so chart version bumps. Bump independently of
+# Chart version. Bumped to 0.2.2 alongside appVersion 1.0.0-rc.3
+# (first signed release from NVNM-Chain home, validating the Phase
+# 9.14 Cosign cert-identity path end-to-end). Bump independently of
 # appVersion when chart templates / values change in a way that
-# affects rendered output.
-version: 0.2.1
+# affects rendered output -- the default image tag changing counts.
+version: 0.2.2
 # App version (image tag the chart pulls by default). Tracks
 # internal/version/version.go (the canonical app version) and is
-# bumped on each release alongside it. Phase 9.7's multi-arch image
-# publishing makes this tag pull a Cosign-signed manifest from
-# ghcr.io/nvnm-chain/nvnm-mcp-server.
-appVersion: "1.0.0-rc.1"
+# bumped on each release alongside it. Pulls a Cosign-signed manifest
+# from ghcr.io/nvnm-chain/nvnm-mcp-server.
+appVersion: "1.0.0-rc.3"
