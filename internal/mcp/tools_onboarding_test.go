@@ -285,6 +285,7 @@ func TestVerifySignature_MalformedSignatureRejected(t *testing.T) {
 func TestWizard_NoAddressReturnsNeedsWalletWithSamples(t *testing.T) {
 	cfg := testServerConfig(false, ApprovalRequired)
 	cfg.BridgeURL = "https://bridge.example"
+	cfg.WalletGeneratorURL = "https://wallet.example"
 	h := makeSetupWizardHandler(&mockEVM{}, cfg)
 	_, out, err := h(context.Background(), nil, setupWizardInput{})
 	if err != nil {
@@ -295,6 +296,15 @@ func TestWizard_NoAddressReturnsNeedsWalletWithSamples(t *testing.T) {
 	}
 	if len(out.SampleCode) == 0 {
 		t.Error("needs_wallet state should include sample code")
+	}
+	// Phase 11 D-L8-2: needs_wallet response must surface the
+	// browser-hosted wallet generator URL alongside the snippet flow.
+	if out.WalletGeneratorURL != cfg.WalletGeneratorURL {
+		t.Errorf("WalletGeneratorURL = %q, want %q",
+			out.WalletGeneratorURL, cfg.WalletGeneratorURL)
+	}
+	if !strings.Contains(out.Message, "wallet_generator_url") {
+		t.Errorf("needs_wallet message should mention wallet_generator_url; got: %q", out.Message)
 	}
 	// Critical safety property: each sample must demonstrate storing
 	// the private key via a real secrets mechanism, not via stdout.

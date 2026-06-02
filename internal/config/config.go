@@ -132,6 +132,13 @@ type Config struct {
 	ExplorerURL string
 	BridgeURL   string
 
+	// WalletGeneratorURL points the setup wizard's needs_wallet response
+	// at the browser-hosted wallet generator page (a sibling repo at
+	// NVNM-Chain/nvnm-wallet-page; canonical URL https://wallet.nvnmchain.io).
+	// Operators self-hosting the wallet page can override; the default
+	// is the canonical Inveniam-hosted instance. Phase 11 D-L8-2.
+	WalletGeneratorURL string
+
 	// AllowedOrigins is the comma-separated NVNM_ALLOWED_ORIGINS list
 	// parsed into a slice. Empty -> the server falls back to a
 	// localhost-only default suitable for local development. Production
@@ -268,6 +275,7 @@ func Load() (*Config, error) {
 	cfg.DocsURL = os.Getenv("NVNM_DOCS_URL")
 	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
 	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
+	cfg.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
 	cfg.TrustProxyHeaders = os.Getenv("NVNM_TRUST_PROXY_HEADERS") == "true"
 

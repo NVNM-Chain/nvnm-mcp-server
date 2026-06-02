@@ -795,6 +795,40 @@ func TestLoad_OnboardingURLs_EmptyByDefault(t *testing.T) {
 	}
 }
 
+// TestLoad_WalletGeneratorURL_DefaultsToCanonical pins that an operator who
+// sets nothing gets the Inveniam-hosted wallet generator page rather than
+// an empty URL that would silently degrade the wizard's needs_wallet
+// response. The default is the canonical URL from
+// docs/WALLET_GENERATOR_DESIGN.md RD15 (NVNM-Chain/nvnm-wallet-page).
+func TestLoad_WalletGeneratorURL_DefaultsToCanonical(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	const want = "https://wallet.nvnmchain.io"
+	if cfg.WalletGeneratorURL != want {
+		t.Errorf("WalletGeneratorURL = %q, want %q", cfg.WalletGeneratorURL, want)
+	}
+}
+
+// TestLoad_WalletGeneratorURL_RespectsOverride pins that operators self-
+// hosting the wallet generator page can point the wizard at it.
+func TestLoad_WalletGeneratorURL_RespectsOverride(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	const override = "https://wallet.example.test"
+	t.Setenv("NVNM_WALLET_GENERATOR_URL", override)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.WalletGeneratorURL != override {
+		t.Errorf("WalletGeneratorURL = %q, want %q", cfg.WalletGeneratorURL, override)
+	}
+}
+
 func TestLoad_AllowedOrigins_ParsesCommaSeparatedList(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)

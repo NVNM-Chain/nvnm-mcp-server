@@ -65,12 +65,13 @@ type sampleCode struct {
 }
 
 type setupWizardOutput struct {
-	State       string          `json:"state"`
-	Message     string          `json:"message"`
-	Wallet      *walletSnapshot `json:"wallet,omitempty"`
-	SampleCode  []sampleCode    `json:"sample_code,omitempty"`
-	BridgeURL   string          `json:"bridge_url,omitempty"`
-	NextActions []NextAction    `json:"next_actions,omitempty"`
+	State              string          `json:"state"`
+	Message            string          `json:"message"`
+	Wallet             *walletSnapshot `json:"wallet,omitempty"`
+	SampleCode         []sampleCode    `json:"sample_code,omitempty"`
+	BridgeURL          string          `json:"bridge_url,omitempty"`
+	WalletGeneratorURL string          `json:"wallet_generator_url,omitempty"`
+	NextActions        []NextAction    `json:"next_actions,omitempty"`
 }
 
 func registerSetupWizardTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Config) {
@@ -157,15 +158,21 @@ func makeSetupWizardHandler(
 // --- Per-state response builders ---
 
 func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWizardOutput {
-	msg := "No address provided. Generate a wallet, fund it with " + naming.Wrapped +
-		", then call this wizard again with the address. The samples " +
-		"below generate a key and IMMEDIATELY hand it to a secrets " +
-		"mechanism -- they never print the private key to stdout."
+	msg := "No address provided. Two ways to get one: " +
+		"(1) the browser-hosted wallet generator at `wallet_generator_url` " +
+		"(opens in a tab, creates a key entirely in the browser, hands you " +
+		"the artifacts to self-custody -- nothing leaves the page); " +
+		"(2) the language-specific samples below, which generate a key in " +
+		"a local runtime and IMMEDIATELY hand it to a secrets mechanism -- " +
+		"they never print the private key to stdout. Once you have an " +
+		"address, fund it with " + naming.Wrapped + " (see `bridge_url`) " +
+		"and call this wizard again with the address."
 	return setupWizardOutput{
-		State:      WizardStateNeedsWallet,
-		Message:    msg,
-		SampleCode: needsWalletSamples(),
-		BridgeURL:  cfg.BridgeURL,
+		State:              WizardStateNeedsWallet,
+		Message:            msg,
+		SampleCode:         needsWalletSamples(),
+		BridgeURL:          cfg.BridgeURL,
+		WalletGeneratorURL: cfg.WalletGeneratorURL,
 		NextActions: []NextAction{
 			{
 				Tool: "nvnm_setup_wizard",

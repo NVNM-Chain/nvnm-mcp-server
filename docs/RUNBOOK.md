@@ -134,6 +134,7 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 | `NVNM_DOCS_URL` | _(empty)_ | Operator-facing docs URL surfaced in onboarding-tool responses (e.g., the wizard's "where to learn more" hint). Optional. |
 | `NVNM_EXPLORER_URL` | _(empty)_ | Block-explorer URL surfaced to agents in onboarding-tool responses. Optional. |
 | `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
+| `NVNM_WALLET_GENERATOR_URL` | `https://wallet.nvnmchain.io` | Browser-hosted wallet generator page surfaced to the wizard's `needs_wallet` state. Default points at the canonical Inveniam-hosted instance (`NVNM-Chain/nvnm-wallet-page`); operators self-hosting the wallet page can override. |
 | `NVNM_ALLOWED_ORIGINS` | _(empty)_ → localhost-only default | Comma-separated allowlist for the HTTP transport's Origin header (DNS-rebinding defense per the MCP spec). When unset the server permits only the loopback variants (`http://localhost`, `https://localhost`, `http://127.0.0.1`, `https://127.0.0.1`, `http://[::1]`, `https://[::1]`) at any port. Production deployments must enumerate the trusted client origins. |
 
 ### Origin-header validation (HTTP transport, Phase 8.5)
