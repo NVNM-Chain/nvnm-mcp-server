@@ -68,6 +68,12 @@ func clearEnv(t *testing.T) {
 		"NVNM_KEY_REQUEST_RATE_LIMIT",
 		"NVNM_KEY_REQUEST_RATE_BURST",
 		"NVNM_KEY_REQUEST_MAX_BODY_BYTES",
+		"NVNM_SMTP_HOST",
+		"NVNM_SMTP_PORT",
+		"NVNM_SMTP_USERNAME",
+		"NVNM_SMTP_PASSWORD",
+		"NVNM_SMTP_FROM",
+		"NVNM_SMTP_FROM_NAME",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)

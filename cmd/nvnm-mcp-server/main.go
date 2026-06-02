@@ -148,8 +148,14 @@ func run() error {
 		_ = healthSrv.Close(shutCtx)
 	}()
 
+	// --- Pending key-request store + email sender (Phase 11 L3) ---
+	pendingStore, emailSender, err := newPendingAndEmail(cfg, logger)
+	if err != nil {
+		return err
+	}
+
 	// --- Admin API Server (API key mode only) ---
-	adminShutdown, err := startAdminServer(cfg, managedKeys, logger)
+	adminShutdown, err := startAdminServer(cfg, managedKeys, pendingStore, emailSender, logger)
 	if err != nil {
 		return err
 	}
@@ -424,6 +430,8 @@ func loadAPIKeys(
 func startAdminServer(
 	cfg *config.Config,
 	keys *mcpserver.ManagedKeyStore,
+	pendingStore *mcpserver.PendingKeyStore,
+	email mcpserver.EmailSender,
 	logger *slog.Logger,
 ) (shutdown func(), err error) {
 	if cfg.AdminAPIKey == "" {
@@ -443,7 +451,7 @@ func startAdminServer(
 
 	adminSrv := mcpserver.NewAdminServer(
 		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, logger,
-	)
+	).WithPendingKeyStore(pendingStore, email)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {
 			logger.Error("admin API server error", slog.String("error", aErr.Error()))
@@ -457,6 +465,66 @@ func startAdminServer(
 			logger.Error("admin API shutdown error", slog.String("error", shutErr.Error()))
 		}
 	}, nil
+}
+
+// newPendingAndEmail constructs the Phase 11 L3 pending-key store
+// (when KeyRequestEnabled) and the email sender (always; falls back
+// to log-only when SMTP is not configured). Returns nil for the store
+// when the feature is opt-out so callers stay branch-free. Extracted
+// from run() so its complexity budget is not consumed by the wiring.
+func newPendingAndEmail(cfg *config.Config, logger *slog.Logger) (
+	*mcpserver.PendingKeyStore, mcpserver.EmailSender, error,
+) {
+	var store *mcpserver.PendingKeyStore
+	if cfg.KeyRequestEnabled {
+		s, err := mcpserver.NewPendingKeyStore(cfg.KeyPendingFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init pending key store: %w", err)
+		}
+		store = s
+	}
+	return store, buildEmailSender(cfg, logger), nil
+}
+
+// buildEmailSender returns the EmailSender used by the admin pending-
+// request approval/rejection flow. When NVNM_SMTP_HOST is set, builds
+// an SMTPEmailSender against the configured relay; otherwise falls
+// back to a log-only sender so the approval flow still completes (the
+// operator copies the freshly-minted key out of structured logs).
+// Config-validation already failed loud if SMTP_HOST was set but
+// SMTP_PORT or SMTP_FROM were missing, so the SMTPEmailSender
+// constructor here cannot return ErrEmailNotConfigured in practice.
+func buildEmailSender(cfg *config.Config, logger *slog.Logger) mcpserver.EmailSender {
+	if cfg.SMTPHost == "" {
+		logger.Info("SMTP not configured; admin approvals will use log-only email sender",
+			slog.String("hint", "set NVNM_SMTP_HOST / NVNM_SMTP_PORT / NVNM_SMTP_FROM to enable delivery"),
+		)
+		return mcpserver.NewLogOnlyEmailSender(logger)
+	}
+	sender, err := mcpserver.NewSMTPEmailSender(&mcpserver.SMTPConfig{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+		FromName: cfg.SMTPFromName,
+	}, logger)
+	if err != nil {
+		// Should be unreachable -- config.Load already gates on the
+		// required fields. Fall back to log-only so the server still
+		// starts and the operator can fix the config.
+		logger.Error("SMTP sender construction failed; falling back to log-only",
+			slog.String("error", err.Error()),
+		)
+		return mcpserver.NewLogOnlyEmailSender(logger)
+	}
+	logger.Info("SMTP email sender configured",
+		slog.String("host", cfg.SMTPHost),
+		slog.Int("port", cfg.SMTPPort),
+		slog.String("from", cfg.SMTPFrom),
+		slog.Bool("auth", cfg.SMTPUsername != ""),
+	)
+	return sender
 }
 
 func extractHost(rawURL string) string {

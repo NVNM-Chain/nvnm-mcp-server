@@ -41,9 +41,11 @@ func validateRoles(roles []string) bool {
 // AdminServer serves the key management REST API on a dedicated port,
 // authenticated by a separate admin bearer token.
 type AdminServer struct {
-	srv    *http.Server
-	keys   *ManagedKeyStore
-	logger *slog.Logger
+	srv          *http.Server
+	keys         *ManagedKeyStore
+	pendingStore *PendingKeyStore
+	email        EmailSender
+	logger       *slog.Logger
 }
 
 // NewAdminServer creates an admin API server.
@@ -59,6 +61,14 @@ func NewAdminServer(addr, adminKey string, keys *ManagedKeyStore, logger *slog.L
 	mux.HandleFunc("POST /admin/keys", a.handleCreate)
 	mux.HandleFunc("PATCH /admin/keys/{id}", a.handleUpdate)
 	mux.HandleFunc("DELETE /admin/keys/{id}", a.handleDelete)
+	// Phase 11 L3 PR 3: pending key-request review endpoints. Wired
+	// regardless of whether the pending store is attached; the handlers
+	// fail fast with 503 when pendingStore is nil so the routing layer
+	// stays static and operators see a clear "not configured" error
+	// rather than a confusing 404.
+	mux.HandleFunc("GET /admin/keys/pending", a.handleListPending)
+	mux.HandleFunc("POST /admin/keys/pending/{id}/approve", a.handleApprovePending)
+	mux.HandleFunc("POST /admin/keys/pending/{id}/reject", a.handleRejectPending)
 
 	handler := adminAuth(
 		limitAdminRequestBody(mux),

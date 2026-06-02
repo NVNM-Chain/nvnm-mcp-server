@@ -140,6 +140,12 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 | `NVNM_KEY_REQUEST_RATE_LIMIT` | `0.5` | Per-source-IP token-bucket rate (requests/sec) on the public key-request endpoint. Default deliberately tight — the endpoint produces durable side effects (a queue row + a reviewer ping) and is not a hot path. |
 | `NVNM_KEY_REQUEST_RATE_BURST` | `3` | Per-source-IP burst capacity. |
 | `NVNM_KEY_REQUEST_MAX_BODY_BYTES` | `16384` | JSON body cap for the public key-request endpoint (tighter than the global `MaxRequestBodyBytes` outer cap). |
+| `NVNM_SMTP_HOST` | _(empty)_ | SMTP relay hostname used by the admin approve/reject flow to email customers. Empty -> approvals fall back to a log-only sender (key material lands in structured logs for the operator to copy out). Phase 11 RD2. |
+| `NVNM_SMTP_PORT` | _(empty)_ | SMTP port. **Required** when `NVNM_SMTP_HOST` is set; startup fails loud otherwise. |
+| `NVNM_SMTP_USERNAME` | _(empty)_ | SMTP PlainAuth username. Optional; when both username and password are empty, no AUTH is attempted (useful for in-network relays). |
+| `NVNM_SMTP_PASSWORD` | _(empty)_ | SMTP PlainAuth password. |
+| `NVNM_SMTP_FROM` | _(empty)_ | From address on approval / rejection emails. **Required** when `NVNM_SMTP_HOST` is set. |
+| `NVNM_SMTP_FROM_NAME` | _(empty)_ | Optional display name. When set, the From header is formatted as `Name <addr>`. |
 | `NVNM_ALLOWED_ORIGINS` | _(empty)_ → localhost-only default | Comma-separated allowlist for the HTTP transport's Origin header (DNS-rebinding defense per the MCP spec). When unset the server permits only the loopback variants (`http://localhost`, `https://localhost`, `http://127.0.0.1`, `https://127.0.0.1`, `http://[::1]`, `https://[::1]`) at any port. Production deployments must enumerate the trusted client origins. |
 
 ### Origin-header validation (HTTP transport, Phase 8.5)

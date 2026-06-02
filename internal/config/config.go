@@ -39,6 +39,8 @@ var (
 	ErrInvalidKeyRequestRateLimit = errors.New("NVNM_KEY_REQUEST_RATE_LIMIT must be positive")
 	ErrInvalidKeyRequestRateBurst = errors.New("NVNM_KEY_REQUEST_RATE_BURST must be positive")
 	ErrInvalidKeyRequestMaxBody   = errors.New("NVNM_KEY_REQUEST_MAX_BODY_BYTES must be positive")
+	ErrMissingSMTPPort            = errors.New("NVNM_SMTP_PORT is required when NVNM_SMTP_HOST is set")
+	ErrMissingSMTPFrom            = errors.New("NVNM_SMTP_FROM is required when NVNM_SMTP_HOST is set")
 	ErrAdminKeyWithoutFile        = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
 	ErrHTTPAuthRequired           = errors.New(
 		"HTTP transport requires an authentication provider; " +
@@ -186,6 +188,21 @@ type Config struct {
 	// scoped cap (default 16 KiB) reflecting the small free-text
 	// PII schema in RD1. NVNM_KEY_REQUEST_MAX_BODY_BYTES env var.
 	KeyRequestMaxBodyBytes int64
+
+	// Phase 11 RD2: SMTP relay for approval / rejection email delivery.
+	// SMTPHost being empty is a valid configuration -- the admin
+	// approval flow falls back to a log-only sender so operators
+	// without SMTP can still close the loop manually. When SMTPHost
+	// is set, SMTPPort and SMTPFrom are required and validated at
+	// Load. Username + Password are optional (PlainAuth is attempted
+	// only when both are non-empty). FromName is a display-name
+	// for the From header.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPFromName string
 }
 
 // detectLegacyEnvVars returns the names of any pre-Phase-8.9
@@ -311,6 +328,10 @@ func Load() (*Config, error) {
 	cfg.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
 
 	if err := cfg.loadKeyRequestConfig(); err != nil {
+		return nil, err
+	}
+
+	if err := cfg.loadSMTPConfig(); err != nil {
 		return nil, err
 	}
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
@@ -570,6 +591,39 @@ func (c *Config) loadKeyRequestConfig() error {
 	}
 	if c.KeyRequestMaxBodyBytes <= 0 {
 		return ErrInvalidKeyRequestMaxBody
+	}
+	return nil
+}
+
+// loadSMTPConfig parses NVNM_SMTP_* env vars and validates them. Empty
+// SMTPHost is a valid configuration (the admin approval flow falls back
+// to a log-only sender so operators without SMTP can still complete
+// reviews manually). When SMTPHost is set, SMTPPort and SMTPFrom are
+// required; missing values fail loud with named sentinel errors.
+func (c *Config) loadSMTPConfig() error {
+	c.SMTPHost = os.Getenv("NVNM_SMTP_HOST")
+	c.SMTPUsername = os.Getenv("NVNM_SMTP_USERNAME")
+	c.SMTPPassword = os.Getenv("NVNM_SMTP_PASSWORD")
+	c.SMTPFrom = os.Getenv("NVNM_SMTP_FROM")
+	c.SMTPFromName = os.Getenv("NVNM_SMTP_FROM_NAME")
+
+	portStr := os.Getenv("NVNM_SMTP_PORT")
+	if portStr != "" {
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return fmt.Errorf("invalid NVNM_SMTP_PORT %q: %w", portStr, err)
+		}
+		c.SMTPPort = port
+	}
+
+	if c.SMTPHost == "" {
+		return nil
+	}
+	if c.SMTPPort == 0 {
+		return ErrMissingSMTPPort
+	}
+	if c.SMTPFrom == "" {
+		return ErrMissingSMTPFrom
 	}
 	return nil
 }
