@@ -9,6 +9,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_No unreleased changes since v1.0.0-rc.5._
+
+## [1.0.0-rc.5] - 2026-06-02
+
+> **Version naming note.** Mantra tagged the previous release as
+> `v1.0.0-rc4` (no dot) rather than the project's prior `v1.0.0-rc.3`
+> (dotted) convention. This release returns to the dotted form for
+> strict SemVer-pre-release compliance and to keep CHANGELOG headers
+> consistent with the older entries. Both forms parse as valid SemVer;
+> the dot is the project's continuing convention.
+
 Phase 11 L3 self-serve API-key request endpoint complete; Phase 10 RD3
 HTTP-level error-rate SLI implemented; Phase 9.14 carried-over k8s
 manifest cleanups landed (**BREAKING** for existing deployments — see
