@@ -162,6 +162,107 @@ NVNM_ALLOWED_ORIGINS="https://claude.ai,https://mcp.nvnmchain.io"
 
 Multiple origins, comma-separated, whitespace tolerated. Matching is case-insensitive and ignores surrounding whitespace. Port-stripping is only applied to loopback hosts -- general allowlist entries require exact-match including port.
 
+### Self-serve key requests (Phase 11 L3)
+
+When `NVNM_KEY_REQUEST_ENABLED=true` and `NVNM_KEY_PENDING_FILE` is set, the server exposes a public endpoint that lets callers request a key without prior credentials. Requests land in a pending-review queue that an admin works through via the existing admin REST API.
+
+#### Public submission endpoint
+
+```text
+POST /api/v1/keys/request
+Content-Type: application/json
+
+{ "email": "user@example.com",
+  "company": "Acme",                                    // optional
+  "intended_use": "Building an agent for X" }
+```
+
+Response shape (RD3, frozen so the contract can absorb a future transition to auto-approval without breaking clients):
+
+```json
+{ "request_id": "<uuid>", "status": "pending" }
+```
+
+Validation rejections return 400 with `{"error": "..."}`. The endpoint sits outside `AuthMiddleware` (no Bearer required) but inside `originGuard`, `limitRequestBody`, `IPFailRateLimiter`, and the endpoint's own per-source-IP rate limiter (defaults `0.5 rps`, burst `3`).
+
+#### Admin review queue
+
+All three endpoints below run on the admin REST server (separate port — `ADMIN_API_ADDR`, default `127.0.0.1:8081`) behind `ADMIN_API_KEY` Bearer auth.
+
+**List pending + decided history:**
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_API_KEY" \
+  http://localhost:8081/admin/keys/pending
+```
+
+Returns every request the store knows about, all statuses included — the reviewer's audit view, not just the current queue. Items are JSON objects with `id`, `email`, `company`, `intended_use`, `status`, `created_at`, and (for decided requests) `decided_at`, `decider_id`, `key_id`.
+
+**Approve and issue a key:**
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
+  http://localhost:8081/admin/keys/pending/<request_id>/approve
+```
+
+This mints a credential with the `reader` role and `required` write-approval policy (consistent with the project's default-deny posture; promote post-issuance via `PATCH /admin/keys/{id}` if a customer needs more), persists the decision under the double-approve guard, then attempts SMTP delivery. The 200 response includes:
+
+```json
+{ "request_id": "...", "status": "approved",
+  "key_id": "pending:<request_id>",
+  "api_key": "<freshly-minted raw key>",
+  "email_delivered": true }
+```
+
+`api_key` is included so reviewers using the API directly (no SMTP) can deliver the key to the customer manually. The key is also returned in plaintext in the response *exactly once*; the on-disk store keeps only the SHA-256 hash (Phase 8.6 invariant unchanged). If SMTP delivery fails the rest of the operation still commits and `email_delivered: false` is returned — the reviewer knows to deliver out-of-band.
+
+**Reject:**
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "applicant not eligible for closed beta"}' \
+  http://localhost:8081/admin/keys/pending/<request_id>/reject
+```
+
+`reason` is optional and surfaces in the rejection email when SMTP is configured. The body is optional; an empty POST is accepted.
+
+#### SMTP modes
+
+| Mode | Trigger | What happens on approve |
+|---|---|---|
+| SMTP relay | `NVNM_SMTP_HOST` set + `NVNM_SMTP_PORT` + `NVNM_SMTP_FROM` | Email delivered via `net/smtp`; `email_delivered: true` on success |
+| Log-only fallback | `NVNM_SMTP_HOST` unset | Email body (including the raw key) written to structured logs at INFO with `msg=email (log-only, no SMTP configured)`; `email_delivered: true` in the response (the structured-log pipeline is the delivery) |
+
+The log-only mode is intended for OSS evaluators, dev / test deployments, and any operator who hasn't wired SMTP yet. Operators using this path are accepting that their log-shipping pipeline is the de-facto secret store for the duration the key sits there. For production-grade deployments, configure SMTP.
+
+#### Double-approve and double-reject guards
+
+The store guarantees:
+
+- A request that has already been approved or rejected returns `409 Conflict` on a second decide. Two admins clicking *approve* near-simultaneously cannot both trigger key issuance + email.
+- Persistence-failure rollback is best-effort: if the underlying `Decide` succeeds but the SMTP send fails, the decision still commits and `email_delivered: false` is reported (the reviewer is the safety net). If the decision itself fails after a key has been minted, the freshly-issued key is best-effort deleted; the original Decide error surfaces to the reviewer.
+
+#### Review cadence
+
+The pending store is the source of truth, not a queue with built-in SLAs. Reviewers should set their own cadence (RD3 specifies a 2–4 week closed beta). Suggested operations:
+
+- Review the queue daily during the closed-beta period.
+- Use `GET /admin/keys/pending` filtered client-side by `status: "pending"` to find new submissions.
+- Approval emails contain the freshly-minted key in plain text; the customer is responsible for storing it securely.
+- The `mcp_key_requests_total{status="pending|approved|rejected"}` metric (bounded cardinality) is the operator dashboard for queue health.
+
+#### Spam and flood threat model
+
+The endpoint produces durable side effects (a queue row + an SMTP send on approve). Mitigations:
+
+- Per-source-IP rate limit (deliberately tight: `0.5 rps`, burst `3` by default).
+- Body-size cap (`16 KiB` default, tighter than the global 10 MB outer cap).
+- Email validation via `net/mail.ParseAddress` rejects malformed addresses, and reviewer judgement during approve catches obviously bogus requests before any email is sent to a real address.
+- `IPFailRateLimiter` (shared with auth-failure tracking) provides a coarser outer ring.
+
+For high-spam threat environments, tighten `NVNM_KEY_REQUEST_RATE_LIMIT` further or front the endpoint with an edge CAPTCHA — the design intentionally does not bake CAPTCHA into the server (per `PHASE_9_DESIGN.md` D3).
+
 Rejected requests produce a structured warning log line with the origin, remote address, method, and path. Operators can audit recent rejections with their log aggregator's filter on `"rejecting request with disallowed Origin"`.
 
 ### CORS (cross-origin browser access, Phase 9.5)

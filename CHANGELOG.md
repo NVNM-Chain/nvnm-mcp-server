@@ -9,7 +9,120 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes since v1.0.0-rc.3._
+Phase 11 L3 self-serve API-key request endpoint complete; Phase 10 RD3
+HTTP-level error-rate SLI implemented; Phase 9.14 carried-over k8s
+manifest cleanups landed (**BREAKING** for existing deployments — see
+`docs/RUNBOOK.md` § "K8s manifest migration (Phase 9.14 follow-up)");
+miscellaneous OSS-hygiene work including the engineering-side Terms of
+Service draft, Node.js 24 action bumps ahead of the 2026-09-16 runner
+cutover, and the wallet-page repo migration from `inveniamcapital/`
+into `NVNM-Chain/`.
+
+### Added
+
+- `internal/mcp/keys_pending.go`: file-backed `PendingKeyStore` for
+  self-serve API-key requests with atomic-write JSON persistence and
+  double-approve race guards. (PR #8 — Phase 11 L3 PR 1/3.)
+- `internal/mcp/keys_request_http.go`: public `POST /api/v1/keys/request`
+  endpoint with per-source-IP `KeyRequestRateLimiter`, body-size cap,
+  email validation, and 202 `{request_id, status: "pending"}` response
+  per Phase 11 RD3. New env vars: `NVNM_KEY_REQUEST_ENABLED` (opt-in),
+  `NVNM_KEY_PENDING_FILE`, `NVNM_KEY_REQUEST_RATE_LIMIT`,
+  `NVNM_KEY_REQUEST_RATE_BURST`, `NVNM_KEY_REQUEST_MAX_BODY_BYTES`.
+  (PR #9 — Phase 11 L3 PR 2/3.)
+- `internal/mcp/admin_keys_pending.go`: admin pending-review endpoints
+  `GET /admin/keys/pending`, `POST /admin/keys/pending/{id}/approve`,
+  `POST /admin/keys/pending/{id}/reject`. Approve mints the credential,
+  persists the decision under a double-approve guard, and delivers the
+  notification email; approve response includes the issued key so
+  reviewers using the API directly (no SMTP) can deliver out-of-band.
+  (PR #10 — Phase 11 L3 PR 3/3.)
+- `internal/mcp/smtp.go`: provider-agnostic `EmailSender` interface
+  with two implementations — `SMTPEmailSender` (plain SMTP with
+  optional PlainAuth and CR/LF header-injection defense) and
+  `LogOnlyEmailSender` (no-SMTP fallback that writes approval emails
+  to structured logs for operators without SMTP wiring). New env vars:
+  `NVNM_SMTP_HOST` / `NVNM_SMTP_PORT` / `NVNM_SMTP_USERNAME` /
+  `NVNM_SMTP_PASSWORD` / `NVNM_SMTP_FROM` / `NVNM_SMTP_FROM_NAME`.
+  Per Phase 11 RD2. (PR #10.)
+- `internal/telemetry/http_responses.go` + new
+  `internal/mcp/response_metrics.go` middleware: Phase 10 RD3 HTTP-
+  level error-rate SLI with a `class` label on the new
+  `mcp_http_responses_total` counter
+  (`server_fault`/`customer_impact`/`client_error`/`success`).
+  Wired in `server.go` as the outermost real-request layer (inside
+  CORS, outside Origin guard). Adds three Prometheus alert rules to
+  `deploy/prometheus/alerts.yaml`: `NvnmMCPServerFaultRate` (warn at
+  1% 5xx ratio), `NvnmMCPServerFaultRateCritical` (5%), and
+  `NvnmMCPCustomerImpactRate` (5% combined 5xx+429+408 ratio). (PR #5.)
+- `internal/config.Config.WalletGeneratorURL` + wizard hook: the
+  `nvnm_setup_wizard` `needs_wallet` response now surfaces the
+  browser-hosted wallet generator page (default
+  `https://wallet.nvnmchain.io`) alongside the existing snippet flow.
+  New env var `NVNM_WALLET_GENERATOR_URL`. Phase 11 D-L8-2. (PR #7.)
+- `docs/TERMS.md`: engineering-side Terms of Service draft for the
+  hosted Service. Bakes in resolved decisions from
+  `PHASE_11_DESIGN.md` § 14 — free-for-v1 + reserve-right-to-charge +
+  no-grandfather (RD4); "reasonable efforts" availability (RD5);
+  wallet-page out of scope (RD8); Apache 2.0 / Service bifurcation;
+  acceptable-use enumerated against the real tool surface. Counsel-
+  iteration items (jurisdiction, forum, effective date) appear in
+  bracketed provisional form. (PR #2.)
+
+### Changed
+
+- **BREAKING for existing k8s deployments**: rename across
+  `deploy/k8s/*` — namespace `inveniam-mcp` → `nvnm-mcp`; API-key
+  mount path `/var/run/secrets/inveniam` → `/var/run/secrets/nvnm`;
+  `app.kubernetes.io/part-of: inveniam` → `nvnm-chain` on every
+  manifest; phantom `inveniam-keymgmt` reference in
+  `networkpolicy.yaml` removed. Also fixes a Phase-9.14-era bug in
+  `deploy/k8s/secret.yaml.example` (was still naming Secrets
+  `inveniam-mcp-server-*` mismatching `deployment.yaml`, and was
+  still setting `INVENIAM_EVM_RPC_URL` which fails loud at startup
+  per Phase 8.9). Parallel-rollover migration documented in
+  `docs/RUNBOOK.md` § "K8s manifest migration (Phase 9.14 follow-up)".
+  (PR #6.)
+- `.github/workflows/image.yml`: bumped all 5 Docker actions to
+  versions on Node.js 24 ahead of the 2026-09-16 GitHub Actions
+  runner cutover — `setup-qemu-action@v4`, `setup-buildx-action@v4`,
+  `metadata-action@v6`, `login-action@v4`, `build-push-action@v7`.
+  Per-action breaking-change analysis inline as workflow comments.
+  Drop-in for this workflow's input shapes. (PR #4.)
+- `nvnm_setup_wizard` `needs_wallet` response prose updated to
+  introduce the wallet-generator URL alongside the language-specific
+  code snippets. (PR #7.)
+
+### Operational
+
+- Wallet-generator-page repo migrated from
+  `inveniamcapital/nvnm-wallet-page` (interim, 2026-05-27) to the
+  canonical `NVNM-Chain/nvnm-wallet-page` via mirror-push of the
+  scaffolding commit (`30cb60e`; same SHA preserved). Interim repo
+  archived with deprecation banner. (PR #3.)
+- `docs/IMPLEMENTATION_PLAN.md`: 6 backlog rows flipped to Completed
+  (Phase 11 L3, k8s cleanups, Node.js 20, wallet-page migration,
+  image.yml bumps). One row remains: marketing brief brand-positioning
+  review (out of engineering scope). (PR #11.)
+- `docs/RUNBOOK.md`: new env-var documentation rows for
+  `NVNM_WALLET_GENERATOR_URL`, the five `NVNM_KEY_REQUEST_*` knobs,
+  and the six `NVNM_SMTP_*` knobs.
+- `docs/PRIVACY_DISCUSSION.md` § 3 (Draft B): `[TBD]` customer-
+  onboarding PII schema replaced with the concrete L3 shape (email,
+  optional company, free-text intended_use) now that the endpoint
+  exists. The schema in code (`KeyRequestInput`) and the schema in
+  the policy now match.
+
+### Notes
+
+- Phase 11 engineering scope is now complete. The remaining Phase 11
+  exit criteria (Privacy Policy counsel sign-off, Anthropic/OpenAI
+  directory submissions, launch announcement, support mailbox
+  provisioning, beta-cohort onboarding) are non-engineering scope
+  per the 2026-05-27 OQ walkthrough and belong with counsel /
+  Inveniam Comms / Inveniam Product / Inveniam HR.
+- Repo visibility flip from `private` to `public` is business-gated
+  per the Phase 9.15 plan, not engineering-gated.
 
 ## [1.0.0-rc.3] - 2026-05-27
 
