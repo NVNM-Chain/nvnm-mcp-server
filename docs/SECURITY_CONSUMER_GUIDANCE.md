@@ -100,4 +100,7 @@ prompt will display the substituted transaction.
 
 Suspected exploitation paths, including chains of weaknesses across
 consumer + server, should be reported per the project's main
-`SECURITY.md` (TODO: link once published).
+[`SECURITY.md`](../SECURITY.md) at the repository root, which
+documents the private-disclosure path (GitHub Security Advisories
+primary, `security@nvnmchain.io` fallback), the 3 / 7 / 90-day SLO,
+and the project's "no monetary bug bounty" stance.
