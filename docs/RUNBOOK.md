@@ -49,6 +49,45 @@ Dashboards that filter by `service.name`, `tracer`, or `meter` will need their q
 
 ---
 
+## K8s manifest migration (Phase 9.14 follow-up)
+
+**Phase 9.14 follow-up (2026-06-02, BREAKING for existing deployments):** the Kubernetes manifests under `deploy/k8s/` carried four operator-visible identifiers from before the NVNM-Chain rename. They have now been renamed to match the post-9.14 canonical identity. **Existing deployments that adopt the new manifests as a drop-in roll will break** — selectors stop matching, mounts move, and the `part-of` label changes.
+
+### What changed
+
+| Surface | Pre-9.14 follow-up | Now |
+|---|---|---|
+| Namespace (`namespace.yaml`, `kustomization.yaml`) | `inveniam-mcp` | `nvnm-mcp` |
+| API-key Secret mount path (`deployment.yaml`) | `/var/run/secrets/inveniam` | `/var/run/secrets/nvnm` |
+| `app.kubernetes.io/part-of` label (every manifest) | `inveniam` | `nvnm-chain` |
+| `secret.yaml.example` env var | `INVENIAM_EVM_RPC_URL` | `NVNM_EVM_RPC_URL` (see env-var migration above — this was already a hard failure at startup; the example was just stale) |
+| `secret.yaml.example` mount path | `/var/run/secrets/inveniam/keys.json` | `/var/run/secrets/nvnm/keys.json` |
+| `networkpolicy.yaml` ingress comment | Phantom `inveniam-keymgmt` workload reference | Removed (use a real `namespaceSelector` + `podSelector` for your ops tooling instead) |
+
+### What this breaks if you roll forward without staging
+
+- A pod from the new Deployment will look for its API-key Secret at `/var/run/secrets/nvnm`. If the Secret is still mounted at the old path (operator-managed Secret manifests not yet updated), the server starts but fails closed on every auth attempt — every request is rejected as if no keys were configured.
+- A new Namespace resource cannot rename an existing Namespace; applying `namespace.yaml` with `name: nvnm-mcp` creates a *new* empty namespace next to `inveniam-mcp`. Selectors in Services, NetworkPolicies, and RBAC bindings that hard-code the old namespace name stop matching.
+- The `part-of: nvnm-chain` label change affects observability groupings: Grafana dashboards, Prometheus recording rules, or kube-state-metrics queries that filter by `app.kubernetes.io/part-of=inveniam` go quiet.
+
+### Steps for an existing deployment
+
+The safe rollover is *parallel*, not in-place:
+
+1. **Audit operator-managed manifests for the four surfaces above.** Anything in your overlay (Helm values, kustomize patches, External Secrets, ArgoCD app config) that references `inveniam-mcp` / `/var/run/secrets/inveniam` / `part-of: inveniam` / `inveniam-keymgmt` / `INVENIAM_EVM_RPC_URL` needs renaming alongside the in-repo manifests.
+2. **Apply the new `nvnm-mcp` namespace alongside the old `inveniam-mcp` namespace.** Don't delete the old one yet.
+3. **Apply the renamed manifests to the new namespace.** Verify pod readiness, Secret mount path, ServiceMonitor scrape, and NetworkPolicy posture in the new namespace.
+4. **Migrate API-key Secrets** to the new mount path under the new namespace. If you generate keys with `key-mgmt`, regenerate the Secret manifest; if you provision via External Secrets, update the `targetSecretName` / `template.metadata.namespace`.
+5. **Cut traffic.** Move Ingress / Service consumers to the new namespace's Service. Validate end-to-end.
+6. **Decommission the old namespace.** `kubectl delete namespace inveniam-mcp` after no pods or traffic depend on it.
+7. **Update observability.** Re-point dashboards and recording rules that filter by `part-of=inveniam` to `part-of=nvnm-chain`.
+
+### Why a hard rename instead of compatibility
+
+Same rationale as the Phase 8.9 env-var rename. Dual-acceptance (selectors that match both `part-of: inveniam` and `part-of: nvnm-chain`, mounts at both `/var/run/secrets/inveniam` and `/var/run/secrets/nvnm`) compounds — every new operator who picks the old name extends the migration tail, and stale legacy values in deployed manifests stay invisible until something else changes. The migration window is small and one-time; the silent-drift trap from accepting both is permanent.
+
+---
+
 ## 1. Deployment checklist
 
 ### Required environment variables

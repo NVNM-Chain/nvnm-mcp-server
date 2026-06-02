@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
-    app.kubernetes.io/part-of: inveniam
+    app.kubernetes.io/part-of: nvnm-chain
 spec:
   selector:
     matchLabels:

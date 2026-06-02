@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
-    app.kubernetes.io/part-of: inveniam
+    app.kubernetes.io/part-of: nvnm-chain
 spec:
   replicas: 2
   selector:
@@ -17,7 +17,7 @@ spec:
       labels:
         app.kubernetes.io/name: nvnm-mcp-server
         app.kubernetes.io/component: mcp-server
-        app.kubernetes.io/part-of: inveniam
+        app.kubernetes.io/part-of: nvnm-chain
     spec:
       securityContext:
         runAsNonRoot: true
@@ -61,7 +61,7 @@ spec:
             # Secret. Optional so deployments using AUTH_PROVIDER=
             # fusionauth do not need the keys Secret.
             - name: api-keys
-              mountPath: /var/run/secrets/inveniam
+              mountPath: /var/run/secrets/nvnm
               readOnly: true
           livenessProbe:
             httpGet:

@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: nvnm-mcp-server
     app.kubernetes.io/component: mcp-server
-    app.kubernetes.io/part-of: inveniam
+    app.kubernetes.io/part-of: nvnm-chain
 spec:
   podSelector:
     matchLabels:
@@ -34,18 +34,8 @@ spec:
     # roles -- it is the master key. The server binds the admin
     # listener to 127.0.0.1 by default; operators that flip
     # ADMIN_API_ADDR=:8081 for in-cluster admin access should add a
-    # narrow ingress rule here scoped to ops tooling, NOT "from: []".
-    # Example:
-    #   - from:
-    #       - namespaceSelector:
-    #           matchLabels:
-    #             kubernetes.io/metadata.name: ops-tooling
-    #         podSelector:
-    #           matchLabels:
-    #             app.kubernetes.io/name: inveniam-keymgmt
-    #     ports:
-    #       - protocol: TCP
-    #         port: 8081
+    # narrow ingress rule here scoped to their ops tooling
+    # (namespaceSelector + podSelector), NOT "from: []".
   egress:
     # Outbound to EVM RPC (HTTPS)
     - to: []
