@@ -682,6 +682,71 @@ Consider custom metrics (e.g. from Prometheus) on `mcp.server.active_requests` o
 | Higher concurrency | Increase CPU and memory; watch for Go GC and JSON-RPC connection usage. |
 | Many concurrent MCP clients | Prefer more replicas over a single oversized pod to isolate failure domains. |
 
+### Phase 10 RD1 capacity targets
+
+The Phase 10 OQ walkthrough resolved per-environment capacity targets
+(`docs/PHASE_10_DESIGN.md` § 14 RD1). They are *aspirational ceilings
+for capacity planning*, not contractual SLOs (the Service is provided
+on a "reasonable efforts" basis per `docs/TERMS.md` § 10).
+
+| Environment | Sustained RPS target | Burst RPS target | HPA posture |
+|---|---|---|---|
+| Testnet (`nvnm-testnet-1`, EVM `787111`) | ~5 RPS | ~25 RPS | Aggressive (low CPU target, fast scale-up) |
+| Mainnet (`nvnm-1`, EVM `1611`) | ~50 RPS | ~200 RPS | Aggressive (same posture, more headroom) |
+
+Per RD1, **node sizing is explicitly out of scope** for this design —
+the operator's Kubernetes platform handles node-level capacity; this
+chart only describes pod-level requests/limits and HPA bounds.
+
+#### Recommended HPA configuration
+
+The shipped Helm defaults in `deploy/helm/nvnm-mcp-server/values.yaml`
+err conservative (`hpa.enabled: false`, `targetCPUUtilization: 70`,
+`minReplicas: 2`, `maxReplicas: 10`) so that adopting the chart does
+not silently change billing. For the RD1 production posture, override:
+
+```yaml
+# values-production.yaml fragment
+hpa:
+  enabled: true
+  targetCPUUtilization: 50      # aggressive: scale up before saturation
+  minReplicas: 3                # absorbs one node-loss without latency
+  maxReplicas: 20               # mainnet ceiling; tune for your quota
+```
+
+The 50% CPU target is the "aggressive" posture RD1 calls for — at 50%
+average utilisation the cluster has roughly 2x burst headroom per
+replica before HPA needs to act, which beats the 200-RPS mainnet
+burst target against 50-RPS sustained without needing tail-latency
+sacrifice.
+
+The shipped per-pod resource requests (`100m` CPU, `128Mi` memory)
+and limits (`500m` CPU, `256Mi` memory) are adequate at the testnet
+target out of the box. For mainnet, plan to validate under load —
+the working set is dominated by JSON-RPC sockets to the EVM endpoint
+plus modest per-request decoding, so memory typically stays well
+under the limit but CPU can spike during signature verification on
+hot tools.
+
+#### Load-test methodology
+
+To validate the capacity numbers above against your environment:
+
+1. Deploy to a staging cluster with the production HPA profile.
+2. Run [`tests/load/`](../tests/load/) (k6 scripts) at the target
+   sustained RPS for 30 minutes; observe `mcp_server_active_requests`,
+   `mcp_http_responses_total{class="server_fault"}` (Phase 10 RD3 SLI),
+   and p99 tool-call duration.
+3. Ramp to the burst RPS for 5 minutes; HPA should add replicas
+   within the metrics-server lag (default 15s).
+4. Pass criteria: server-fault SLI stays under the
+   `NvnmMCPServerFaultRate` warning threshold (1%); p99 stays under
+   the `NvnmMCPHighP99Latency` threshold (5000ms).
+
+Failing pass criteria do not necessarily mean the targets are wrong —
+upstream RPC latency or per-tool work distribution can dominate; the
+load test surfaces the bottleneck.
+
 ### Trace sampling
 
 The server supports configurable trace sampling via `OTEL_TRACE_SAMPLE_RATIO` (default `1.0`, meaning sample all traces). Uses `ParentBased(TraceIDRatioBased)` to respect upstream sampling decisions while controlling cost for high-volume deployments.

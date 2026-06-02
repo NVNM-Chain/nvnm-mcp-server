@@ -287,5 +287,34 @@ behavioral difference between networks should be documented in
 `docs/TOOL_REFERENCE.md` and an issue opened to align caller expectations —
 not a server-side bug, but a chain-side property worth surfacing.
 
-**To be verified during Phase 10 staging.** Parked in
-`project_phase10_devops_doc` memory.
+**Status (2026-06-02):** still unresolved at the engineering layer
+because resolving requires three things outside this codebase: a
+funded mainnet wallet, the live mainnet RPC URL (pending per Phase 10
+RD13), and at least one anchored record on mainnet to compare the
+counter against. Documented here as a deferred verification rather
+than left as a dangling open question.
+
+### Verification procedure (run during staging cutover)
+
+Once the mainnet RPC URL is configured and at least one record exists,
+run these two probes against staging pointed at mainnet:
+
+```sh
+# 1. anchor_get_registries pagination behaviour.
+export NVNM_EVM_RPC_URL=<mainnet-rpc-url>
+export NVNM_CHAIN_ID=1611
+./bin/query-anchor get-registries --limit 10 | jq '.pagination'
+
+# 2. anchor_get_records pagination behaviour. Substitute a registry
+#    ID that has at least one record on mainnet.
+./bin/query-anchor get-records --registry-id <known-id> --limit 10 \
+  | jq '.pagination'
+```
+
+### Outcome handling
+
+| Observed `pagination.total` | Action |
+|---|---|
+| `0` (matches testnet) | No change. The existing "treat `total` as unknown" client convention in `docs/TOOL_REFERENCE.md` covers both networks. |
+| Actual record count | Document the per-network behaviour in `docs/TOOL_REFERENCE.md` (one sentence under each tool's `pagination` field), open a tracking issue for downstream client maintainers, and update this section to "resolved: mainnet reports counts; testnet does not." Not a server-side bug; the difference is a chain-property and the SDK is doing what it sees. |
+| Different non-zero pattern (e.g. an inflated value) | Treat as a chain-side bug; route to MANTRA team. The MCP server does not synthesize this field, only forwards it. |
