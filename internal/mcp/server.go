@@ -17,6 +17,7 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/version"
 )
 
@@ -168,6 +169,7 @@ func (s *Server) RunHTTP(
 	anonLimiter *AnonReadRateLimiter,
 	failLimiter *IPFailRateLimiter,
 	allowedOrigins *OriginAllowlist,
+	metrics *telemetry.Metrics,
 ) error {
 	if allowedOrigins == nil {
 		allowedOrigins = DefaultOriginAllowlist()
@@ -215,10 +217,18 @@ func (s *Server) RunHTTP(
 		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
 	}
 	guarded := originGuard(failGuarded, allowedOrigins, s.logger)
+	// Response metrics sit just inside CORS so the Phase 10 SLI counter
+	// (mcp_http_responses_total{class=...}) sees every real-request
+	// response with its final status — including Origin-guard rejections
+	// (intentionally; a spike of 403s is a misconfiguration signal) —
+	// but does not record OPTIONS preflight noise that CORS handles
+	// before delegating downward. nil metrics is a passthrough; tests
+	// and stdio-only callers pass nil.
+	metered := responseMetricsMiddleware(guarded, metrics)
 	// CORS sits outermost so it answers browser OPTIONS preflight before
 	// the Origin guard or any parser. It shares the same allowlist but
 	// grants cross-origin permission rather than rejecting (see cors.go).
-	handler := CORSMiddleware(guarded, allowedOrigins, s.logger)
+	handler := CORSMiddleware(metered, allowedOrigins, s.logger)
 
 	srv := &http.Server{
 		Addr:              addr,

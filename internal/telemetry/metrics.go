@@ -32,6 +32,10 @@ type Metrics struct {
 	CircuitBreakerState metric.Int64Gauge
 	// RPCRateLimited counts rate-limit rejections for upstream RPC calls.
 	RPCRateLimited metric.Int64Counter
+	// HTTPResponses counts MCP HTTP responses, keyed by `class` (see
+	// ClassifyStatus) for the Phase 10 error-rate SLI. Exported to
+	// Prometheus as mcp_http_responses_total.
+	HTTPResponses metric.Int64Counter
 }
 
 // NewMetrics creates and registers all metric instruments with the provider.
@@ -112,6 +116,16 @@ func NewMetrics(provider *sdkmetric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("rate limited counter: %w", err)
 	}
 
+	httpResponses, err := meter.Int64Counter(
+		"mcp.http.responses",
+		metric.WithDescription(
+			"Total MCP HTTP responses, labeled by SLI class (server_fault|customer_impact|client_error|success)",
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("http responses counter: %w", err)
+	}
+
 	return &Metrics{
 		ToolCallDuration:    toolDur,
 		ToolCallCount:       toolCount,
@@ -122,5 +136,6 @@ func NewMetrics(provider *sdkmetric.MeterProvider) (*Metrics, error) {
 		RPCRetryCount:       rpcRetries,
 		CircuitBreakerState: cbState,
 		RPCRateLimited:      rateLimited,
+		HTTPResponses:       httpResponses,
 	}, nil
 }

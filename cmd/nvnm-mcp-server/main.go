@@ -183,7 +183,11 @@ func run() error {
 	case "stdio":
 		return srv.RunStdio(ctx)
 	case "http":
-		return srv.RunHTTP(ctx, cfg.HTTPAddr, validator, mcpLimiter, anonLimiter, failLimiter, buildOriginAllowlist(cfg))
+		return srv.RunHTTP(
+			ctx, cfg.HTTPAddr, validator,
+			mcpLimiter, anonLimiter, failLimiter,
+			buildOriginAllowlist(cfg), tel.Metrics,
+		)
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
 			cfg.Transport, config.ErrInvalidTransport)
