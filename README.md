@@ -54,6 +54,7 @@ This README is the technical entry point. For deeper context, follow the links b
 |---|---|
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture decisions; multi-chain deployment model; target-chain reference |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational guide — startup, env-var migration, admin REST API |
+| [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) | Per-alert investigation playbook; what to do when each Prometheus rule fires |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
 | [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
 | [`docs/TERMS.md`](docs/TERMS.md) | Terms of Service for the hosted Service (Apache 2.0 governs the Software) |
@@ -521,6 +522,7 @@ docs/
   DATA_HANDLING.md                Privacy-by-design technical reference
   PRIVACY_DISCUSSION.md           Working notes for the privacy policy
   TERMS.md                        Terms of Service for the hosted Service
+  INCIDENT_RUNBOOK.md             Per-alert investigation playbook
   KEY_CUSTODY_THREAT_MODEL.md     Rationale for zero-key-custody design
   SECURITY_CONSUMER_GUIDANCE.md   Operator-facing security guidance
   LICENSE_EXCEPTIONS.md           Project-scoped license exception register

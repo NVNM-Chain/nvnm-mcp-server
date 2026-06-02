@@ -88,6 +88,83 @@ Same rationale as the Phase 8.9 env-var rename. Dual-acceptance (selectors that 
 
 ---
 
+## Verifying signed releases (Cosign)
+
+Every tagged release ships Cosign-keyless signatures for both the
+release binaries and the multi-arch container image. Verifying before
+deployment confirms the artifact came from the project's GitHub
+Actions workflow and was not tampered with on the way to you. The
+signatures live in [Sigstore Rekor](https://search.sigstore.dev) and
+do not require any pre-shared key.
+
+### Verifying a release binary
+
+Download the binary, certificate, and signature from the GitHub
+release page, then verify with `cosign verify-blob`:
+
+```sh
+RELEASE=v1.0.0-rc.4
+PLATFORM=linux-amd64                     # or linux-arm64, darwin-amd64, darwin-arm64
+
+# Download
+BASE=https://github.com/NVNM-Chain/nvnm-mcp-server/releases/download/${RELEASE}
+for ext in '' .cert.pem .sig .sbom.cyclonedx.json .sha256; do
+  curl -fsSLO "${BASE}/nvnm-mcp-server-${RELEASE}-${PLATFORM}${ext}"
+done
+
+# SHA-256 first (catches transport-layer corruption before crypto)
+shasum -a 256 -c "nvnm-mcp-server-${RELEASE}-${PLATFORM}.sha256"
+
+# Cosign keyless verify
+cosign verify-blob \
+  --certificate "nvnm-mcp-server-${RELEASE}-${PLATFORM}.cert.pem" \
+  --signature   "nvnm-mcp-server-${RELEASE}-${PLATFORM}.sig" \
+  --certificate-identity-regexp 'https://github.com/NVNM-Chain/nvnm-mcp-server/.*' \
+  --certificate-oidc-issuer     'https://token.actions.githubusercontent.com' \
+  "nvnm-mcp-server-${RELEASE}-${PLATFORM}"
+```
+
+The output should end with `Verified OK`. The `--certificate-identity-regexp`
+and `--certificate-oidc-issuer` together prove the binary was signed
+by *this project's* GitHub Actions workflow — substitute the URL prefix
+if you fork.
+
+### Verifying the container image
+
+The image is signed at push time by the `Image` workflow. Verify the
+manifest digest:
+
+```sh
+cosign verify \
+  --certificate-identity-regexp 'https://github.com/NVNM-Chain/nvnm-mcp-server/.*' \
+  --certificate-oidc-issuer     'https://token.actions.githubusercontent.com' \
+  ghcr.io/nvnm-chain/nvnm-mcp-server:v1.0.0-rc.4 | jq .
+```
+
+The signature payload pins the manifest digest, so an attacker who
+swaps the image after the verify step still produces a different
+digest on next pull. Pair this verification with a digest-pinned
+deployment for the strongest posture:
+
+```yaml
+# In deploy/k8s/deployment.yaml (and equivalent Helm override):
+containers:
+  - name: nvnm-mcp-server
+    image: ghcr.io/nvnm-chain/nvnm-mcp-server@sha256:<digest-from-verify-output>
+```
+
+### Cosign admission policy (cluster-side)
+
+The verification commands above run on the operator's workstation
+before deployment. For continuous enforcement, the Phase 10
+deployment story includes a Cosign admission policy (Sigstore Policy
+Controller or Kyverno equivalent) that rejects unsigned images at
+admission time. That layer is operator-managed and lives outside
+this chart; see Phase 10 design § Cosign admission for the policy
+shape.
+
+---
+
 ## 1. Deployment checklist
 
 ### Required environment variables
