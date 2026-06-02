@@ -56,6 +56,7 @@ This README is the technical entry point. For deeper context, follow the links b
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational guide — startup, env-var migration, admin REST API |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
 | [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
+| [`docs/TERMS.md`](docs/TERMS.md) | Terms of Service for the hosted Service (Apache 2.0 governs the Software) |
 | [`docs/KEY_CUSTODY_THREAT_MODEL.md`](docs/KEY_CUSTODY_THREAT_MODEL.md) | Rationale for the zero-key-custody design — no agent-mediated signing |
 | [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased roadmap with goal / depends-on / tasks / exit criteria |
@@ -519,6 +520,7 @@ docs/
   OWASP_AUDIT.md                  OWASP Top 10 self-audit (Phase 8.12)
   DATA_HANDLING.md                Privacy-by-design technical reference
   PRIVACY_DISCUSSION.md           Working notes for the privacy policy
+  TERMS.md                        Terms of Service for the hosted Service
   KEY_CUSTODY_THREAT_MODEL.md     Rationale for zero-key-custody design
   SECURITY_CONSUMER_GUIDANCE.md   Operator-facing security guidance
   LICENSE_EXCEPTIONS.md           Project-scoped license exception register
