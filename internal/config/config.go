@@ -33,8 +33,14 @@ var (
 	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
 	ErrInvalidAnonRateLimit   = errors.New("MCP_ANON_RATE_LIMIT must be positive")
 	ErrInvalidAnonRateBurst   = errors.New("MCP_ANON_RATE_BURST must be positive")
-	ErrAdminKeyWithoutFile    = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
-	ErrHTTPAuthRequired       = errors.New(
+	ErrMissingKeyPendingFile  = errors.New(
+		"NVNM_KEY_PENDING_FILE is required when NVNM_KEY_REQUEST_ENABLED is true",
+	)
+	ErrInvalidKeyRequestRateLimit = errors.New("NVNM_KEY_REQUEST_RATE_LIMIT must be positive")
+	ErrInvalidKeyRequestRateBurst = errors.New("NVNM_KEY_REQUEST_RATE_BURST must be positive")
+	ErrInvalidKeyRequestMaxBody   = errors.New("NVNM_KEY_REQUEST_MAX_BODY_BYTES must be positive")
+	ErrAdminKeyWithoutFile        = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
+	ErrHTTPAuthRequired           = errors.New(
 		"HTTP transport requires an authentication provider; " +
 			"set MCP_API_KEYS_FILE, MCP_API_KEY, or AUTH_PROVIDER=fusionauth",
 	)
@@ -153,6 +159,33 @@ type Config struct {
 	// header to dodge the limiter. NVNM_TRUST_PROXY_HEADERS env var,
 	// default false.
 	TrustProxyHeaders bool
+
+	// Phase 11 L3: self-serve API-key request endpoint (POST
+	// /api/v1/keys/request). Opt-in; the endpoint is not registered
+	// unless KeyRequestEnabled is true. When enabled, KeyPendingFile
+	// is required (validated at Load).
+	KeyRequestEnabled bool
+
+	// KeyPendingFile is the on-disk path to the pending key-request
+	// JSON store. Required when KeyRequestEnabled is true.
+	// NVNM_KEY_PENDING_FILE env var.
+	KeyPendingFile string
+
+	// KeyRequestRateLimit / KeyRequestRateBurst control the per-source-
+	// IP token-bucket on POST /api/v1/keys/request. Defaults are
+	// deliberately tight (0.5 rps, burst 3) -- the public endpoint
+	// produces durable side effects (a pending row + a reviewer ping)
+	// and is not a hot path. NVNM_KEY_REQUEST_RATE_LIMIT (float64,
+	// requests per second) and NVNM_KEY_REQUEST_RATE_BURST (int).
+	KeyRequestRateLimit float64
+	KeyRequestRateBurst int
+
+	// KeyRequestMaxBodyBytes caps the JSON body size for the public
+	// key-request endpoint. The outer limitRequestBody middleware caps
+	// at MaxRequestBodyBytes (10 MB); this is a tighter, endpoint-
+	// scoped cap (default 16 KiB) reflecting the small free-text
+	// PII schema in RD1. NVNM_KEY_REQUEST_MAX_BODY_BYTES env var.
+	KeyRequestMaxBodyBytes int64
 }
 
 // detectLegacyEnvVars returns the names of any pre-Phase-8.9
@@ -276,6 +309,10 @@ func Load() (*Config, error) {
 	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
 	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
 	cfg.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
+
+	if err := cfg.loadKeyRequestConfig(); err != nil {
+		return nil, err
+	}
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
 	cfg.TrustProxyHeaders = os.Getenv("NVNM_TRUST_PROXY_HEADERS") == "true"
 
@@ -486,6 +523,54 @@ func (c *Config) loadKeylessConfig() error {
 		return fmt.Errorf("invalid MCP_ANON_RATE_BURST %q: %w", anonBurstStr, err)
 	}
 	c.AnonRateBurst = anonBurst
+	return nil
+}
+
+// loadKeyRequestConfig parses NVNM_KEY_REQUEST_* env vars and validates
+// them. KeyRequestEnabled is opt-in; everything else is only consulted
+// when enabled. When enabled, KeyPendingFile is required (the on-disk
+// store has nowhere to persist without it) and the rate-limit knobs
+// must be positive.
+func (c *Config) loadKeyRequestConfig() error {
+	c.KeyRequestEnabled = envOrDefault("NVNM_KEY_REQUEST_ENABLED", "false") == "true"
+	c.KeyPendingFile = os.Getenv("NVNM_KEY_PENDING_FILE")
+
+	limitStr := envOrDefault("NVNM_KEY_REQUEST_RATE_LIMIT", "0.5")
+	limit, err := strconv.ParseFloat(limitStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid NVNM_KEY_REQUEST_RATE_LIMIT %q: %w", limitStr, err)
+	}
+	c.KeyRequestRateLimit = limit
+
+	burstStr := envOrDefault("NVNM_KEY_REQUEST_RATE_BURST", "3")
+	burst, err := strconv.Atoi(burstStr)
+	if err != nil {
+		return fmt.Errorf("invalid NVNM_KEY_REQUEST_RATE_BURST %q: %w", burstStr, err)
+	}
+	c.KeyRequestRateBurst = burst
+
+	maxBodyStr := envOrDefault("NVNM_KEY_REQUEST_MAX_BODY_BYTES", "16384")
+	maxBody, err := strconv.ParseInt(maxBodyStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid NVNM_KEY_REQUEST_MAX_BODY_BYTES %q: %w", maxBodyStr, err)
+	}
+	c.KeyRequestMaxBodyBytes = maxBody
+
+	if !c.KeyRequestEnabled {
+		return nil
+	}
+	if c.KeyPendingFile == "" {
+		return ErrMissingKeyPendingFile
+	}
+	if c.KeyRequestRateLimit <= 0 {
+		return ErrInvalidKeyRequestRateLimit
+	}
+	if c.KeyRequestRateBurst <= 0 {
+		return ErrInvalidKeyRequestRateBurst
+	}
+	if c.KeyRequestMaxBodyBytes <= 0 {
+		return ErrInvalidKeyRequestMaxBody
+	}
 	return nil
 }
 

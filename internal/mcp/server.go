@@ -170,6 +170,7 @@ func (s *Server) RunHTTP(
 	failLimiter *IPFailRateLimiter,
 	allowedOrigins *OriginAllowlist,
 	metrics *telemetry.Metrics,
+	keyRequestHandler http.Handler,
 ) error {
 	if allowedOrigins == nil {
 		allowedOrigins = DefaultOriginAllowlist()
@@ -183,6 +184,7 @@ func (s *Server) RunHTTP(
 		slog.Bool("rate_limiting", limiter != nil),
 		slog.Bool("anon_rate_limiting", anonLimiter != nil),
 		slog.Bool("fail_rate_limiting", failLimiter != nil),
+		slog.Bool("key_request_endpoint", keyRequestHandler != nil),
 		slog.Any("allowed_origins", allowedOrigins.Resolved()),
 	)
 
@@ -192,9 +194,16 @@ func (s *Server) RunHTTP(
 
 	// Chain (outermost first):
 	//   CORSMiddleware       → browser preflight + cross-origin permission
+	//   responseMetrics      → Phase 10 RD3 SLI counter (class label)
 	//   originGuard          → cheap string lookup, DNS-rebinding defense
 	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
 	//   limitRequestBody     → cap body before any parser sees it
+	//   path mux             → branches the chain by URL path:
+	//     /api/v1/keys/request → public key-request handler (Phase 11 L3)
+	//                            (NO AuthMiddleware; bring-your-own rate limit
+	//                            inside the handler)
+	//     default              → AuthMiddleware → AnonReadRateLimiter →
+	//                            ClientRateLimiter → mcpHandler
 	//   AuthMiddleware       → validates bearer (penalizes failLimiter on miss);
 	//                          under keyless mode admits anonymous when the
 	//                          Authorization header is absent
@@ -203,15 +212,28 @@ func (s *Server) RunHTTP(
 	//   ClientRateLimiter    → per-client bucket; requires identity from Auth,
 	//                          passes anonymous through
 	//   mcpHandler           → MCP SDK
-	var inner http.Handler = mcpHandler
+	var mcpChain http.Handler = mcpHandler
 	if limiter != nil {
-		inner = limiter.Middleware(inner, s.logger)
+		mcpChain = limiter.Middleware(mcpChain, s.logger)
 	}
 	if anonLimiter != nil {
-		inner = anonLimiter.Middleware(inner, s.logger)
+		mcpChain = anonLimiter.Middleware(mcpChain, s.logger)
 	}
-	authed := AuthMiddleware(inner, validator, failLimiter, s.keylessReads, s.logger)
-	bodyLimited := limitRequestBody(authed)
+	mcpChain = AuthMiddleware(mcpChain, validator, failLimiter, s.keylessReads, s.logger)
+
+	// Path mux: if the public key-request handler is wired, route its
+	// exact path to it; everything else falls through to the MCP auth
+	// chain. When the endpoint is disabled the mux is collapsed to the
+	// MCP chain so there is no extra hop on the hot path.
+	routed := mcpChain
+	if keyRequestHandler != nil {
+		mux := http.NewServeMux()
+		mux.Handle(KeyRequestPath, keyRequestHandler)
+		mux.Handle("/", mcpChain)
+		routed = mux
+	}
+
+	bodyLimited := limitRequestBody(routed)
 	failGuarded := bodyLimited
 	if failLimiter != nil {
 		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)

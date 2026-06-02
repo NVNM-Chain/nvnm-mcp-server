@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -179,6 +180,32 @@ func run() error {
 		middleware, logger,
 	)
 
+	// --- Phase 11 L3: public self-serve key-request endpoint (opt-in) ---
+	keyRequestHandler, stopKeyRequest, err := newKeyRequestHandler(cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer stopKeyRequest()
+
+	return runTransport(ctx, srv, cfg, validator,
+		mcpLimiter, anonLimiter, failLimiter,
+		tel.Metrics, keyRequestHandler)
+}
+
+// runTransport dispatches to the configured transport. Extracted from
+// run() so the dispatch's switch + error path do not consume run's
+// cyclomatic-complexity budget.
+func runTransport(
+	ctx context.Context,
+	srv *mcpserver.Server,
+	cfg *config.Config,
+	validator auth.TokenValidator,
+	mcpLimiter *mcpserver.ClientRateLimiter,
+	anonLimiter *mcpserver.AnonReadRateLimiter,
+	failLimiter *mcpserver.IPFailRateLimiter,
+	metrics *telemetry.Metrics,
+	keyRequestHandler http.Handler,
+) error {
 	switch cfg.Transport {
 	case "stdio":
 		return srv.RunStdio(ctx)
@@ -186,7 +213,8 @@ func run() error {
 		return srv.RunHTTP(
 			ctx, cfg.HTTPAddr, validator,
 			mcpLimiter, anonLimiter, failLimiter,
-			buildOriginAllowlist(cfg), tel.Metrics,
+			buildOriginAllowlist(cfg), metrics,
+			keyRequestHandler,
 		)
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
@@ -250,6 +278,44 @@ func newHTTPLimiters(cfg *config.Config, logger *slog.Logger) (
 		failLimiter.Stop()
 	}
 	return mcpLimiter, anonLimiter, failLimiter, stop
+}
+
+// newKeyRequestHandler builds the Phase 11 L3 public self-serve key-
+// request endpoint when cfg.KeyRequestEnabled is true and the transport
+// is HTTP. Returns the handler (nil = endpoint disabled), a stop
+// function (always non-nil, no-op when disabled so callers can defer
+// unconditionally), and any error. Extracted from run() so that
+// function's cyclomatic-complexity budget is not consumed by the
+// wiring.
+func newKeyRequestHandler(cfg *config.Config, logger *slog.Logger) (http.Handler, func(), error) {
+	noop := func() {}
+	if !cfg.KeyRequestEnabled || cfg.Transport != "http" {
+		return nil, noop, nil
+	}
+	pendingStore, err := mcpserver.NewPendingKeyStore(cfg.KeyPendingFile)
+	if err != nil {
+		return nil, noop, fmt.Errorf("init pending key store: %w", err)
+	}
+	krLimiter := mcpserver.NewKeyRequestRateLimiter(
+		cfg.KeyRequestRateLimit,
+		cfg.KeyRequestRateBurst,
+		cfg.TrustProxyHeaders,
+	)
+	krLimiter.Start()
+	handler := mcpserver.NewKeyRequestHandler(mcpserver.KeyRequestHandlerConfig{
+		Store:        pendingStore,
+		RateLimiter:  krLimiter,
+		MaxBodyBytes: cfg.KeyRequestMaxBodyBytes,
+		TrustProxy:   cfg.TrustProxyHeaders,
+		Logger:       logger,
+	})
+	logger.Info("self-serve key-request endpoint enabled",
+		slog.String("path", mcpserver.KeyRequestPath),
+		slog.String("pending_file", cfg.KeyPendingFile),
+		slog.Float64("rate_per_sec", cfg.KeyRequestRateLimit),
+		slog.Int("burst", cfg.KeyRequestRateBurst),
+	)
+	return handler, krLimiter.Stop, nil
 }
 
 // buildOriginAllowlist returns the Origin allowlist for the HTTP

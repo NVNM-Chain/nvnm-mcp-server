@@ -62,6 +62,12 @@ func clearEnv(t *testing.T) {
 		"MCP_KEYLESS_READS",
 		"MCP_ANON_RATE_LIMIT",
 		"MCP_ANON_RATE_BURST",
+		"NVNM_WALLET_GENERATOR_URL",
+		"NVNM_KEY_REQUEST_ENABLED",
+		"NVNM_KEY_PENDING_FILE",
+		"NVNM_KEY_REQUEST_RATE_LIMIT",
+		"NVNM_KEY_REQUEST_RATE_BURST",
+		"NVNM_KEY_REQUEST_MAX_BODY_BYTES",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -956,5 +962,67 @@ func TestLoad_RejectsLegacyEnvVars(t *testing.T) {
 				t.Errorf("Load: error %q must point at the migration runbook", err)
 			}
 		})
+	}
+}
+
+// TestLoad_KeyRequestDisabledByDefault pins that the public endpoint is
+// opt-in. An operator who sets nothing gets an instance that does not
+// expose POST /api/v1/keys/request — important because OSS operators
+// may not want a public write endpoint at all.
+func TestLoad_KeyRequestDisabledByDefault(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.KeyRequestEnabled {
+		t.Error("KeyRequestEnabled should default to false")
+	}
+}
+
+// TestLoad_KeyRequestEnabledRequiresPendingFile pins the fail-loud
+// contract: enabling the endpoint without a file path is a config
+// error, not a silent run with nowhere to persist.
+func TestLoad_KeyRequestEnabledRequiresPendingFile(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("NVNM_KEY_REQUEST_ENABLED", "true")
+	// NVNM_KEY_PENDING_FILE deliberately unset.
+	_, err := Load()
+	if !errors.Is(err, ErrMissingKeyPendingFile) {
+		t.Errorf("Load err = %v, want ErrMissingKeyPendingFile", err)
+	}
+}
+
+// TestLoad_KeyRequestEnabledLoadsFields pins that all four knobs round-
+// trip from env vars when enabled.
+func TestLoad_KeyRequestEnabledLoadsFields(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("NVNM_KEY_REQUEST_ENABLED", "true")
+	t.Setenv("NVNM_KEY_PENDING_FILE", "/var/lib/nvnm/keys_pending.json")
+	t.Setenv("NVNM_KEY_REQUEST_RATE_LIMIT", "0.25")
+	t.Setenv("NVNM_KEY_REQUEST_RATE_BURST", "5")
+	t.Setenv("NVNM_KEY_REQUEST_MAX_BODY_BYTES", "8192")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.KeyRequestEnabled {
+		t.Error("KeyRequestEnabled = false, want true")
+	}
+	if cfg.KeyPendingFile != "/var/lib/nvnm/keys_pending.json" {
+		t.Errorf("KeyPendingFile = %q", cfg.KeyPendingFile)
+	}
+	if cfg.KeyRequestRateLimit != 0.25 {
+		t.Errorf("KeyRequestRateLimit = %v, want 0.25", cfg.KeyRequestRateLimit)
+	}
+	if cfg.KeyRequestRateBurst != 5 {
+		t.Errorf("KeyRequestRateBurst = %d, want 5", cfg.KeyRequestRateBurst)
+	}
+	if cfg.KeyRequestMaxBodyBytes != 8192 {
+		t.Errorf("KeyRequestMaxBodyBytes = %d, want 8192", cfg.KeyRequestMaxBodyBytes)
 	}
 }

@@ -135,6 +135,11 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 | `NVNM_EXPLORER_URL` | _(empty)_ | Block-explorer URL surfaced to agents in onboarding-tool responses. Optional. |
 | `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
 | `NVNM_WALLET_GENERATOR_URL` | `https://wallet.nvnmchain.io` | Browser-hosted wallet generator page surfaced to the wizard's `needs_wallet` state. Default points at the canonical Inveniam-hosted instance (`NVNM-Chain/nvnm-wallet-page`); operators self-hosting the wallet page can override. |
+| `NVNM_KEY_REQUEST_ENABLED` | `false` | Opt-in flag for the public self-serve API-key request endpoint (`POST /api/v1/keys/request`). When `true`, `NVNM_KEY_PENDING_FILE` is required. Phase 11 L3 / RD3. |
+| `NVNM_KEY_PENDING_FILE` | _(empty)_ | Path to the on-disk JSON store of pending key requests. Required when `NVNM_KEY_REQUEST_ENABLED=true`. Operator-controlled persistence; mount on a durable filesystem. |
+| `NVNM_KEY_REQUEST_RATE_LIMIT` | `0.5` | Per-source-IP token-bucket rate (requests/sec) on the public key-request endpoint. Default deliberately tight — the endpoint produces durable side effects (a queue row + a reviewer ping) and is not a hot path. |
+| `NVNM_KEY_REQUEST_RATE_BURST` | `3` | Per-source-IP burst capacity. |
+| `NVNM_KEY_REQUEST_MAX_BODY_BYTES` | `16384` | JSON body cap for the public key-request endpoint (tighter than the global `MaxRequestBodyBytes` outer cap). |
 | `NVNM_ALLOWED_ORIGINS` | _(empty)_ → localhost-only default | Comma-separated allowlist for the HTTP transport's Origin header (DNS-rebinding defense per the MCP spec). When unset the server permits only the loopback variants (`http://localhost`, `https://localhost`, `http://127.0.0.1`, `https://127.0.0.1`, `http://[::1]`, `https://[::1]`) at any port. Production deployments must enumerate the trusted client origins. |
 
 ### Origin-header validation (HTTP transport, Phase 8.5)
