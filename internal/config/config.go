@@ -262,7 +262,9 @@ func Load() (*Config, error) {
 	}
 	cfg.RequestTimeout = timeout
 
-	cfg.EnableWriteTools = envOrDefault("ENABLE_WRITE_TOOLS", "false") == "true"
+	if loadErr := cfg.loadFeatureFlags(); loadErr != nil {
+		return nil, loadErr
+	}
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
@@ -275,14 +277,6 @@ func Load() (*Config, error) {
 
 	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "nvnm-mcp-server")
-	cfg.EnablePrometheus = envOrDefault("ENABLE_PROMETHEUS", "true") == "true"
-	cfg.EnableStdoutTel = envOrDefault("ENABLE_STDOUT_TELEMETRY", "false") == "true"
-	// Secure-by-default: OTLP gRPC connects with TLS unless the
-	// operator explicitly opts into insecure (typical for a sidecar
-	// collector on localhost). Spans carry pre-sanitization error text
-	// and tool-call patterns; an insecure default leaks them on any
-	// non-loopback collector path.
-	cfg.OTLPInsecure = envOrDefault("OTLP_INSECURE", "false") == "true"
 	cfg.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
 
 	if loadErr := cfg.loadResilienceConfig(); loadErr != nil {
@@ -335,7 +329,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
-	cfg.TrustProxyHeaders = os.Getenv("NVNM_TRUST_PROXY_HEADERS") == "true"
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -529,7 +522,11 @@ func (c *Config) loadMCPRateConfig() error {
 // per-IP rate-limit knobs. Anon defaults are deliberately tighter than
 // the per-client defaults.
 func (c *Config) loadKeylessConfig() error {
-	c.KeylessReads = envOrDefault("MCP_KEYLESS_READS", "false") == "true"
+	keyless, err := envBool("MCP_KEYLESS_READS", false)
+	if err != nil {
+		return err
+	}
+	c.KeylessReads = keyless
 
 	anonLimitStr := envOrDefault("MCP_ANON_RATE_LIMIT", "5")
 	anonLimit, err := strconv.ParseFloat(anonLimitStr, 64)
@@ -553,7 +550,11 @@ func (c *Config) loadKeylessConfig() error {
 // store has nowhere to persist without it) and the rate-limit knobs
 // must be positive.
 func (c *Config) loadKeyRequestConfig() error {
-	c.KeyRequestEnabled = envOrDefault("NVNM_KEY_REQUEST_ENABLED", "false") == "true"
+	enabled, err := envBool("NVNM_KEY_REQUEST_ENABLED", false)
+	if err != nil {
+		return err
+	}
+	c.KeyRequestEnabled = enabled
 	c.KeyPendingFile = os.Getenv("NVNM_KEY_PENDING_FILE")
 
 	limitStr := envOrDefault("NVNM_KEY_REQUEST_RATE_LIMIT", "0.5")
@@ -644,11 +645,61 @@ func (c *Config) GetFusionAuthJWKSURL() string {
 	return strings.TrimRight(c.FusionAuthURL, "/") + "/.well-known/jwks.json"
 }
 
+// loadFeatureFlags parses the boolean feature and telemetry flags into c.
+// Extracted from Load() to keep Load's cyclomatic complexity below the
+// gocyclo threshold, and to route every boolean env var through envBool's
+// fail-loud parsing in one place -- a bare `== "true"` compare silently
+// coerced ENABLE_WRITE_TOOLS=1 or =True to read-only with no error.
+func (c *Config) loadFeatureFlags() error {
+	flags := []struct {
+		key      string
+		fallback bool
+		dst      *bool
+	}{
+		{"ENABLE_WRITE_TOOLS", false, &c.EnableWriteTools},
+		{"ENABLE_PROMETHEUS", true, &c.EnablePrometheus},
+		{"ENABLE_STDOUT_TELEMETRY", false, &c.EnableStdoutTel},
+		// Secure-by-default: OTLP gRPC connects with TLS unless the operator
+		// explicitly opts into insecure (typical for a sidecar collector on
+		// localhost). Spans carry pre-sanitization error text and tool-call
+		// patterns; an insecure default leaks them on any non-loopback path.
+		{"OTLP_INSECURE", false, &c.OTLPInsecure},
+		{"NVNM_TRUST_PROXY_HEADERS", false, &c.TrustProxyHeaders},
+	}
+	for _, f := range flags {
+		v, err := envBool(f.key, f.fallback)
+		if err != nil {
+			return err
+		}
+		*f.dst = v
+	}
+	return nil
+}
+
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
+}
+
+// envBool parses a boolean env var, returning fallback when unset or empty.
+// Unlike a bare `== "true"` compare, it accepts every strconv.ParseBool
+// spelling (1/t/T/TRUE/true/True and 0/f/F/FALSE/false/False) and fails loud
+// on an unrecognized value rather than silently coercing it to the fallback --
+// matching the fail-loud contract of the numeric/duration parsers above. A
+// silent coercion is the trap where ENABLE_WRITE_TOOLS=1 or =True yields a
+// read-only server with no error.
+func envBool(key string, fallback bool) (bool, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s %q: want a boolean (true/false): %w", key, v, err)
+	}
+	return b, nil
 }
 
 // parseCommaSeparated splits a comma-separated string, trimming

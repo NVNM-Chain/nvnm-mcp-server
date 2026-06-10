@@ -9,7 +9,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes since v1.0.0-rc.5._
+### Security
+
+- Bumped the Go toolchain to 1.26.4 (`go.mod` directive, Dockerfile base
+  image `golang:1.26.4-alpine` + digest, and `GOTOOLCHAIN`) to patch two
+  reachable standard-library advisories surfaced by `govulncheck`:
+  `GO-2026-5039` (net/textproto, used by the SMTP and admin-HTTP paths)
+  and `GO-2026-5037` (crypto/x509). No application code changes.
+
+### Changed
+
+- Boolean environment variables now fail loud on an unrecognized value
+  instead of silently coercing it to the default. All seven boolean flags
+  (`ENABLE_WRITE_TOOLS`, `ENABLE_PROMETHEUS`, `ENABLE_STDOUT_TELEMETRY`,
+  `OTLP_INSECURE`, `MCP_KEYLESS_READS`, `NVNM_KEY_REQUEST_ENABLED`,
+  `NVNM_TRUST_PROXY_HEADERS`) are parsed through a new `envBool` helper
+  (`strconv.ParseBool` semantics: accepts `1/t/T/TRUE/true/True` and the
+  false equivalents, trims whitespace). Previously a bare `== "true"`
+  compare meant `ENABLE_WRITE_TOOLS=1` or `=True` silently produced a
+  read-only server with no error; such values now abort startup with a
+  message naming the offending key. Valid `true`/`false` configs are
+  unaffected. The five `Load()`-level flags are grouped into a new
+  `loadFeatureFlags` parser.
 
 ## [1.0.0-rc.5] - 2026-06-02
 
