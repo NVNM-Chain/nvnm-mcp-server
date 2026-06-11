@@ -32,6 +32,13 @@ data:
   REQUEST_TIMEOUT: "15s"
   ENABLE_WRITE_TOOLS: "false"
   WRITE_APPROVAL_DEFAULT: "required"
+  # Keyless reads: "true" makes read tools callable without a Bearer token
+  # (anonymous reads carry no per-customer identifier). Self-hosters may
+  # choose either value. INVARIANT (Inveniam-hosted production): MUST be
+  # "true" -- the published NVNM MCP, LLC privacy policy represents the
+  # hosted Service as keyless-read; running "false" would make that
+  # representation false. See docs/RUNBOOK.md (keyless-read invariant).
+  MCP_KEYLESS_READS: "false"
   ENABLE_PROMETHEUS: "true"
 
   # Telemetry. OTLP_INSECURE=false is the secure default; set to "true"

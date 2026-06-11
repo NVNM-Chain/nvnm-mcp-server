@@ -38,13 +38,13 @@ const serverName = "nvnm-chain"
 // than duplicates.
 const initializeInstructions = "NVNM Chain MCP server -- typed " +
 	"access to NVNM Chain, an EVM L2 on MANTRA Chain used as a " +
-	"neutral notary for document anchoring. The anchoring " +
-	"precompile deliberately emits no events: this server can " +
-	"report whether a wallet has been funded or has sent " +
-	"transactions, but never what those transactions did. If you " +
-	"have never used this server before, call nvnm_overview first " +
-	"for chain identity, prereqs, and a recommended 6-step agent " +
-	"journey."
+	"neutral notary for document anchoring. This server holds no " +
+	"private keys (writes are prepare-sign-submit, signed caller-side) " +
+	"and returns only public on-chain data; anchored hashes and " +
+	"registry names are public on-chain, so encode anything sensitive " +
+	"before anchoring. If you have never used this server before, call " +
+	"nvnm_overview first for chain identity, prereqs, and a " +
+	"recommended 6-step agent journey."
 
 // Server wraps the MCP server with its dependencies.
 type Server struct {
