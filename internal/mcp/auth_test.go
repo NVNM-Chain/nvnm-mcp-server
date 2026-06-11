@@ -112,3 +112,61 @@ func TestAuthMiddleware_KeylessAuthenticatesValidToken(t *testing.T) {
 		t.Errorf("keyless valid-token: code=%d clientID=%q, want 200/alice", w.Code, gotClientID)
 	}
 }
+
+// TestAuthMiddleware_Sets_WWWAuthenticate_On401 asserts every 401 carries a
+// plain "WWW-Authenticate: Bearer" challenge (RFC 6750 / 7235). A bare 401
+// with no challenge is the MCP-authorization-spec gap that leaves Claude-class
+// clients unable to determine the scheme. The challenge is plain Bearer with
+// NO resource_metadata parameter: this server authenticates opaque API keys /
+// FusionAuth JWTs supplied out-of-band, not an OAuth discovery flow, so it must
+// not point clients at OAuth metadata they cannot use.
+func TestAuthMiddleware_Sets_WWWAuthenticate_On401(t *testing.T) {
+	tests := []struct {
+		name      string
+		authValue string // "" with setHeader=false means do not set the header
+		setHeader bool
+		validator auth.TokenValidator
+	}{
+		{
+			name:      "missing Authorization header",
+			setHeader: false,
+			validator: fakeValidator{},
+		},
+		{
+			name:      "non-Bearer scheme",
+			authValue: "Basic dXNlcjpwYXNz",
+			setHeader: true,
+			validator: fakeValidator{},
+		},
+		{
+			name:      "invalid credentials",
+			authValue: "Bearer garbage",
+			setHeader: true,
+			validator: fakeValidator{err: auth.ErrInvalidAPIKey},
+		},
+	}
+
+	const want = "Bearer"
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				t.Error("handler must not be reached on a 401 path")
+			})
+			// keylessReads=false so a missing header is a 401, not anonymous.
+			handler := AuthMiddleware(next, tt.validator, nil, false, discardLogger())
+			req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+			if tt.setHeader {
+				req.Header.Set("Authorization", tt.authValue)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status: got %d, want 401", w.Code)
+			}
+			if got := w.Header().Get("WWW-Authenticate"); got != want {
+				t.Errorf("WWW-Authenticate: got %q, want %q", got, want)
+			}
+		})
+	}
+}

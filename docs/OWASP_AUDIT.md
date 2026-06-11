@@ -317,8 +317,13 @@ stuffing resistance, and session handling.
 - **Timing-safe comparison.** Both the apikey and admin paths compare
   fixed-length sha256 digests under `subtle.ConstantTimeCompare`, with a
   miss-path placeholder to flatten hit/miss timing.
-- **Correct failure semantics.** Bearer failures return `401` per RFC 7235 and
-  do not disclose whether a key exists versus is wrong (`internal/mcp/auth.go`).
+- **Correct failure semantics.** Bearer failures return `401` per RFC 7235 with
+  a plain `WWW-Authenticate: Bearer` challenge (RFC 6750), and do not disclose
+  whether a key exists versus is wrong (`internal/mcp/auth.go`). The OAuth
+  discovery well-known paths return `404` (`wellKnownGuard`,
+  `internal/mcp/wellknown.go`), so MCP clients fall back to the configured
+  Bearer credential instead of attempting an OAuth flow the server does not
+  offer. The challenge carries no `resource_metadata` parameter by design.
 - **No session fixation surface.** The server is stateless; MCP session
   lifecycle is handled by the SDK.
 

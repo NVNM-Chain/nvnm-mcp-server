@@ -69,7 +69,7 @@ func AuthMiddleware(
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("method", r.Method),
 			)
-			http.Error(w, "missing Authorization header", http.StatusUnauthorized)
+			writeUnauthorized(w, "missing Authorization header")
 			return
 		}
 
@@ -79,7 +79,7 @@ func AuthMiddleware(
 			logger.Warn("rejected request with invalid auth scheme",
 				slog.String("remote_addr", r.RemoteAddr),
 			)
-			http.Error(w, "invalid Authorization scheme; expected Bearer", http.StatusUnauthorized)
+			writeUnauthorized(w, "invalid Authorization scheme; expected Bearer")
 			return
 		}
 
@@ -96,11 +96,24 @@ func AuthMiddleware(
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("error", err.Error()),
 			)
-			http.Error(w, msg, http.StatusUnauthorized)
+			writeUnauthorized(w, msg)
 			return
 		}
 
 		ctx := auth.ContextWithClaims(r.Context(), claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// writeUnauthorized sends a 401 with a plain "WWW-Authenticate: Bearer"
+// challenge (RFC 6750 / 7235). The challenge carries NO resource_metadata
+// parameter: this server authenticates opaque API keys / FusionAuth JWTs
+// supplied out-of-band, not an OAuth discovery flow, so it must signal "send
+// a bearer token" rather than "start an OAuth flow." Without the challenge,
+// Claude-class MCP clients cannot determine the scheme and report "Needs
+// authentication" even with a valid static Bearer token configured. The header
+// must be set before WriteHeader, which http.Error calls internally.
+func writeUnauthorized(w http.ResponseWriter, msg string) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	http.Error(w, msg, http.StatusUnauthorized)
 }

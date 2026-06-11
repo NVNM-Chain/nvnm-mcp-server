@@ -32,6 +32,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unaffected. The five `Load()`-level flags are grouped into a new
   `loadFeatureFlags` parser.
 
+### Fixed
+
+- MCP authorization-spec compliance for HTTP transport: Claude-class clients
+  (Claude Code / Desktop) no longer report "Needs authentication" when a valid
+  static `Authorization: Bearer` token is configured. Two gaps are closed.
+  (1) The OAuth discovery well-known paths `/.well-known/oauth-protected-resource`
+  and `/.well-known/oauth-authorization-server` now return `404` — via a new
+  `wellKnownGuard` ahead of `AuthMiddleware` (`internal/mcp/wellknown.go`) —
+  instead of falling through to a gated `401`. A `404` signals "no OAuth
+  discovery here, use your configured credentials"; the previous `401` read to
+  a client as "OAuth-protected resource you cannot reach." The guard matches
+  only those two exact paths, so `/.well-known/jwks.json` and any future
+  well-known resource are unaffected. (2) Every `AuthMiddleware` `401` now
+  carries a plain `WWW-Authenticate: Bearer` challenge (RFC 6750 / 7235) via a
+  new `writeUnauthorized` helper — deliberately with **no** `resource_metadata`
+  parameter, because this server authenticates opaque API keys / FusionAuth
+  JWTs supplied out-of-band, not an OAuth flow. Credential validation, RBAC,
+  and rate limiting are unchanged. Server-side behavior verified end-to-end
+  through the full middleware chain.
+
 ## [1.0.0-rc.5] - 2026-06-02
 
 > **Version naming note.** Mantra tagged the previous release as

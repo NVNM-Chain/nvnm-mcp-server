@@ -1082,3 +1082,44 @@ secrets-clean for the Phase 9.15 public flip.
 
 Audit run at `0926633`; tooling versions: `detect-secrets 1.5.0`,
 `gitleaks` (Homebrew current), `git-secrets 1.3.0`.
+
+## Update 2026-06-11: MCP authorization-spec compliance (WWW-Authenticate + well-known)
+
+Discovered by dogfooding the server as an HTTP MCP client in Claude Code:
+the client reported "Needs authentication" even with a valid static
+`Authorization: Bearer` token, while raw `curl` with the same token
+returned `200`. Root cause was a two-part MCP-authorization-spec gap in the
+HTTP transport (not a credential or RBAC defect):
+
+1. **No `WWW-Authenticate` challenge on 401s.** `AuthMiddleware`
+   (`internal/mcp/auth.go`) wrote bare `401`s with no challenge header, so a
+   spec-following client could not determine the scheme. **Remediated** — a
+   new `writeUnauthorized` helper now sets `WWW-Authenticate: Bearer` on all
+   three 401 paths (missing header, wrong scheme, invalid credentials). The
+   challenge is **plain Bearer with no `resource_metadata` parameter** by
+   design: this server authenticates opaque API keys / FusionAuth JWTs
+   supplied out-of-band, so it must signal "send a bearer token," not "begin
+   an OAuth discovery flow."
+
+2. **OAuth discovery well-known paths returned a gated 401.**
+   `/.well-known/oauth-protected-resource` and
+   `/.well-known/oauth-authorization-server` fell through to `AuthMiddleware`
+   and answered `401`, which a Claude-class client reads as "OAuth-protected
+   resource I cannot reach." **Remediated** — a new `wellKnownGuard`
+   (`internal/mcp/wellknown.go`), placed ahead of `AuthMiddleware` in the
+   chain, answers `404` for exactly those two paths (signaling "no OAuth
+   discovery; use configured credentials") and passes every other path
+   through untouched, so `/.well-known/jwks.json` and any future well-known
+   resource are unaffected.
+
+**Scope and verification.** No change to credential validation, the
+constant-time compare, RBAC, rate limiting, or CORS. Coverage added in
+`internal/mcp/auth_test.go` (challenge header on every 401) and
+`internal/mcp/wellknown_test.go` (404 for the two OAuth paths, pass-through
+otherwise). Server-side behavior was reproduced and confirmed end-to-end
+through the full middleware chain (`CORS → originGuard → IPFailRateLimiter →
+limitRequestBody → wellKnownGuard → AuthMiddleware`) against a local binary:
+well-known → `404`, no-auth → `401` + `WWW-Authenticate: Bearer`, valid key →
+`200`. The remaining client-side confirmation — that Claude Code itself flips
+to "Connected" — is a black-box client behavior validated separately at
+release, not assertable from the server code.

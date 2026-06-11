@@ -233,6 +233,12 @@ func (s *Server) RunHTTP(
 		routed = mux
 	}
 
+	// OAuth discovery well-known paths answer 404 ("no OAuth here, use
+	// configured credentials") ahead of AuthMiddleware, so a Claude-class
+	// client probing them does not read a 401 as "Needs authentication"
+	// and abandon a valid static Bearer token. See wellknown.go.
+	routed = wellKnownGuard(routed)
+
 	bodyLimited := limitRequestBody(routed)
 	failGuarded := bodyLimited
 	if failLimiter != nil {
