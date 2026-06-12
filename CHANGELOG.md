@@ -79,6 +79,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   encode anything sensitive before anchoring. Supporting docs carry a dated
   retraction. No behavior change beyond the instructions-string content.
 
+- Write-approval elicitation is now MCP-spec compliant. `evm_send_raw_transaction`
+  under `write_approval: required` sends its confirmation prompt via MCP
+  elicitation; the request previously carried only a `message` and **no
+  `requestedSchema`**, which spec-strict clients (e.g. Claude / Fable 5) reject as
+  malformed — so the broadcast could never complete from those clients (reported
+  by an integrator whose script had to bypass the tool and write to chain
+  directly). The request now sends `mode: "form"` and a valid `requestedSchema`
+  (an object with one boolean `approve` property). The accept/decline/cancel
+  action remains the decision. The gap was invisible in CI because the go-sdk
+  in-process test client tolerates a nil schema; a new e2e test now asserts the
+  outgoing request carries a valid form schema.
+
 ## [1.0.0-rc.5] - 2026-06-02
 
 > **Version naming note.** Mantra tagged the previous release as

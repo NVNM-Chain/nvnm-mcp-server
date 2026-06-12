@@ -264,6 +264,59 @@ func TestE2E_SendRawTx_ElicitationPromptContainsTxDetails(t *testing.T) {
 	}
 }
 
+// TestE2E_SendRawTx_ElicitationRequestIsSpecCompliant asserts the write-approval
+// elicitation carries a valid form `requestedSchema` and `mode: "form"`. Per the
+// MCP spec a form elicitation MUST include a requestedSchema; a request with only
+// a message (no schema) is rejected by spec-strict clients (e.g. Claude / Fable 5),
+// so the broadcast can never complete from those clients. The go-sdk in-process
+// test client is lenient (a nil schema validates), which is why this gap was
+// invisible until a strict client hit it -- so the assertion must inspect the
+// OUTGOING request params, not the mocked reply.
+func TestE2E_SendRawTx_ElicitationRequestIsSpecCompliant(t *testing.T) {
+	signedTx := buildSignedTxHex(t)
+	var elicited bool
+	var capturedSchema any
+	var capturedMode string
+
+	session := startTestServerWithConfig(t, e2eServerConfig{
+		approvalDefault: ApprovalRequired,
+	}, &mcp.ClientOptions{
+		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			elicited = true
+			capturedSchema = req.Params.RequestedSchema
+			capturedMode = req.Params.Mode
+			return &mcp.ElicitResult{Action: "accept"}, nil
+		},
+	})
+
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_send_raw_transaction",
+		Arguments: map[string]any{"signed_tx": signedTx},
+	}); err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if !elicited {
+		t.Fatal("elicitation was not requested under required approval")
+	}
+	if capturedSchema == nil {
+		t.Fatal("ElicitParams.RequestedSchema is nil; spec-strict clients reject a form elicitation with no schema")
+	}
+	schemaMap, ok := capturedSchema.(map[string]any)
+	if !ok {
+		t.Fatalf("RequestedSchema should marshal to an object map, got %T", capturedSchema)
+	}
+	if schemaMap["type"] != "object" {
+		t.Errorf("RequestedSchema[\"type\"] = %v, want \"object\"", schemaMap["type"])
+	}
+	if _, hasProps := schemaMap["properties"]; !hasProps {
+		t.Error("RequestedSchema should declare a \"properties\" object")
+	}
+	if capturedMode != "form" {
+		t.Errorf("ElicitParams.Mode = %q, want \"form\"", capturedMode)
+	}
+}
+
 func TestE2E_SendRawTx_AutoApproval_RPCError(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 

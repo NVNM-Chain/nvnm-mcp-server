@@ -199,17 +199,45 @@ func formatApprovalMessage(s *TxSummary) string {
 	)
 }
 
+// approvalFieldName is the single boolean property in the elicitation form
+// schema below.
+const approvalFieldName = "approve"
+
+// writeApprovalSchema is the form `requestedSchema` sent with every
+// write-approval elicitation. The MCP spec requires a form elicitation to
+// carry a requestedSchema; a bare message with no schema is rejected by
+// spec-strict clients (e.g. Claude / Fable 5), so without this the approval
+// round-trip never completes and a `required` write can never broadcast from
+// those clients. It is an object schema with one flat primitive property, per
+// the elicitation restriction that only top-level primitives are allowed. The
+// property is intentionally NOT required: a client that accepts without echoing
+// form content still succeeds, since the accept/decline/cancel action is the
+// primary decision (see RequestWriteApproval).
+var writeApprovalSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		approvalFieldName: map[string]any{
+			"type": "boolean",
+			"description": "Approve broadcasting this signed transaction to the " +
+				"chain. This action is irreversible. Decline or cancel to abort.",
+		},
+	},
+}
+
 // RequestWriteApproval uses MCP elicitation to ask the human user to approve a
 // transaction broadcast. Returns nil if approved, ErrWriteDeclined if declined
 // or canceled, and ErrElicitationUnsupported if the client has no elicitation
-// capability.
+// capability. The elicitation is sent as a spec-compliant `form` request
+// carrying writeApprovalSchema.
 func RequestWriteApproval(
 	ctx context.Context,
 	session *mcp.ServerSession,
 	summary *TxSummary,
 ) error {
 	result, err := session.Elicit(ctx, &mcp.ElicitParams{
-		Message: formatApprovalMessage(summary),
+		Mode:            "form",
+		Message:         formatApprovalMessage(summary),
+		RequestedSchema: writeApprovalSchema,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "does not support elicitation") {
@@ -223,6 +251,17 @@ func RequestWriteApproval(
 			"user action %q: %w",
 			result.Action, apperrors.ErrWriteDeclined,
 		)
+	}
+	// Defensive: honor an explicit negative in the returned form content even
+	// when the action was "accept" -- e.g. a client that renders the checkbox
+	// and lets the user uncheck it before submitting.
+	if v, ok := result.Content[approvalFieldName]; ok {
+		if approved, isBool := v.(bool); isBool && !approved {
+			return fmt.Errorf(
+				"user set %s=false: %w",
+				approvalFieldName, apperrors.ErrWriteDeclined,
+			)
+		}
 	}
 	return nil
 }
