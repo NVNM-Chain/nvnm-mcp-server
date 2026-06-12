@@ -299,7 +299,7 @@ parallel options without weakening the threat model:
 | Surface | Status | Trust delta |
 |---|---|---|
 | Snippet executed in user's local runtime | Shipped (Flow B) | OS keychain + crypto library + language runtime |
-| Static browser page, key generated in-browser via a vendored secp256k1 library | **Selected 2026-05-15.** Targeting Phase 10 design / Phase 11 launch. Pre-design notes: [WALLET_GENERATOR_PAGE_NOTES.md](WALLET_GENERATOR_PAGE_NOTES.md). | Browser + page integrity (SRI-pinned, open-source, strict CSP) + the hosting origin's DNS/TLS posture — structurally the same trust set MetaMask's "Create Wallet" page operates under |
+| Static browser page, key generated in-browser via a vendored secp256k1 library | **Selected 2026-05-15.** Targeting Phase 10 design / Phase 11 launch. Pre-design notes: [WALLET_GENERATOR_PAGE_NOTES.md](ARCHIVE/WALLET_GENERATOR_PAGE_NOTES.md). | Browser + page integrity (SRI-pinned, open-source, strict CSP) + the hosting origin's DNS/TLS posture — structurally the same trust set MetaMask's "Create Wallet" page operates under |
 | Existing external wallet (MetaMask, Rabby, Phantom, Ledger, Trezor) | Already supported (wizard accepts any address) | The wallet vendor's threat model |
 | Signed standalone binary `nvnm-keygen` published by Inveniam | Not pursued (superseded by webpage path 2026-05-15) | Same as snippet, packaged |
 
@@ -342,7 +342,7 @@ Re-proposals tend to take one of these forms. Each has a short answer:
 - **Phase 8.8 (2026-05-13).** `nvnm_setup_wizard` shipped with the
   snippet-based `needs_wallet` response. The decision to keep private
   keys out of the agent surface was made at design time and recorded
-  in [`PHASE_8_DESIGN.md § 3.7`](PHASE_8_DESIGN.md). No explicit
+  in [`planning/PHASE_8_DESIGN.md § 3.7`](planning/PHASE_8_DESIGN.md). No explicit
   threat-model document existed at that point; the design comment in
   [tools_setup_wizard.go:14-39](../internal/mcp/tools_setup_wizard.go#L14-L39)
   records the rationale inline.
@@ -355,7 +355,7 @@ Re-proposals tend to take one of these forms. Each has a short answer:
   snippet flow — the snippet flow is *not* being deprecated). The
   page targets users who cannot or will not paste a snippet into a
   local runtime. Pre-design notes captured in
-  [WALLET_GENERATOR_PAGE_NOTES.md](WALLET_GENERATOR_PAGE_NOTES.md);
+  [WALLET_GENERATOR_PAGE_NOTES.md](ARCHIVE/WALLET_GENERATOR_PAGE_NOTES.md);
   full design will live in the Phase 10 design doc when it is
   written. The threat-model statement updates to: *key bytes are
   generated in a process the user controls — either a local language
@@ -364,7 +364,7 @@ Re-proposals tend to take one of these forms. Each has a short answer:
   MCP server, the LLM agent, or the chat transcript.* The phishing
   surface introduced by the page flow is the one residual threat
   worth tracking explicitly; see [WALLET_GENERATOR_PAGE_NOTES.md § 5
-  "Phishing — the residual threat"](WALLET_GENERATOR_PAGE_NOTES.md)
+  "Phishing — the residual threat"](ARCHIVE/WALLET_GENERATOR_PAGE_NOTES.md)
   for the mitigation plan.
 
 ---
@@ -377,11 +377,11 @@ Re-proposals tend to take one of these forms. Each has a short answer:
   — companion document for threats that fall on consuming agents,
   including indirect prompt injection (which is one of the exfiltration
   vectors discussed in § 5.3).
-- [`docs/PHASE_8_DESIGN.md § 3.7`](PHASE_8_DESIGN.md) — the
+- [`docs/planning/PHASE_8_DESIGN.md § 3.7`](planning/PHASE_8_DESIGN.md) — the
   onboarding-tools design that established the snippet flow.
 - [`CLAUDE.md`](../CLAUDE.md) — project identity statement: *"Not a
   wallet. Holds zero private keys, ever."*
-- [`docs/WALLET_GENERATOR_PAGE_NOTES.md`](WALLET_GENERATOR_PAGE_NOTES.md)
+- [`docs/ARCHIVE/WALLET_GENERATOR_PAGE_NOTES.md`](ARCHIVE/WALLET_GENERATOR_PAGE_NOTES.md)
   — pre-design notes for the browser-page surface selected
   2026-05-15. Captures design points, the MANTRA-piggyback
   investigation, and the phishing-mitigation plan that this document

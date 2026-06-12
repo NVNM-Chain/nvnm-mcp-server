@@ -14,7 +14,7 @@ themselves are governed by Apache 2.0, not these Terms — they are the
 operator of their own deployment.
 
 **Currency:** reflects the resolved decisions captured in
-[docs/PHASE_11_DESIGN.md](PHASE_11_DESIGN.md) § 14 as of commit
+[docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 14 as of commit
 `e2de26c` (2026-05-27). Counsel-iteration items appear in bracketed
 provisional form and will be revised editorially against the live
 document, not as prerequisites for publication; see
@@ -57,7 +57,7 @@ These Terms do **not** apply to:
   operators and on-chain protocol rules;
 - The wallet-generator page at the wallet project's hosting URL — that
   surface is governed by its own Terms and Privacy Policy
-  ([docs/PHASE_11_DESIGN.md](PHASE_11_DESIGN.md) § 10, RD8);
+  ([docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 10, RD8);
 - Any third-party tool, agent, or framework you use to call the
   Service.
 
@@ -91,7 +91,7 @@ The version of these Terms you accept is the version posted at the time
 of acceptance. The Service may record the version identifier and
 timestamp of your acceptance as part of the credential record
 (`tos_version`, `tos_accepted_at`) per
-[docs/PHASE_11_DESIGN.md](PHASE_11_DESIGN.md) § 6 D-L4-2.
+[docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 6 D-L4-2.
 
 ## 4. Eligibility
 
@@ -116,7 +116,7 @@ You represent and warrant that:
 ### 5.1 Credential issuance
 
 Credentials are issued through the processes described in
-[docs/PHASE_11_DESIGN.md](PHASE_11_DESIGN.md) §§ 5–6:
+[docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) §§ 5–6:
 
 - **Self-serve API key request** — `POST /keys/request` enqueues a
   pending request that an Inveniam reviewer manually approves during
@@ -555,7 +555,7 @@ intellectual-property rights or confidentiality obligations.
   and 11.
 - [docs/SECURITY.md](../SECURITY.md) — security disclosure terms
   referenced in §§ 6.5 and 18.
-- [docs/PHASE_11_DESIGN.md](PHASE_11_DESIGN.md) § 14 — the resolved
+- [docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 14 — the resolved
   decisions that bake into this draft.
 - [LICENSE](../LICENSE) — Apache 2.0 license governing the Software.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — Developer Certificate of

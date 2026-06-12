@@ -192,12 +192,12 @@ state model, and whether security was designed in or bolted on.
   There is no private key on the server to steal — the single highest-leverage
   design decision in the system, and an invariant called out in
   `internal/config` and `docs/DESIGN.md`.
-- **Pre-mortem-driven design.** `docs/PHASE_8_DESIGN.md` §4 enumerates ten
+- **Pre-mortem-driven design.** `docs/planning/PHASE_8_DESIGN.md` §4 enumerates ten
   failure modes *before* implementation and §5 records the refinements applied
   in response (atomic key-file writes, legacy-tx opt-out, honest wizard states,
   fail-loud env-var migration).
 - **Honest state naming.** The wizard uses `funded_active` rather than the
-  misleading `ready_to_anchor` (`PHASE_8_DESIGN.md` §3.7.1) — a deliberate
+  misleading `ready_to_anchor` (`planning/PHASE_8_DESIGN.md` §3.7.1) — a deliberate
   design choice against a state name that would over-claim what the server can
   actually observe.
 - **Human-in-the-loop by default.** `WRITE_APPROVAL_DEFAULT` defaults to
@@ -253,7 +253,7 @@ migration, and the K8s / Helm deployment manifests.
   comment block in `deployment.yaml` documents the substitution; the real fix
   needs the release pipeline to emit a digest-stable image — **Phase 10**
   (DevOps Foundations). (SECURITY_AUDIT.md 2026-05-12 review, item 6.)
-- **CORS middleware** is intentionally not implemented (`PHASE_8_DESIGN.md` §2)
+- **CORS middleware** is intentionally not implemented (`planning/PHASE_8_DESIGN.md` §2)
   — only relevant once browser-based MCP clients hit a public deployment.
   **Phase 9.**
 

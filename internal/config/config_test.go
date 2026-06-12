@@ -811,7 +811,7 @@ func TestLoad_OnboardingURLs_EmptyByDefault(t *testing.T) {
 // sets nothing gets the Inveniam-hosted wallet generator page rather than
 // an empty URL that would silently degrade the wizard's needs_wallet
 // response. The default is the canonical URL from
-// docs/WALLET_GENERATOR_DESIGN.md RD15 (NVNM-Chain/nvnm-wallet-page).
+// docs/planning/WALLET_GENERATOR_DESIGN.md RD15 (NVNM-Chain/nvnm-wallet-page).
 func TestLoad_WalletGeneratorURL_DefaultsToCanonical(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)

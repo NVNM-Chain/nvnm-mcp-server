@@ -536,8 +536,6 @@ tests/
 docs/
   DESIGN.md                       Architecture and design decisions
   IMPLEMENTATION_PLAN.md          Phased implementation plan
-  PHASE_8_DESIGN.md               Phase 8 design contract (closed out)
-  PHASE_9_DESIGN.md               Phase 9 design contract (OSS Readiness)
   SECURITY_AUDIT.md               Security assessment and remediation results
   OWASP_AUDIT.md                  OWASP Top 10 self-audit (Phase 8.12)
   DATA_HANDLING.md                Privacy-by-design technical reference
@@ -551,10 +549,15 @@ docs/
   MAINNET_CUTOVER.md              Mainnet cutover playbook (Phase 10 input)
   METAMASK_GUIDE.md               End-user MetaMask integration walkthrough
   OVERVIEW.md                     Product-level overview
-  WALLET_GENERATOR_DESIGN.md      Wallet generator page design contract (sibling repo)
   TESTING.md                      Test framework, strategy, and results
   TOOL_REFERENCE.md               MCP tool schema reference
   RUNBOOK.md                      Operational runbook
+  planning/                       Phase design docs + process artifacts (historical; not needed to use the server)
+    PHASE_8_DESIGN.md             Phase 8 design contract (closed out)
+    PHASE_9_DESIGN.md             Phase 9 design contract (OSS Readiness)
+    PHASE_10_DESIGN.md            Phase 10 design contract (DevOps foundations)
+    PHASE_11_DESIGN.md            Phase 11 design contract (Product launch)
+    WALLET_GENERATOR_DESIGN.md    Wallet generator page design contract (sibling repo)
 .github/
   workflows/ci.yml           CI pipeline
   dependabot.yml             Automated dependency updates

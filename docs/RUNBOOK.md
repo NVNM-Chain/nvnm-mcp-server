@@ -338,7 +338,7 @@ The endpoint produces durable side effects (a queue row + an SMTP send on approv
 - Email validation via `net/mail.ParseAddress` rejects malformed addresses, and reviewer judgement during approve catches obviously bogus requests before any email is sent to a real address.
 - `IPFailRateLimiter` (shared with auth-failure tracking) provides a coarser outer ring.
 
-For high-spam threat environments, tighten `NVNM_KEY_REQUEST_RATE_LIMIT` further or front the endpoint with an edge CAPTCHA — the design intentionally does not bake CAPTCHA into the server (per `PHASE_9_DESIGN.md` D3).
+For high-spam threat environments, tighten `NVNM_KEY_REQUEST_RATE_LIMIT` further or front the endpoint with an edge CAPTCHA — the design intentionally does not bake CAPTCHA into the server (per `planning/PHASE_9_DESIGN.md` D3).
 
 Rejected requests produce a structured warning log line with the origin, remote address, method, and path. Operators can audit recent rejections with their log aggregator's filter on `"rejecting request with disallowed Origin"`.
 
@@ -685,7 +685,7 @@ Consider custom metrics (e.g. from Prometheus) on `mcp.server.active_requests` o
 ### Phase 10 RD1 capacity targets
 
 The Phase 10 OQ walkthrough resolved per-environment capacity targets
-(`docs/PHASE_10_DESIGN.md` § 14 RD1). They are *aspirational ceilings
+(`docs/planning/PHASE_10_DESIGN.md` § 14 RD1). They are *aspirational ceilings
 for capacity planning*, not contractual SLOs (the Service is provided
 on a "reasonable efforts" basis per `docs/TERMS.md` § 10).
 

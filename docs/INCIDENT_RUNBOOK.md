@@ -530,7 +530,7 @@ new dashboards.
 - [`docs/RUNBOOK.md`](RUNBOOK.md) — deployment + day-two operations.
 - [`docs/DATA_HANDLING.md`](DATA_HANDLING.md) § 7 — metrics taxonomy
   + privacy posture.
-- [`docs/PHASE_10_DESIGN.md`](PHASE_10_DESIGN.md) — design rationale
+- [`docs/planning/PHASE_10_DESIGN.md`](planning/PHASE_10_DESIGN.md) — design rationale
   for the Phase 10 SLI class label and capacity targets.
 - [`deploy/prometheus/alerts.yaml`](../deploy/prometheus/alerts.yaml) —
   the alert rules this document indexes.

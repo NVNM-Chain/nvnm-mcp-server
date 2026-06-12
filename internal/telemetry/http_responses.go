@@ -3,7 +3,7 @@
 
 package telemetry
 
-// Phase 10 RD3/RD4 (docs/PHASE_10_DESIGN.md § 14): HTTP response counter with a
+// Phase 10 RD3/RD4 (docs/planning/PHASE_10_DESIGN.md § 14): HTTP response counter with a
 // `class` label so operators can alert on the SLI ratio at rule-evaluation
 // time without recomputing. The four classes intentionally collapse the full
 // status-code space into the categories operators actually page on:

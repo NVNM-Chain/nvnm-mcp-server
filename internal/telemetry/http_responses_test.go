@@ -6,7 +6,7 @@ package telemetry
 import "testing"
 
 // TestClassifyStatus pins the four-class mapping defined in Phase 10 RD3/RD4
-// (docs/PHASE_10_DESIGN.md § 14). Boundaries matter — the alert rules in
+// (docs/planning/PHASE_10_DESIGN.md § 14). Boundaries matter — the alert rules in
 // deploy/prometheus/alerts.yaml partition the status-code space by these
 // labels, so a mis-categorized boundary (e.g. 408 as client_error) would
 // silently move customer-impact responses off the customer-impact SLI.
