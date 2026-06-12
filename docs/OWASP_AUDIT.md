@@ -38,7 +38,7 @@ boundary (operator, reverse proxy, consuming agent).
 
 | # | Category | Disposition | One-line |
 |---|---|---|---|
-| A01 | Broken Access Control | **PARTIAL** | MCP transport authenticated + RBAC-gated; health/metrics endpoints rely on network isolation; RBAC enforcement is conditional on roles being assigned. |
+| A01 | Broken Access Control | **PARTIAL** | MCP transport authenticated + RBAC-gated (under `MCP_KEYLESS_READS=true` the read surface is intentionally anonymous; only `evm_send_raw_transaction` is gated); health/metrics endpoints rely on network isolation; RBAC enforcement is conditional on roles being assigned. |
 | A02 | Cryptographic Failures | **PARTIAL** | API keys + admin key sha256-hashed at rest with constant-time compare; OTLP TLS default-on; MCP HTTP transport TLS is a reverse-proxy responsibility. |
 | A03 | Injection | **COVERED** | No SQL/shell/template surface; calldata is typed ABI-encoded, never concatenated. Indirect prompt injection via on-chain data is documented as a consumer-side concern. |
 | A04 | Insecure Design | **COVERED** | Prepare-sign-submit keeps zero keys server-side; pre-mortem-driven design; honest wizard state names; human-approval elicitation on writes. |
@@ -94,7 +94,8 @@ in-scope only as a local-process boundary.
 
 ### Disposition
 **PARTIAL.** The MCP transport is authenticated and RBAC-gated with a
-fail-closed posture. The two named gaps — conditional RBAC and unauthenticated
+fail-closed posture (under `MCP_KEYLESS_READS=true` the read surface is
+intentionally anonymous; only `evm_send_raw_transaction` is gated). The two named gaps — conditional RBAC and unauthenticated
 `:9090` — are documented operator-boundary / Phase 10 items, not silent holes.
 
 ---

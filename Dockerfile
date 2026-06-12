@@ -23,5 +23,10 @@ COPY --from=builder /build/abi /app/abi
 EXPOSE 8080
 EXPOSE 9090
 
+# Run as the distroless nonroot user (UID/GID 65532) so the image itself
+# is non-root even outside Kubernetes. The k8s securityContext also pins
+# runAsUser=65532; this makes a plain `docker run` match that posture.
+USER 65532:65532
+
 ENTRYPOINT ["/nvnm-mcp-server"]
 CMD ["--transport", "http"]

@@ -47,29 +47,31 @@ type overviewOutput struct {
 
 // whatIsNVNMChainText is the 2-3 sentence "what is this chain"
 // explanation that EVERY consumer of the overview tool reads. It
-// MUST include the privacy-by-design property because that property
+// MUST set expectations about on-chain observability, because that
 // shapes what `wallet_status` and the wizard can and cannot tell the
 // agent about the wallet's history on chain.
 const whatIsNVNMChainText = "NVNM Chain is an EVM L2 on MANTRA Chain " +
 	"used as a neutral notary for document anchoring. It stores only " +
 	"one-way hash fingerprints (SHA-256) of documents, never the " +
-	"documents themselves, and the anchoring precompile deliberately " +
-	"emits no events -- so the chain is meaningless to passive " +
-	"observers. Counterparties exchange the underlying file off-band " +
-	"on a need-to-know basis and verify by recomputing the hash."
+	"documents themselves. Anchor writes are publicly observable: " +
+	"add_record logs the SHA-256 hash and add_registry logs the " +
+	"registry name in public on-chain logs. A hash is one-way, so the " +
+	"underlying document is not derivable -- counterparties exchange " +
+	"the file off-band and verify by recomputing the hash; encode or " +
+	"salt sensitive registry names before anchoring."
 
-// privacyByDesignText restates the property with its consequence for
-// what this server can and cannot do for an agent. The wizard message
-// in funded_active state echoes the same constraint so a consumer
-// reading either tool's output reaches the same conclusion.
-const privacyByDesignText = "Because the precompile emits no events, " +
-	"only you (or your user) know what your transactions on this chain " +
-	"did. This server's onboarding wizard and wallet_status tool can " +
-	"tell you whether a wallet has been funded or has sent any " +
-	"transactions, but not whether it has anchored anything " +
-	"specifically -- by design, that information lives off-chain. " +
-	"Do not expect a tool that decodes RecordAdded events; that " +
-	"feature would undermine the privacy property."
+// privacyByDesignText states the consequence for what this server can
+// and cannot do for an agent. The wizard message in funded_active
+// state echoes the same constraint so a consumer reading either tool's
+// output reaches the same conclusion.
+const privacyByDesignText = "This server's onboarding wizard and " +
+	"wallet_status tool read only balance and nonce -- never " +
+	"transaction contents -- so they can tell you whether a wallet has " +
+	"been funded or has sent transactions, but not whether it anchored " +
+	"anything specifically. The anchored data itself is public on-chain " +
+	"(the SHA-256 hash and registry name appear in transaction logs), " +
+	"but a hash does not reveal the underlying document; only you (or " +
+	"your user) hold the pre-image."
 
 // canonicalJourney is the recommended-first-time-agent sequence.
 // Listed verbatim in the overview response so an agent that calls
@@ -122,8 +124,10 @@ var prereqsSummary = []string{
 	"A signing path: either a browser wallet (MetaMask via the wallet_tx_request " +
 		"field returned by anchor_prepare_*) or a local/headless signer " +
 		"(sign raw_tx, broadcast via evm_send_raw_transaction).",
-	"For write tools: an API key on this server with the writer or admin role " +
-		"(per the deployment's auth policy).",
+	"For broadcasting (evm_send_raw_transaction): an API key on this server " +
+		"with the writer or admin role. The anchor_prepare_* tools return " +
+		"unsigned bytes and may be callable without authentication under a " +
+		"keyless-read deployment (per the deployment's auth policy).",
 }
 
 func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {

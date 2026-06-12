@@ -261,7 +261,7 @@ Optional. Enabled via `$OTEL_EXPORTER_OTLP_ENDPOINT` (OTLP gRPC),
 |-----------------------------------|-----------|-----------------------|
 | `mcp.server.tool.duration`        | histogram | tool, status          |
 | `mcp.server.tool.calls`           | counter   | tool, status          |
-| `mcp.server.tool.errors`          | counter   | tool, error_type      |
+| `mcp.server.tool.errors`          | counter   | tool                  |
 | `mcp.server.active_requests`      | gauge     | —                     |
 | `evm.rpc.duration`                | histogram | method                |
 | `evm.rpc.errors`                  | counter   | method                |

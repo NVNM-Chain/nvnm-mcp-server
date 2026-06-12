@@ -9,6 +9,48 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Completed the "anchor precompile emits no events" privacy-claim correction
+  begun in rc6 across **all** remaining surfaces — the rc6 pass corrected only
+  the `initialize` instructions string and `PRIVACY_DISCUSSION.md` and missed
+  the rest. The false claim (the precompile DOES emit events exposing the
+  anchored SHA-256 hash and the registry name in public logs) is now corrected
+  in the runtime tool strings (`nvnm_overview` incl. the `privacy_by_design`
+  response field, `wallet_status`, `nvnm_setup_wizard`), and in `DESIGN.md`,
+  `README.md`, `TOOL_REFERENCE.md`, `PHASE_8_DESIGN.md`, and
+  `marketing/PRODUCT_BRIEF.md`. Where a tool's limitation was justified by the
+  false "no events" premise, the true reason is now stated: `wallet_status` and
+  the wizard read only balance and nonce, never transaction contents.
+- `DESIGN.md` no longer claims error messages are "never recorded in traces" —
+  they are attached to internal span events for debugging (sanitized before
+  reaching clients), matching `DATA_HANDLING.md`. Removed a non-existent
+  `error_type` label from the `mcp.server.tool.errors` metric row in
+  `DATA_HANDLING.md` (the code emits `mcp.method` + `mcp.tool.name` only).
+
+### Changed
+
+- Customer-facing surfaces that presented authentication as universal now carry
+  the keyless-read qualifier: under `MCP_KEYLESS_READS=true` (the Inveniam-hosted
+  default) only `evm_send_raw_transaction` authenticates and records a per-client
+  identifier; the `anchor_prepare_*` tools are auth-exempt and anonymous reads
+  carry no `client_id` (`README.md`, `OVERVIEW.md`, `TOOL_REFERENCE.md`,
+  `OWASP_AUDIT.md`, `marketing/PRODUCT_BRIEF.md`, and the `nvnm_overview`
+  runtime prerequisites text).
+
+### Security
+
+- The container image now runs as the distroless non-root user (`USER 65532:65532`
+  in the Dockerfile), so a plain `docker run` matches the non-root posture the k8s
+  `securityContext` already enforces.
+
+### Documentation
+
+- Recorded the hosted MCP service endpoints (`mcp-testnet.nvnmchain.io` /
+  `mcp.nvnmchain.io`) in the canonical reference tables (`DESIGN.md` § Target
+  Chain and the `README.md` quick-reference) — they were previously only in
+  roadmap docs.
+
 ## [1.0.0-rc6] - 2026-06-11
 
 > **Version naming note.** This release is tagged `v1.0.0-rc6` (no dot),

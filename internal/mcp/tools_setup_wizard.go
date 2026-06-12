@@ -20,8 +20,8 @@ import (
 // guidance. The state names are intentionally honest -- in particular
 // the `funded_active` state name resists the (incorrect) reading
 // that the wizard could tell the agent "you have anchored." The
-// chain emits no events; only the agent's user knows what their
-// transactions on chain did.
+// wizard reads only balance and nonce, never transaction contents;
+// only the agent's user knows what their transactions on chain did.
 
 const (
 	// WizardStateNeedsWallet means the caller did not provide an
@@ -35,9 +35,9 @@ const (
 	// WizardStateFundedUnused means balance > 0 but nonce == 0.
 	WizardStateFundedUnused = "funded_unused"
 	// WizardStateFundedActive means balance > 0 and nonce > 0.
-	// This says "has sent any tx," NOT "has anchored," because
-	// the chain emits no events. The response text repeats this
-	// caveat verbatim.
+	// This says "has sent any tx," NOT "has anchored," because the
+	// wizard reads only balance and nonce, never transaction
+	// contents. The response text repeats this caveat verbatim.
 	WizardStateFundedActive = "funded_active"
 )
 
@@ -83,7 +83,8 @@ func registerSetupWizardTool(srv *mcp.Server, evmClient evm.Client, cfg *config.
 			"`funded_active`) for the supplied (optional) address. " +
 			"Returns prose guidance + a wallet snapshot. Important: " +
 			"`funded_active` means \"has sent any transaction,\" not " +
-			"\"has anchored\" -- the chain emits no events by design.",
+			"\"has anchored\" -- the wizard reads only balance and nonce, " +
+			"never transaction contents.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeSetupWizardHandler(evmClient, cfg))
 }
@@ -227,11 +228,11 @@ func fundedUnusedResponse(snap *walletSnapshot) setupWizardOutput {
 func fundedActiveResponse(snap *walletSnapshot) setupWizardOutput {
 	msg := "Wallet has " + snap.BalanceHuman + " and has sent " +
 		"transactions (nonce > 0). Important: this state means \"has " +
-		"sent any transaction,\" NOT \"has anchored.\" The chain emits " +
-		"no events by design, so only you (or your user) know what " +
-		"those transactions did. Use the anchor_prepare_* tools to " +
-		"build new writes, or anchor_get_records to browse existing " +
-		"records visible to you off-chain."
+		"sent any transaction,\" NOT \"has anchored.\" This wizard reads " +
+		"only balance and nonce, never transaction contents, so only you " +
+		"(or your user) know what those transactions did. Use the " +
+		"anchor_prepare_* tools to build new writes, or anchor_get_records " +
+		"to browse on-chain records."
 	return setupWizardOutput{
 		State:   WizardStateFundedActive,
 		Message: msg,

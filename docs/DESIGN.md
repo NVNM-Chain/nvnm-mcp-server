@@ -19,11 +19,12 @@ NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set t
 | EVM RPC | `https://evm.testnet.nvnmchain.io` | `https://evm.nvnmchain.io` |
 | Cosmos RPC | `https://rpc.testnet.nvnmchain.io` | `https://rpc.nvnmchain.io` |
 | EVM explorer | `https://explorer.evm.testnet.nvnmchain.io` | `https://evm.explorer.nvnmchain.io` |
+| MCP service (hosted) | `https://mcp-testnet.nvnmchain.io` | `https://mcp.nvnmchain.io` |
 | Anchor precompile | `0x0000000000000000000000000000000000000A00` | `0x0000000000000000000000000000000000000A00` |
 
-> **Privacy-by-design.** The chain stores only hash fingerprints of data (one-way SHA-256), never the underlying data itself. The anchoring precompile deliberately emits no events. Records on chain are meaningless to passive observers; counterparties exchange the underlying file off-band on a need-to-know basis and verify by recomputing the hash. The chain is a neutral notary that never reads documents.
+> **Privacy-by-design.** The chain stores only hash fingerprints of data (one-way SHA-256), never the underlying data itself. Anchor writes are publicly observable: `add_record` logs the SHA-256 hash and `add_registry` logs the registry name in public on-chain logs. A hash is one-way, so the underlying document is not derivable — counterparties exchange the file off-band and verify by recomputing the hash; encode or salt sensitive registry names before anchoring. The chain is a neutral notary that never reads documents.
 >
-> *Design implication for this server:* the onboarding wizard and `wallet_status` surface only activity-level signals (e.g., "has this wallet sent any transactions?") and never content-level signals (e.g., "which registries did it touch"). The skipped feature "decoded events in receipts" is correctly off the roadmap — decoding would undermine the privacy design.
+> *Design implication for this server:* the onboarding wizard and `wallet_status` surface only activity-level signals (e.g., "has this wallet sent any transactions?") and never content-level signals (e.g., "which registries did it touch"). Decoding receipts is out of scope; it would expose nothing beyond what the public logs already carry (the hash and registry name).
 
 ```
                                           ┌─────────────────────┐
@@ -565,7 +566,7 @@ Vendor-agnostic telemetry via OpenTelemetry SDK:
 - `evm.rpc.duration` histogram -- upstream RPC latency
 - `evm.rpc.errors` counter -- errors by method
 
-**Privacy:** tool arguments, return values, error messages, and private keys are never recorded in traces or metrics.
+**Privacy:** tool arguments, return values, and private keys are never recorded in traces or metrics; error messages are attached to internal trace span events for debugging only and are sanitized before reaching clients.
 
 ### Health Check Endpoints
 

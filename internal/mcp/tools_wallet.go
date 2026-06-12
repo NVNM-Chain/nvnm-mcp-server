@@ -18,10 +18,10 @@ import (
 // wallet_status is the one-shot wallet snapshot tool. It is the
 // programmatic equivalent of the setup wizard's state derivation,
 // without the prose guidance. Returned `status` values are honest
-// (see the type-level comment) and tied to the chain's
-// privacy-by-design property: this server cannot tell an agent "this
-// wallet has anchored a record" because the chain emits no events --
-// only that the wallet has been funded or has sent transactions.
+// (see the type-level comment): this server cannot tell an agent "this
+// wallet has anchored a record" because wallet_status reads only
+// balance and nonce, never transaction contents -- only that the
+// wallet has been funded or has sent transactions.
 
 const (
 	// WalletStatusUnfunded means balance == 0. The wallet exists
@@ -33,9 +33,9 @@ const (
 	WalletStatusFundedUnused = "funded_unused"
 	// WalletStatusFundedActive means balance > 0 and nonce > 0.
 	// The wallet has sent at least one transaction. This says
-	// nothing about WHAT those transactions did -- per the
-	// privacy-by-design property the server cannot detect
-	// anchoring specifically.
+	// nothing about WHAT those transactions did -- wallet_status
+	// reads only balance and nonce, never transaction contents,
+	// so it cannot detect anchoring specifically.
 	WalletStatusFundedActive = "funded_active"
 )
 
@@ -66,9 +66,9 @@ func registerWalletTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Confi
 			"nonce, whether any transaction has been sent, and a " +
 			"three-state status (`unfunded` / `funded_unused` / " +
 			"`funded_active`). Status `funded_active` means \"has sent " +
-			"any transaction,\" not \"has anchored\" -- by design this " +
-			"chain emits no events, so the server cannot detect " +
-			"anchoring specifically.",
+			"any transaction,\" not \"has anchored\" -- wallet_status " +
+			"reads only balance and nonce, never transaction contents, " +
+			"so it cannot detect anchoring specifically.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeWalletStatusHandler(evmClient, cfg))
 }

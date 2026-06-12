@@ -19,7 +19,10 @@ Complete schema reference for all 21 tools exposed by the NVNM Chain MCP Server.
 > in the JWT, tools are gated by role. Reads require `reader`, `writer`,
 > `admin`, or `automation`. Writes require `writer`, `admin`, or `automation`.
 > `anchor_prepare_grant_role` requires `admin`. Calls without sufficient role
-> return `permission denied`.
+> return `permission denied`. Under keyless reads (`MCP_KEYLESS_READS=true`, the
+> Inveniam-hosted default) only `evm_send_raw_transaction` authenticates and
+> carries a per-client identifier; the `anchor_prepare_*` tools are auth-exempt
+> and anonymous reads carry no `client_id`.
 >
 > **Per-client rate limiting:** When configured (`MCP_RATE_LIMIT`,
 > `MCP_RATE_BURST`), requests beyond the per-client token budget receive
@@ -134,7 +137,7 @@ _No parameters._
 | `token_native` | `string` | Native gas token symbol (e.g. `INVE`). |
 | `token_wrapped` | `string` | Wrapped token symbol (e.g. `WINVE`). |
 | `what_is_nvnm_chain` | `string` | 2-3 sentence prose explanation. |
-| `privacy_by_design` | `string` | Verbatim caveat: the precompile emits no events, so only the caller knows what their transactions did. |
+| `privacy_by_design` | `string` | Verbatim caveat: anchored data (hash + registry name) is public on-chain, but a hash doesn't reveal the document; wallet_status reads only balance/nonce so it can't tell what a wallet anchored. |
 | `prereqs` | `[]string` | Prerequisites a caller needs before interacting. |
 | `canonical_journey` | `[]object` | Recommended first-time-agent sequence; each entry is `{step, tool, hint}`. |
 | `next_actions` | `[]NextAction` | Hints toward `wallet_status` / `nvnm_setup_wizard`. |
@@ -147,7 +150,7 @@ None: pure-compute, no RPC.
 
 ## wallet\_status
 
-One-shot snapshot for an EVM address. Returns balance, nonce, and a three-state status -- `unfunded` / `funded_unused` / `funded_active`. The status field is intentionally honest: `funded_active` means "has sent any transaction," NOT "has anchored," because the chain emits no events by design.
+One-shot snapshot for an EVM address. Returns balance, nonce, and a three-state status -- `unfunded` / `funded_unused` / `funded_active`. The status field is intentionally honest: `funded_active` means "has sent any transaction," NOT "has anchored," because `wallet_status` reads only balance and nonce, never transaction contents.
 
 ### Input Parameters
 
@@ -206,7 +209,7 @@ Four-state prose-guided onboarding flow: `needs_wallet` / `unfunded` / `funded_u
 
 ### Important caveat
 
-`funded_active` says "has sent any transaction," NOT "has anchored." The chain emits no events by design, so this server cannot detect anchoring specifically. The response prose repeats this caveat verbatim.
+`funded_active` says "has sent any transaction," NOT "has anchored," because `wallet_status` reads only balance and nonce, never transaction contents — so this server cannot detect anchoring specifically. The response prose repeats this caveat verbatim.
 
 ---
 

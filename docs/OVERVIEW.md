@@ -29,7 +29,7 @@ This is not a raw JSON-RPC passthrough. It exposes **21 curated, typed tools** w
 
 **Observable by Default.** OpenTelemetry traces and Prometheus metrics on every tool call and upstream RPC request. Per-client identity flows through audit logs and OTel spans. Health and readiness probes for Kubernetes and cloud ALB health checks.
 
-**Production-Grade Security.** Security hardened with a comprehensive security assessment. Bearer token authentication with per-client identity, error sanitization, input size limits, rate limiting, circuit breakers, distroless container, non-root execution, and dependency vulnerability scanning in CI.
+**Production-Grade Security.** Security hardened with a comprehensive security assessment. Bearer token authentication with per-client identity (on authenticated requests; keyless reads carry no per-client identity), error sanitization, input size limits, rate limiting, circuit breakers, distroless container, non-root execution, and dependency vulnerability scanning in CI.
 
 ---
 
@@ -113,7 +113,7 @@ Your Agent          MCP Server           Your Signer          NVNM Chain
 
 ## Security Posture
 
-- Bearer token authentication with per-client identity and full audit trail
+- Bearer token authentication with per-client identity and full audit trail (on authenticated requests; keyless reads carry no per-client identity)
 - Human-in-the-loop write approval -- configurable per client (`required` or `auto`)
 - Private keys never touch the server -- prepare-sign-submit by design
 - Error sanitization prevents internal details from leaking to callers
