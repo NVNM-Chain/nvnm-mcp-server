@@ -6,8 +6,19 @@ name: Image
 # Git tags (`:v1.2.3`, `:1.2`, `:1`). Pull requests build but do NOT
 # push, so a Dockerfile regression fails the PR before it can land.
 #
-# Registry: GHCR (chosen 2026-05-18, Phase 9 OSS decision). The repo's
-# default GITHUB_TOKEN scopes packages:write so no PAT is required.
+# Registry: GHCR is the registry of record (chosen 2026-05-18, Phase 9
+# OSS decision). The repo's default GITHUB_TOKEN scopes packages:write so
+# no PAT is required.
+#
+# Optional Docker Hub mirror: when the repo VARIABLE `DOCKERHUB_IMAGE` is
+# set (e.g. "docker.io/<org>/nvnm-mcp-server"), every tag is also pushed
+# to Docker Hub and Cosign-signed there. It additionally requires the repo
+# SECRETS `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
+# token). If the variable is unset, the workflow pushes to GHCR only --
+# the mirror degrades gracefully and never blocks a release. (Existing
+# tags are NOT backfilled to Docker Hub; copy them once with
+# `docker buildx imagetools create -t docker.io/<org>/nvnm-mcp-server:1.0.0-rc7
+# ghcr.io/nvnm-chain/nvnm-mcp-server:1.0.0-rc7`.)
 #
 # Phase 9.7. Companion to the existing release.yml which signs binaries.
 
@@ -51,6 +62,32 @@ jobs:
         # invocation, so the bump is drop-in).
         uses: docker/setup-buildx-action@v4
 
+      - name: Compute image list
+        # GHCR is always a target (the registry of record). Docker Hub is
+        # an OPTIONAL mirror: it is added only when the repo variable
+        # DOCKERHUB_IMAGE is set (e.g. "docker.io/<org>/nvnm-mcp-server").
+        # When it is unset the workflow behaves exactly as GHCR-only, so a
+        # missing-mirror config never breaks a release. The mirror also
+        # needs the DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets (see the
+        # Docker Hub login step).
+        id: images
+        env:
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+        run: |
+          set -euo pipefail
+          IMAGES="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          if [ -n "${DOCKERHUB_IMAGE}" ]; then
+            IMAGES="${IMAGES}"$'\n'"${DOCKERHUB_IMAGE}"
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "list<<EOF"
+            echo "${IMAGES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Compute image tags
         id: meta
         # v6 (2026-03-05) defaults to Node.js 24. The only behaviour
@@ -59,7 +96,7 @@ jobs:
         # has no `#` chars, so this is a no-op for us.
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.images.outputs.list }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -80,6 +117,19 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub (mirror)
+        # Only runs when the Docker Hub mirror is configured (DOCKERHUB_IMAGE
+        # variable set, from the Compute image list step) and we are pushing
+        # (not a PR). Requires repo secrets DOCKERHUB_USERNAME and
+        # DOCKERHUB_TOKEN (a Docker Hub access token, not the account
+        # password). If unset, the workflow pushes to GHCR only.
+        if: github.event_name != 'pull_request' && steps.images.outputs.dockerhub == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build & push multi-arch image
         id: build
