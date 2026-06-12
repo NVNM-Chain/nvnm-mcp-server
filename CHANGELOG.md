@@ -9,6 +9,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc6] - 2026-06-11
+
+> **Version naming note.** This release is tagged `v1.0.0-rc6` (no dot),
+> continuing the `v1.0.0-rc4` / `v1.0.0-rc5` form rather than the dotted
+> `v1.0.0-rc.N` used through rc.3. The no-dot form is deliberate: under SemVer
+> pre-release precedence a dotted `1.0.0-rc.6` would sort *before* the existing
+> `1.0.0-rc5` (the identifier `"rc"` is a prefix of `"rc5"`, so `"rc" < "rc5"`),
+> ranking this release as older than its predecessor. `rc6` sorts correctly
+> after `rc5`. The CHANGELOG header matches the tag string exactly.
+
 ### Security
 
 - Bumped the Go toolchain to 1.26.4 (`go.mod` directive, Dockerfile base
@@ -32,6 +42,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unaffected. The five `Load()`-level flags are grouped into a new
   `loadFeatureFlags` parser.
 
+- `MCP_KEYLESS_READS` is now set explicitly in the Helm `values.yaml` and
+  k8s `configmap.yaml` (self-hoster default `false`) and documented in
+  `RUNBOOK.md` as a **required `true` invariant for the Inveniam-hosted
+  deployment** — the published privacy policy represents that deployment as
+  keyless-read, so running `false` there would falsify it. Self-hosters
+  choose their own posture. No code change; the env var already existed.
+
 ### Fixed
 
 - MCP authorization-spec compliance for HTTP transport: Claude-class clients
@@ -51,6 +68,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   JWTs supplied out-of-band, not an OAuth flow. Credential validation, RBAC,
   and rate limiting are unchanged. Server-side behavior verified end-to-end
   through the full middleware chain.
+
+- Corrected a false "non-eventful" privacy claim. The server's `initialize`
+  instructions string (returned to every MCP client at session start) and
+  `PRIVACY_DISCUSSION.md` stated the anchor precompile "emits no events." On-chain
+  inspection (`eth_getLogs`) shows `add_record` emits an event exposing the
+  anchored SHA-256 hash and `add_registry` exposes the registry name in public
+  logs. The instructions string now states the true non-custody property (no
+  server-side keys; prepare-sign-submit) and that anchored data is public —
+  encode anything sensitive before anchoring. Supporting docs carry a dated
+  retraction. No behavior change beyond the instructions-string content.
 
 ## [1.0.0-rc.5] - 2026-06-02
 
@@ -1207,7 +1234,9 @@ typed JSON with `snake_case` field names.
   script must be extended.
 - Self-serve API key request workflow is on the backlog (Medium priority).
 
-[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc.3...HEAD
+[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc6...HEAD
+[1.0.0-rc6]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc6
+[1.0.0-rc.5]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc5
 [1.0.0-rc.3]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/inveniamcapital/NVNM_MCP_Server/releases/tag/v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/inveniamcapital/NVNM_MCP_Server/releases/tag/v1.0.0-rc.1

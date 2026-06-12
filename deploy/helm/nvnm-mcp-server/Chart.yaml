@@ -2,17 +2,14 @@ apiVersion: v2
 name: nvnm-mcp-server
 description: Helm chart for the NVNM Chain MCP Server
 type: application
-# Chart version. Bumped to 0.2.3 alongside appVersion 1.0.0-rc.5
-# (Phase 11 L3 self-serve key endpoint + Phase 10 RD3 HTTP SLI +
-# Phase 9.14 k8s manifest cleanups). Bump independently of
-# appVersion when chart templates / values change in a way that
-# affects rendered output -- the default image tag changing counts.
-# The chart did not render-change between 0.2.2 and 0.2.3 EXCEPT for
-# the values.yaml image.tag default being cleared (PR #13), which is
-# why this is a chart bump and not just an appVersion bump.
-version: 0.2.3
+# Chart version. Bumped to 0.2.4 alongside appVersion 1.0.0-rc6: the
+# rendered output changes because values.yaml gained an explicit
+# MCP_KEYLESS_READS env key (#20). Bump independently of appVersion
+# when chart templates / values change in a way that affects rendered
+# output -- the default image tag changing also counts.
+version: 0.2.4
 # App version (image tag the chart pulls by default). Tracks
 # internal/version/version.go (the canonical app version) and is
 # bumped on each release alongside it. Pulls a Cosign-signed manifest
 # from ghcr.io/nvnm-chain/nvnm-mcp-server.
-appVersion: "1.0.0-rc.5"
+appVersion: "1.0.0-rc6"
