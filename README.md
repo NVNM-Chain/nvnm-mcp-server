@@ -188,9 +188,28 @@ export JWT_CLOCK_SKEW=60s                           # default 60s
 export JWT_ROLES_CLAIM=roles                        # default "roles"
 ```
 
-The `automation` role in the JWT maps to `auto` write approval. All other roles default to `required`.
+The `automation` role in the JWT maps to `auto` write approval (it bypasses the human write-approval prompt). All other roles default to `required`.
 
-The authenticated client ID (API key ID or JWT `sub`) flows into all audit logs and OTel spans.
+The authenticated client ID — the API key's label, or a keyed HMAC of the JWT `sub` (the raw `sub`, which is email-reversible, is never logged) — flows into audit logs and OTel spans for authenticated requests.
+
+#### Setting up the FusionAuth side
+
+To use the `fusionauth` provider, configure these in your FusionAuth instance (this is what an operator/identity admin sets up; the server only validates the resulting tokens):
+
+1. **Create an Application.** Its **Application ID** (UUID) becomes `FUSIONAUTH_APPLICATION_ID`. FusionAuth issues access tokens with `aud` set to this ID, which the server validates against — so this lines up automatically.
+2. **Define these Application Roles** (exact names — the server's RBAC checks them literally): `reader`, `writer`, `admin`, `automation`. FusionAuth emits a user's application roles in the access-token `roles` claim **once the user is registered to the Application**.
+3. **Register consumers to the Application and assign roles:**
+   - `reader` — read tools only
+   - `writer` — reads + broadcast writes (`evm_send_raw_transaction`)
+   - `admin` — the above + `anchor_prepare_grant_role`
+   - `automation` — **bypasses the human write-approval prompt** (`write_approval: auto`); assign only to unattended pipelines.
+4. **JWKS** is the standard `<FUSIONAUTH_URL>/.well-known/jwks.json` (auto-discovered unless `FUSIONAUTH_JWKS_URL` is set); ensure it is reachable from the server.
+5. Clients obtain a JWT from FusionAuth (interactive login, or a client-credentials / Entity grant) and present it as `Authorization: Bearer <jwt>`.
+
+**Gotchas:**
+- The `roles` claim must actually populate. An empty `roles` array makes RBAC a no-op — writes would not be role-gated. For machine-to-machine / Entity grants you may need a JWT-populate lambda to inject `roles`.
+- `MCP_CLIENT_ID_HMAC_KEY` is **required** in `fusionauth` mode (startup fails loud without it). It keys the one-way HMAC that turns the JWT `sub` into the logged `client_id`, keeping the email-reversible `sub` out of logs.
+- The server validates `iss` (== `FUSIONAUTH_ISSUER`, default `FUSIONAUTH_URL`) and `aud` (== `FUSIONAUTH_APPLICATION_ID`) on every token; a mismatch is rejected.
 
 ## Configuration
 
