@@ -9,6 +9,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc7] - 2026-06-12
+
+> **Version naming note.** Tagged `v1.0.0-rc7` (no dot), continuing the
+> `rc4`/`rc5`/`rc6` form. A dotted `1.0.0-rc.7` would sort *before* `1.0.0-rc6`
+> under SemVer pre-release precedence (see the rc6 note below), so the no-dot
+> form is required for correct ordering. The CHANGELOG header matches the tag.
+
 ### Fixed
 
 - Completed the "anchor precompile emits no events" privacy-claim correction
@@ -1288,7 +1295,8 @@ typed JSON with `snake_case` field names.
   script must be extended.
 - Self-serve API key request workflow is on the backlog (Medium priority).
 
-[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc6...HEAD
+[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc7...HEAD
+[1.0.0-rc7]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc7
 [1.0.0-rc6]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc6
 [1.0.0-rc.5]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc5
 [1.0.0-rc.3]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc.3
