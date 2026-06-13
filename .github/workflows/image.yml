@@ -8,17 +8,31 @@ name: Image
 #
 # Registry: GHCR is the registry of record (chosen 2026-05-18, Phase 9
 # OSS decision). The repo's default GITHUB_TOKEN scopes packages:write so
-# no PAT is required.
+# no PAT is required. The GHCR build/push/sign steps are FATAL -- they
+# gate the job.
 #
 # Optional Docker Hub mirror: when the repo VARIABLE `DOCKERHUB_IMAGE` is
-# set (e.g. "docker.io/<org>/nvnm-mcp-server"), every tag is also pushed
-# to Docker Hub and Cosign-signed there. It additionally requires the repo
-# SECRETS `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
-# token). If the variable is unset, the workflow pushes to GHCR only --
-# the mirror degrades gracefully and never blocks a release. (Existing
-# tags are NOT backfilled to Docker Hub; copy them once with
-# `docker buildx imagetools create -t docker.io/<org>/nvnm-mcp-server:1.0.0-rc7
-# ghcr.io/nvnm-chain/nvnm-mcp-server:1.0.0-rc7`.)
+# set (e.g. "docker.io/<org>/nvnm-mcp-server"), each GHCR tag is mirrored
+# to Docker Hub by re-tagging the *already-built* GHCR manifest with
+# `docker buildx imagetools create` (no rebuild) and Cosign-signed there.
+# The mirror requires the repo SECRETS `DOCKERHUB_USERNAME` and
+# `DOCKERHUB_TOKEN` (a Docker Hub access token with Read & Write scope --
+# a narrower token cannot pull buildkit helper images and will fail).
+#
+# The mirror is fully decoupled from the GHCR publish: its login/mirror/
+# sign steps are `continue-on-error`, and -- critically -- the GHCR build
+# never logs into Docker Hub, so a missing/typo'd DOCKERHUB_IMAGE or a
+# bad DOCKERHUB_TOKEN can NEVER break the registry-of-record publish or
+# red the branch. A misconfigured mirror surfaces as an amber (non-fatal)
+# step, not a failed job. This realizes the original "mirror degrades
+# gracefully and never blocks a release" intent (an earlier coupled
+# design pushed both registries in one build step, so a bad Docker Hub
+# token took the GHCR publish down with it).
+#
+# Backfill (one-time, manual) -- copy an existing tag to Docker Hub:
+#   docker buildx imagetools create \
+#     -t docker.io/<org>/nvnm-mcp-server:1.0.0-rc7 \
+#     ghcr.io/nvnm-chain/nvnm-mcp-server:1.0.0-rc7
 #
 # Phase 9.7. Companion to the existing release.yml which signs binaries.
 
@@ -62,41 +76,36 @@ jobs:
         # invocation, so the bump is drop-in).
         uses: docker/setup-buildx-action@v4
 
-      - name: Compute image list
-        # GHCR is always a target (the registry of record). Docker Hub is
-        # an OPTIONAL mirror: it is added only when the repo variable
+      - name: Detect Docker Hub mirror
+        # The mirror is OPT-IN: enabled only when the repo variable
         # DOCKERHUB_IMAGE is set (e.g. "docker.io/<org>/nvnm-mcp-server").
-        # When it is unset the workflow behaves exactly as GHCR-only, so a
-        # missing-mirror config never breaks a release. The mirror also
-        # needs the DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets (see the
-        # Docker Hub login step).
-        id: images
+        # When unset, every mirror step below is skipped and the workflow
+        # is exactly GHCR-only. This step only sets a boolean; it never
+        # touches the GHCR build path.
+        id: mirror
         env:
           DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
         run: |
           set -euo pipefail
-          IMAGES="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           if [ -n "${DOCKERHUB_IMAGE}" ]; then
-            IMAGES="${IMAGES}"$'\n'"${DOCKERHUB_IMAGE}"
-            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
-          {
-            echo "list<<EOF"
-            echo "${IMAGES}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Compute image tags
         id: meta
+        # GHCR only. The Docker Hub mirror derives its tags from these by
+        # swapping the registry/repo prefix (see the mirror step), so the
+        # tag suffixes stay identical across registries.
+        #
         # v6 (2026-03-05) defaults to Node.js 24. The only behaviour
         # change called out is that `#` inside list-input values is now
         # preserved (full-line `#` still comments). Our `tags` list
         # has no `#` chars, so this is a no-op for us.
         uses: docker/metadata-action@v6
         with:
-          images: ${{ steps.images.outputs.list }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -108,7 +117,11 @@ jobs:
         # Skip on pull_request: we build to verify, but never push from
         # an untrusted PR head. Forks would not have packages:write
         # anyway, so this also keeps the workflow green for outside
-        # contributors.
+        # contributors. NOTE: we do NOT log into Docker Hub here -- the
+        # GHCR build must stay independent of Docker Hub credentials so a
+        # bad mirror token cannot break it (buildx pulls public helper
+        # images like buildkit-syft-scanner during the build; doing so
+        # through a narrow-scope Docker Hub login 401s).
         if: github.event_name != 'pull_request'
         # v4 (2026-03-04) defaults to Node.js 24. No input-shape change
         # for the registry/username/password inputs we use.
@@ -118,28 +131,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub (mirror)
-        # Only runs when the Docker Hub mirror is configured (DOCKERHUB_IMAGE
-        # variable set, from the Compute image list step) and we are pushing
-        # (not a PR). Requires repo secrets DOCKERHUB_USERNAME and
-        # DOCKERHUB_TOKEN (a Docker Hub access token, not the account
-        # password). If unset, the workflow pushes to GHCR only.
-        if: github.event_name != 'pull_request' && steps.images.outputs.dockerhub == 'true'
-        uses: docker/login-action@v4
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build & push multi-arch image
+      - name: Build & push multi-arch image (GHCR)
         id: build
         # v7 (2026-03-05) defaults to Node.js 24. Breaking changes
         # called out: removal of the deprecated `DOCKER_BUILD_NO_SUMMARY`
         # and `DOCKER_BUILD_EXPORT_RETENTION_DAYS` env vars. We set
         # neither (no `env:` on this step), so the bump is drop-in.
-        # The `context`/`platforms`/`push`/`tags`/`labels`/`provenance`/
-        # `sbom`/`cache-from`/`cache-to` inputs we pass are unchanged
-        # across v6 -> v7.
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -160,12 +157,13 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v3
 
-      - name: Sign image manifest
+      - name: Sign image manifest (GHCR)
         # Sign the multi-arch manifest at its content-addressable digest.
         # Each tag in steps.meta.outputs.tags resolves to the same
         # digest for this build, so signing once is sufficient -- but
         # we walk the tag list anyway so a verifier who knows only a
-        # tag (not the digest) can resolve through it.
+        # tag (not the digest) can resolve through it. FATAL: this gates
+        # the job.
         if: github.event_name != 'pull_request'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -175,4 +173,41 @@ jobs:
           for tag in $TAGS; do
             echo "Signing ${tag}@${DIGEST}"
             cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+      # --- Docker Hub mirror (best-effort; never gates the job) --------------
+      # All three steps below are continue-on-error and run only when the
+      # mirror is enabled and we are pushing. A bad token / wrong image name
+      # fails these softly (amber) without touching the GHCR publish above.
+
+      - name: Login to Docker Hub (mirror)
+        if: github.event_name != 'pull_request' && steps.mirror.outputs.enabled == 'true'
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Mirror to Docker Hub + sign
+        # Re-tag the already-built GHCR manifest onto Docker Hub with
+        # `imagetools create` (no rebuild), then Cosign-sign it. The
+        # mirrored manifest is content-identical, so it carries the same
+        # digest -- we sign that same DIGEST on the Docker Hub ref.
+        if: github.event_name != 'pull_request' && steps.mirror.outputs.enabled == 'true'
+        continue-on-error: true
+        env:
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          echo "Mirroring GHCR tags to ${DOCKERHUB_IMAGE} (best-effort)"
+          for tag in $TAGS; do
+            suffix="${tag##*:}"
+            dst="${DOCKERHUB_IMAGE}:${suffix}"
+            echo "Mirroring ${tag} -> ${dst}"
+            docker buildx imagetools create -t "${dst}" "${tag}"
+            echo "Signing ${dst}@${DIGEST}"
+            cosign sign --yes "${dst}@${DIGEST}"
           done
