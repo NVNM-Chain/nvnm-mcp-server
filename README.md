@@ -558,6 +558,7 @@ docs/
     PHASE_10_DESIGN.md            Phase 10 design contract (DevOps foundations)
     PHASE_11_DESIGN.md            Phase 11 design contract (Product launch)
     WALLET_GENERATOR_DESIGN.md    Wallet generator page design contract (sibling repo)
+    FUSIONAUTH_RBAC_TEST_HARNESS.md  Deferred concept note: end-to-end RBAC test harness
 .github/
   workflows/ci.yml           CI pipeline
   dependabot.yml             Automated dependency updates
