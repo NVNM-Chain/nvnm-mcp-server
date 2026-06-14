@@ -39,6 +39,13 @@ jobs:
         with:
           version: v2.11.4
           args: --timeout=5m
+          # Skip `golangci-lint config verify`. That step fetches the
+          # config JSON schema from golangci-lint.run at runtime, which
+          # makes a required check depend on an external network call --
+          # it timed out and red main on 2026-06-13 with no code change.
+          # Schema-shape mistakes in .golangci.yml still surface: the
+          # lint run itself errors on an unparseable config.
+          verify: false
 
       - name: License scan
         # Hard-refused for proprietary commercial work: GPL-*, LGPL-*,
