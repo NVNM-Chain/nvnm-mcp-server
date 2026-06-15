@@ -552,6 +552,7 @@ docs/
   TESTING.md                      Test framework, strategy, and results
   TOOL_REFERENCE.md               MCP tool schema reference
   RUNBOOK.md                      Operational runbook
+  SESSION_AFFINITY.md             Multi-replica session continuity: investigation + decision (go stateless)
   planning/                       Phase design docs + process artifacts (historical; not needed to use the server)
     PHASE_8_DESIGN.md             Phase 8 design contract (closed out)
     PHASE_9_DESIGN.md             Phase 9 design contract (OSS Readiness)
