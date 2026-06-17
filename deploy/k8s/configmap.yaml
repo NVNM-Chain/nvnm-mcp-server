@@ -31,7 +31,6 @@ data:
   LOG_LEVEL: "info"
   REQUEST_TIMEOUT: "15s"
   ENABLE_WRITE_TOOLS: "false"
-  WRITE_APPROVAL_DEFAULT: "required"
   # Keyless reads: "true" makes read tools callable without a Bearer token
   # (anonymous reads carry no per-customer identifier). Self-hosters may
   # choose either value. INVARIANT (Inveniam-hosted production): MUST be
