@@ -16,9 +16,8 @@ var ErrInvalidAPIKey = errors.New("invalid API key")
 // Phase 8.6 migration the validator never sees a raw key beyond the
 // initial token argument; storage indexes by KeyHash.
 type KeyResult struct {
-	ID            string
-	KeyHash       string // sha256 hex of the raw bearer token
-	WriteApproval string
+	ID      string
+	KeyHash string // sha256 hex of the raw bearer token
 	// Roles are the RBAC roles assigned to this key. Empty means no enforcement.
 	Roles []string
 }
@@ -88,9 +87,8 @@ func (v *APIKeyValidator) Validate(token string) (*Claims, error) {
 	}
 
 	return &Claims{
-		ClientID:      entry.ID,
-		WriteApproval: entry.WriteApproval,
-		Roles:         entry.Roles,
+		ClientID: entry.ID,
+		Roles:    entry.Roles,
 	}, nil
 }
 

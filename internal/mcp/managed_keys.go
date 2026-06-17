@@ -21,12 +21,11 @@ var (
 // KeySummary is a redacted view of a KeyEntry suitable for API responses.
 // The raw key is never included.
 type KeySummary struct {
-	ID            string    `json:"client_id"`
-	Enabled       bool      `json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	WriteApproval string    `json:"write_approval,omitempty"`
-	Roles         []string  `json:"roles,omitempty"`
-	KeyPrefix     string    `json:"key_prefix"`
+	ID        string    `json:"client_id"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	Roles     []string  `json:"roles,omitempty"`
+	KeyPrefix string    `json:"key_prefix"`
 }
 
 // KeyCreateResult is returned from Create. It includes the raw key exactly once.
@@ -38,9 +37,8 @@ type KeyCreateResult struct {
 // KeyUpdate holds optional fields for a PATCH operation.
 // nil pointers mean "do not change".
 type KeyUpdate struct {
-	Enabled       *bool
-	WriteApproval *string
-	Roles         *[]string
+	Enabled *bool
+	Roles   *[]string
 }
 
 // ManagedKeyStore provides thread-safe CRUD over a KeyStore backed by a JSON file.
@@ -188,7 +186,7 @@ func (m *ManagedKeyStore) List() []KeySummary {
 
 // Create generates a new API key for clientID, persists it, and returns the
 // result including the raw key. Returns ErrClientExists if clientID is taken.
-func (m *ManagedKeyStore) Create(clientID, writeApproval string, roles []string) (*KeyCreateResult, error) {
+func (m *ManagedKeyStore) Create(clientID string, roles []string) (*KeyCreateResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -203,7 +201,7 @@ func (m *ManagedKeyStore) Create(clientID, writeApproval string, roles []string)
 		return nil, err
 	}
 
-	entry := NewKeyEntry(clientID, rawKey, writeApproval, roles)
+	entry := NewKeyEntry(clientID, rawKey, roles)
 	// NewKeyEntry captures KeyPrefix from the raw key once; the raw
 	// key is returned exactly once via KeyCreateResult.Key and never
 	// retained on the entry.
@@ -242,9 +240,6 @@ func (m *ManagedKeyStore) Update(clientID string, upd KeyUpdate) (*KeySummary, e
 	updated := copyEntries(m.entries)
 	if upd.Enabled != nil {
 		updated[idx].Enabled = *upd.Enabled
-	}
-	if upd.WriteApproval != nil {
-		updated[idx].WriteApproval = *upd.WriteApproval
 	}
 	if upd.Roles != nil {
 		updated[idx].Roles = *upd.Roles
@@ -312,12 +307,11 @@ func (m *ManagedKeyStore) TotalCount() int {
 
 func summarize(e *KeyEntry) KeySummary {
 	return KeySummary{
-		ID:            e.ID,
-		Enabled:       e.Enabled,
-		CreatedAt:     e.CreatedAt,
-		WriteApproval: e.WriteApproval,
-		Roles:         e.Roles,
-		KeyPrefix:     e.KeyPrefix,
+		ID:        e.ID,
+		Enabled:   e.Enabled,
+		CreatedAt: e.CreatedAt,
+		Roles:     e.Roles,
+		KeyPrefix: e.KeyPrefix,
 	}
 }
 

@@ -56,14 +56,12 @@ func signTxWithKey(t *testing.T, key *defiwallet.PrivateKey) string {
 }
 
 type e2eServerConfig struct {
-	approvalDefault string
-	evmClient       *mockEVM
+	evmClient *mockEVM
 }
 
 func startTestServerWithConfig(
 	t *testing.T,
 	cfg e2eServerConfig,
-	clientOpts *mcp.ClientOptions,
 ) *mcp.ClientSession {
 	t.Helper()
 
@@ -84,12 +82,7 @@ func startTestServerWithConfig(
 		},
 	}
 
-	approval := cfg.approvalDefault
-	if approval == "" {
-		approval = ApprovalRequired
-	}
-
-	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true, approval), nil, testLogger())
+	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true), nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -100,7 +93,7 @@ func startTestServerWithConfig(
 
 	client := mcp.NewClient(
 		&mcp.Implementation{Name: "test-client", Version: "1.0.0"},
-		clientOpts,
+		nil,
 	)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
@@ -117,12 +110,18 @@ func startTestServerWithConfig(
 // Write approval E2E tests
 // ---------------------------------------------------------------------------
 
-func TestE2E_SendRawTx_AutoApproval_Succeeds(t *testing.T) {
+// TestE2E_SendRawTx_DirectBroadcast_NoElicitation asserts that
+// evm_send_raw_transaction broadcasts directly with no elicitation round-trip,
+// even with no client-side elicitation handler wired. Under Option 0 the
+// server makes no server→client requests, so any approval default should
+// result in a tx_hash response rather than an error.
+func TestE2E_SendRawTx_DirectBroadcast_NoElicitation(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalAuto,
-	}, nil)
+	// No ElicitationHandler wired — if the server were still calling
+	// session.Elicit, the SDK would return an error and the tool call
+	// would fail. With elicitation removed, it must succeed.
+	session := startTestServerWithConfig(t, e2eServerConfig{})
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "evm_send_raw_transaction",
@@ -132,196 +131,16 @@ func TestE2E_SendRawTx_AutoApproval_Succeeds(t *testing.T) {
 		t.Fatalf("CallTool: %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("expected success, got error: %v", result.Content)
+		t.Fatalf("expected direct broadcast to succeed with no elicitation, got error: %v", result.Content)
 	}
 }
 
-func TestE2E_SendRawTx_RequiredApproval_Accepted(t *testing.T) {
+// TestE2E_SendRawTx_RPCError_BroadcastFails verifies that when the EVM RPC
+// returns an error during broadcast the tool response has IsError=true.
+func TestE2E_SendRawTx_RPCError_BroadcastFails(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
 	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalRequired,
-	}, &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, _ *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			return &mcp.ElicitResult{Action: "accept"}, nil
-		},
-	})
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success after human accept, got error: %v", result.Content)
-	}
-}
-
-func TestE2E_SendRawTx_RequiredApproval_Declined(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalRequired,
-	}, &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, _ *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			return &mcp.ElicitResult{Action: "decline"}, nil
-		},
-	})
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected IsError=true when user declines")
-	}
-	if len(result.Content) > 0 {
-		tc, ok := result.Content[0].(*mcp.TextContent)
-		if ok && !strings.Contains(tc.Text, "declined") {
-			t.Errorf("error message should mention declined, got: %s", tc.Text)
-		}
-	}
-}
-
-func TestE2E_SendRawTx_RequiredApproval_Canceled(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalRequired,
-	}, &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, _ *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			return &mcp.ElicitResult{Action: "cancel"}, nil
-		},
-	})
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected IsError=true when user cancels")
-	}
-}
-
-func TestE2E_SendRawTx_NoElicitation_RequiredFails(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalRequired,
-	}, nil)
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected IsError=true when client lacks elicitation support")
-	}
-	if len(result.Content) > 0 {
-		tc, ok := result.Content[0].(*mcp.TextContent)
-		if ok && !strings.Contains(tc.Text, "elicitation") {
-			t.Errorf("error should mention elicitation, got: %s", tc.Text)
-		}
-	}
-}
-
-func TestE2E_SendRawTx_ElicitationPromptContainsTxDetails(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-	var capturedMessage string
-
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalRequired,
-	}, &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			capturedMessage = req.Params.Message
-			return &mcp.ElicitResult{Action: "accept"}, nil
-		},
-	})
-
-	_, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-
-	for _, expected := range []string{"To:", "Value:", "Gas:", "Nonce:", "Chain ID:", "Data:", "irreversible"} {
-		if !strings.Contains(capturedMessage, expected) {
-			t.Errorf("approval prompt missing %q, got:\n%s", expected, capturedMessage)
-		}
-	}
-}
-
-// TestE2E_SendRawTx_ElicitationRequestIsSpecCompliant asserts the write-approval
-// elicitation carries a valid form `requestedSchema` and `mode: "form"`. Per the
-// MCP spec a form elicitation MUST include a requestedSchema; a request with only
-// a message (no schema) is rejected by spec-strict clients (e.g. Claude / Fable 5),
-// so the broadcast can never complete from those clients. The go-sdk in-process
-// test client is lenient (a nil schema validates), which is why this gap was
-// invisible until a strict client hit it -- so the assertion must inspect the
-// OUTGOING request params, not the mocked reply.
-func TestE2E_SendRawTx_ElicitationRequestIsSpecCompliant(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-	var elicited bool
-	var capturedSchema any
-	var capturedMode string
-
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalRequired,
-	}, &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			elicited = true
-			capturedSchema = req.Params.RequestedSchema
-			capturedMode = req.Params.Mode
-			return &mcp.ElicitResult{Action: "accept"}, nil
-		},
-	})
-
-	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	}); err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-
-	if !elicited {
-		t.Fatal("elicitation was not requested under required approval")
-	}
-	if capturedSchema == nil {
-		t.Fatal("ElicitParams.RequestedSchema is nil; spec-strict clients reject a form elicitation with no schema")
-	}
-	schemaMap, ok := capturedSchema.(map[string]any)
-	if !ok {
-		t.Fatalf("RequestedSchema should marshal to an object map, got %T", capturedSchema)
-	}
-	if schemaMap["type"] != "object" {
-		t.Errorf("RequestedSchema[\"type\"] = %v, want \"object\"", schemaMap["type"])
-	}
-	if _, hasProps := schemaMap["properties"]; !hasProps {
-		t.Error("RequestedSchema should declare a \"properties\" object")
-	}
-	if capturedMode != "form" {
-		t.Errorf("ElicitParams.Mode = %q, want \"form\"", capturedMode)
-	}
-}
-
-func TestE2E_SendRawTx_AutoApproval_RPCError(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		approvalDefault: ApprovalAuto,
 		evmClient: &mockEVM{
 			chainInfo:  &evm.ChainInfo{ChainID: 58887, LatestBlockNumber: 100},
 			balance:    &evm.NormalizedBalance{Address: testAddr, Wei: "0", Ether: "0"},
@@ -329,7 +148,7 @@ func TestE2E_SendRawTx_AutoApproval_RPCError(t *testing.T) {
 			returnErr:  errors.New("nonce too low"),
 			sendTxHash: "",
 		},
-	}, nil)
+	})
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "evm_send_raw_transaction",
@@ -340,82 +159,6 @@ func TestE2E_SendRawTx_AutoApproval_RPCError(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Fatal("expected IsError=true for RPC failure")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Approval + error sentinel tests (unit level, but depend on real tx parsing)
-// ---------------------------------------------------------------------------
-
-func TestDecodeTxSummary_ValidSignedTx(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-	summary, err := DecodeTxSummary(signedTx, "test-client", "testnet")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if summary.To != "0x0000000000000000000000000000000000000A00" {
-		t.Errorf("To = %q, want precompile address", summary.To)
-	}
-	if summary.Gas != 21000 {
-		t.Errorf("Gas = %d, want 21000", summary.Gas)
-	}
-	if summary.DataLen != 2 {
-		t.Errorf("DataLen = %d, want 2", summary.DataLen)
-	}
-	if summary.ClientID != "test-client" {
-		t.Errorf("ClientID = %q, want %q", summary.ClientID, "test-client")
-	}
-}
-
-func TestDecodeTxSummary_InvalidHex(t *testing.T) {
-	_, err := DecodeTxSummary("0xZZZZ", "client", "testnet")
-	if err == nil {
-		t.Fatal("expected error for invalid hex")
-	}
-}
-
-func TestFormatApprovalMessage_ContainsFields(t *testing.T) {
-	summary := &TxSummary{
-		To:       "0x0000000000000000000000000000000000000A00",
-		Value:    big.NewInt(0),
-		Gas:      65000,
-		Nonce:    42,
-		ChainID:  big.NewInt(58887),
-		DataLen:  136,
-		ClientID: "dev-agent",
-	}
-	msg := formatApprovalMessage(summary)
-	for _, want := range []string{
-		"0x0000000000000000000000000000000000000A00",
-		"0 wei", "65000", "42", "58887", "136 bytes", "dev-agent", "irreversible",
-	} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("message missing %q", want)
-		}
-	}
-}
-
-func TestErrWriteDeclined_IsSentinel(t *testing.T) {
-	err := apperrors.ErrWriteDeclined
-	if !errors.Is(err, apperrors.ErrWriteDeclined) {
-		t.Error("ErrWriteDeclined should match via errors.Is")
-	}
-}
-
-func TestErrElicitationUnsupported_IsSentinel(t *testing.T) {
-	err := apperrors.ErrElicitationUnsupported
-	if !errors.Is(err, apperrors.ErrElicitationUnsupported) {
-		t.Error("ErrElicitationUnsupported should match via errors.Is")
-	}
-}
-
-func TestSafeForClient_PassesThroughApprovalErrors(t *testing.T) {
-	tests := []error{apperrors.ErrWriteDeclined, apperrors.ErrElicitationUnsupported}
-	for _, sentinel := range tests {
-		safe := apperrors.SafeForClient(sentinel)
-		if !errors.Is(safe, sentinel) {
-			t.Errorf("SafeForClient(%v) = %v, want original sentinel", sentinel, safe)
-		}
 	}
 }
 
@@ -458,10 +201,9 @@ func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
 		}
 		if entryHash == wantHash {
 			return &auth.KeyResult{
-				ID:            t.entries[i].ID,
-				KeyHash:       entryHash,
-				WriteApproval: t.entries[i].WriteApproval,
-				Roles:         t.entries[i].Roles,
+				ID:      t.entries[i].ID,
+				KeyHash: entryHash,
+				Roles:   t.entries[i].Roles,
 			}
 		}
 	}
@@ -496,8 +238,7 @@ func (bt *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 type authE2EConfig struct {
-	keys            []KeyEntry
-	approvalDefault string
+	keys []KeyEntry
 	// keylessReads, when true, configures the test server with
 	// cfg.KeylessReads=true and cfg.Transport="http" so NewServer
 	// registers the enforcement middleware, AND passes keylessReads=true
@@ -509,7 +250,6 @@ func startAuthTestServer(
 	t *testing.T,
 	cfg authE2EConfig,
 	clientToken string,
-	clientOpts *mcp.ClientOptions,
 ) (*mcp.ClientSession, error) {
 	t.Helper()
 
@@ -529,18 +269,13 @@ func startAuthTestServer(
 		},
 	}
 
-	approval := cfg.approvalDefault
-	if approval == "" {
-		approval = ApprovalRequired
-	}
-
 	var validator auth.TokenValidator
 	if len(cfg.keys) > 0 {
 		adapter := &testKeyLookup{entries: cfg.keys}
 		validator = auth.NewAPIKeyValidator(adapter)
 	}
 
-	serverCfg := testServerConfig(true, approval)
+	serverCfg := testServerConfig(true)
 	if cfg.keylessReads {
 		serverCfg.KeylessReads = true
 		serverCfg.Transport = "http"
@@ -562,7 +297,7 @@ func startAuthTestServer(
 
 	client := mcp.NewClient(
 		&mcp.Implementation{Name: "test-auth-client", Version: "1.0.0"},
-		clientOpts,
+		nil,
 	)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:   httpServer.URL,
@@ -576,9 +311,60 @@ func startAuthTestServer(
 	return session, nil
 }
 
+// TestE2E_StatelessHandler_ServesUnknownSession verifies the Option 0
+// affinity-removing property at the HTTP layer: a request bearing a
+// session id the handler has never seen -- exactly what happens when a
+// load balancer routes a follow-up call to a different replica -- is
+// rejected with 404 "session not found" by the stateful handler but
+// served by the stateless one (go-sdk streamable.go session-id check).
+// We exercise BOTH modes so the test proves it discriminates, rather
+// than passing vacuously.
+func TestE2E_StatelessHandler_ServesUnknownSession(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	evmClient := &mockEVM{
+		chainInfo: &evm.ChainInfo{ChainID: 58887, LatestBlockNumber: 100},
+		balance:   &evm.NormalizedBalance{Address: testAddr, Wei: "0", Ether: "0"},
+		block:     &evm.NormalizedBlock{Number: 1, Hash: "0xabc"},
+	}
+	anchorClient := &mockAnchor{info: anchor.PrecompileInfo{
+		Address: testAddr, ChainID: 58887, ABILoaded: true, MethodCount: 5,
+	}}
+	srv := NewServer(evmClient, anchorClient, testServerConfig(false), nil, logger)
+
+	handler := func(stateless bool) http.Handler {
+		return mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+			return srv.mcpServer
+		}, &mcp.StreamableHTTPOptions{Stateless: stateless})
+	}
+
+	// A follow-up POST carrying a session id the replica has never minted.
+	postUnknownSession := func(h http.Handler) int {
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Mcp-Session-Id", "session-minted-on-another-replica")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Stateful: the unknown session id is rejected -> this is the failure a
+	// multi-replica deployment hits without affinity. (Sanity: proves the
+	// request shape actually reaches the session-id check.)
+	if code := postUnknownSession(handler(false)); code != http.StatusNotFound {
+		t.Fatalf("stateful handler: unknown-session status = %d, want 404 (session not found)", code)
+	}
+	// Stateless: the same request must NOT be rejected as session-not-found,
+	// so any replica can serve any request -- no affinity required.
+	if code := postUnknownSession(handler(true)); code == http.StatusNotFound {
+		t.Fatal("stateless handler returned 404 for an unknown session id; affinity not removed")
+	}
+}
+
 func TestE2E_Auth_ValidKey_ToolCallSucceeds(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
-	session, err := startAuthTestServer(t, authE2EConfig{keys: keys, approvalDefault: ApprovalAuto}, "valid-key-123", nil)
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
+	session, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "valid-key-123")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -596,40 +382,39 @@ func TestE2E_Auth_ValidKey_ToolCallSucceeds(t *testing.T) {
 }
 
 func TestE2E_Auth_InvalidKey_ConnectionFails(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
-	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "wrong-key-456", nil)
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
+	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "wrong-key-456")
 	if err == nil {
 		t.Fatal("expected connection to fail with invalid key")
 	}
 }
 
 func TestE2E_Auth_MissingKey_ConnectionFails(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
-	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "", nil)
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
+	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "")
 	if err == nil {
 		t.Fatal("expected connection to fail with missing key")
 	}
 }
 
 func TestE2E_Auth_DisabledKey_ConnectionFails(t *testing.T) {
-	disabled := NewKeyEntry("disabled-client", "disabled-key", "", nil)
+	disabled := NewKeyEntry("disabled-client", "disabled-key", nil)
 	disabled.Enabled = false
 	keys := []KeyEntry{
-		NewKeyEntry("active-client", "active-key", "", nil),
+		NewKeyEntry("active-client", "active-key", nil),
 		disabled,
 	}
-	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "disabled-key", nil)
+	_, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "disabled-key")
 	if err == nil {
 		t.Fatal("expected connection to fail with disabled key")
 	}
 }
 
 func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("reader-only", "reader-key-123", "", []string{"reader"})}
+	keys := []KeyEntry{NewKeyEntry("reader-only", "reader-key-123", []string{"reader"})}
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		approvalDefault: ApprovalAuto,
-	}, "reader-key-123", nil)
+		keys: keys,
+	}, "reader-key-123")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -665,11 +450,10 @@ func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
 
 func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
 	// API key with no roles should have no RBAC enforcement.
-	keys := []KeyEntry{NewKeyEntry("no-role-client", "no-role-key", "", nil)}
+	keys := []KeyEntry{NewKeyEntry("no-role-client", "no-role-key", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		approvalDefault: ApprovalAuto,
-	}, "no-role-key", nil)
+		keys: keys,
+	}, "no-role-key")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -688,11 +472,10 @@ func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
 }
 
 func TestE2E_RBAC_GrantRoleRequiresAdmin(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("writer-client", "writer-key", "", []string{"writer"})}
+	keys := []KeyEntry{NewKeyEntry("writer-client", "writer-key", []string{"writer"})}
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		approvalDefault: ApprovalAuto,
-	}, "writer-key", nil)
+		keys: keys,
+	}, "writer-key")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -715,7 +498,7 @@ func TestE2E_RBAC_GrantRoleRequiresAdmin(t *testing.T) {
 }
 
 func TestE2E_Auth_NoKeysConfigured_NoAuthRequired(t *testing.T) {
-	session, err := startAuthTestServer(t, authE2EConfig{approvalDefault: ApprovalAuto}, "", nil)
+	session, err := startAuthTestServer(t, authE2EConfig{}, "")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -732,83 +515,16 @@ func TestE2E_Auth_NoKeysConfigured_NoAuthRequired(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Per-client write approval override E2E tests
-// ---------------------------------------------------------------------------
-
-func TestE2E_PerClientApproval_AutoOverridesGlobalRequired(t *testing.T) {
+// TestE2E_Auth_ValidKey_SendTx_Succeeds verifies that an authenticated key
+// broadcasts successfully under Option 0 (no elicitation, direct broadcast).
+func TestE2E_Auth_ValidKey_SendTx_Succeeds(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
-	keys := []KeyEntry{NewKeyEntry("auto-client", "auto-key-123", ApprovalAuto, nil)}
+	keys := []KeyEntry{NewKeyEntry("write-client", "write-key-789", nil)}
+
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		approvalDefault: ApprovalRequired,
-	}, "auto-key-123", nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected auto-approval to succeed, got error: %v", result.Content)
-	}
-}
-
-func TestE2E_PerClientApproval_RequiredOverridesGlobalAuto(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-
-	keys := []KeyEntry{NewKeyEntry("strict-client", "strict-key-123", ApprovalRequired, nil)}
-
-	elicitCalled := false
-	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		approvalDefault: ApprovalAuto,
-	}, "strict-key-123", &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, _ *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			elicitCalled = true
-			return &mcp.ElicitResult{Action: "accept"}, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_send_raw_transaction",
-		Arguments: map[string]any{"signed_tx": signedTx},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success after elicitation accept, got error: %v", result.Content)
-	}
-	if !elicitCalled {
-		t.Error("expected elicitation handler to be called for per-client required override")
-	}
-}
-
-func TestE2E_Auth_ValidKey_SendTx_WithElicitation(t *testing.T) {
-	signedTx := buildSignedTxHex(t)
-
-	keys := []KeyEntry{NewKeyEntry("write-client", "write-key-789", "", nil)}
-
-	var capturedMessage string
-	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		approvalDefault: ApprovalRequired,
-	}, "write-key-789", &mcp.ClientOptions{
-		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			capturedMessage = req.Params.Message
-			return &mcp.ElicitResult{Action: "accept"}, nil
-		},
-	})
+		keys: keys,
+	}, "write-key-789")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -822,9 +538,6 @@ func TestE2E_Auth_ValidKey_SendTx_WithElicitation(t *testing.T) {
 	}
 	if result.IsError {
 		t.Fatalf("expected success, got error: %v", result.Content)
-	}
-	if !strings.Contains(capturedMessage, "Submitted by:       write-client") {
-		t.Errorf("approval prompt should contain client identity, got:\n%s", capturedMessage)
 	}
 }
 
@@ -863,12 +576,11 @@ func TestE2E_Keyless_AnonReadAllowed(t *testing.T) {
 	// short-circuits and the keyless behavior is not exercised. So we
 	// configure a key but the client sends no Authorization header
 	// (clientToken == "").
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		keylessReads:    true,
-		approvalDefault: ApprovalAuto,
-	}, "", nil) // empty token -> bearerTransport omits the Authorization header
+		keys:         keys,
+		keylessReads: true,
+	}, "") // empty token -> bearerTransport omits the Authorization header
 	if err != nil {
 		t.Fatalf("anon connect under keyless: %v", err)
 	}
@@ -886,12 +598,11 @@ func TestE2E_Keyless_AnonReadAllowed(t *testing.T) {
 }
 
 func TestE2E_Keyless_AnonWriteRejected(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		keylessReads:    true,
-		approvalDefault: ApprovalAuto,
-	}, "", nil)
+		keys:         keys,
+		keylessReads: true,
+	}, "")
 	if err != nil {
 		t.Fatalf("anon connect under keyless: %v", err)
 	}
@@ -921,12 +632,11 @@ func TestE2E_Keyless_AnonWriteRejected(t *testing.T) {
 }
 
 func TestE2E_Keyless_AuthedWriteReachesHandler(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", "", nil)}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
-		keys:            keys,
-		keylessReads:    true,
-		approvalDefault: ApprovalAuto,
-	}, "valid-key-123", nil)
+		keys:         keys,
+		keylessReads: true,
+	}, "valid-key-123")
 	if err != nil {
 		t.Fatalf("authed connect under keyless: %v", err)
 	}

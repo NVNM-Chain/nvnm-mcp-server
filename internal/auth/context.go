@@ -29,12 +29,3 @@ func ClientIDFromContext(ctx context.Context) string {
 	}
 	return ""
 }
-
-// WriteApprovalFromContext returns the per-client write approval policy
-// ("required", "auto", or "" for unset/use-global-default).
-func WriteApprovalFromContext(ctx context.Context) string {
-	if c := ClaimsFromContext(ctx); c != nil {
-		return c.WriteApproval
-	}
-	return ""
-}

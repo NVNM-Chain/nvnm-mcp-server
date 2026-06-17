@@ -16,7 +16,7 @@ LDFLAGS := -s -w
         docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
         deps-update deps-verify info help \
-        key-create key-disable key-enable key-set-approval key-list
+        key-create key-disable key-enable key-list
 
 all: check-all test build
 
@@ -257,10 +257,10 @@ export MCP_API_KEYS_FILE
 
 key-create:
 ifndef NAME
-	$(error NAME is required. Usage: make key-create NAME=my-client [APPROVAL=required|auto])
+	$(error NAME is required. Usage: make key-create NAME=my-client [ROLES=reader,writer])
 endif
-ifdef APPROVAL
-	$(GO) run ./cmd/key-mgmt create $(NAME) --write-approval $(APPROVAL)
+ifdef ROLES
+	$(GO) run ./cmd/key-mgmt create $(NAME) --roles $(ROLES)
 else
 	$(GO) run ./cmd/key-mgmt create $(NAME)
 endif
@@ -276,15 +276,6 @@ ifndef NAME
 	$(error NAME is required. Usage: make key-enable NAME=my-client)
 endif
 	$(GO) run ./cmd/key-mgmt enable $(NAME)
-
-key-set-approval:
-ifndef NAME
-	$(error NAME is required. Usage: make key-set-approval NAME=my-client APPROVAL=required|auto)
-endif
-ifndef APPROVAL
-	$(error APPROVAL is required. Usage: make key-set-approval NAME=my-client APPROVAL=required|auto)
-endif
-	$(GO) run ./cmd/key-mgmt set-approval $(NAME) $(APPROVAL)
 
 key-list:
 	$(GO) run ./cmd/key-mgmt list
@@ -316,12 +307,10 @@ help:
 	@echo "  run-local        Source .env and run with HTTP transport (see Local Dev)"
 	@echo ""
 	@echo "API Key Management:"
-	@echo "  key-create NAME=x [APPROVAL=required|auto]"
+	@echo "  key-create NAME=x [ROLES=reader,writer]"
 	@echo "                     Generate a new API key for client x"
 	@echo "  key-disable NAME=x Disable the key for client x"
 	@echo "  key-enable NAME=x  Re-enable a disabled key for client x"
-	@echo "  key-set-approval NAME=x APPROVAL=required|auto"
-	@echo "                     Set write-approval policy for client x"
 	@echo "  key-list           List all API keys and their status"
 	@echo ""
 	@echo "Local Dev:"

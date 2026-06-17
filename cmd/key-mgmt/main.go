@@ -17,13 +17,10 @@ import (
 const defaultKeysFile = ".mcp-keys.json"
 
 var (
-	errClientExists    = errors.New("client already exists")
-	errClientMissing   = errors.New("client not found")
-	errInvalidApproval = errors.New("write-approval must be \"required\", \"auto\", or empty")
-	errInvalidRole     = errors.New("invalid role; must be one of: reader, writer, admin, automation")
+	errClientExists  = errors.New("client already exists")
+	errClientMissing = errors.New("client not found")
+	errInvalidRole   = errors.New("invalid role; must be one of: reader, writer, admin, automation")
 )
-
-var validApprovals = map[string]bool{"required": true, "auto": true, "": true}
 
 var validRoles = map[string]bool{
 	"reader":     true,
@@ -61,8 +58,6 @@ func run(args []string) error {
 		return runSetEnabled(keysFile, args[1:], false)
 	case "enable":
 		return runSetEnabled(keysFile, args[1:], true)
-	case "set-approval":
-		return runSetApproval(keysFile, args[1:])
 	case "set-roles":
 		return runSetRoles(keysFile, args[1:])
 	case "list":
@@ -76,16 +71,15 @@ func run(args []string) error {
 func runCreate(keysFile string, args []string) error {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr,
-			"usage: key-mgmt create <client-id> [--write-approval required|auto] [--roles reader,writer,...]\n")
+			"usage: key-mgmt create <client-id> [--roles reader,writer,...]\n")
 		return errUsage
 	}
-	approval := parseFlag(args[1:], "--write-approval")
 	rolesStr := parseFlag(args[1:], "--roles")
 	roles, err := parseRoles(rolesStr)
 	if err != nil {
 		return err
 	}
-	return createKey(keysFile, args[0], approval, roles)
+	return createKey(keysFile, args[0], roles)
 }
 
 func runSetEnabled(keysFile string, args []string, enabled bool) error {
@@ -98,15 +92,6 @@ func runSetEnabled(keysFile string, args []string, enabled bool) error {
 		return errUsage
 	}
 	return setEnabled(keysFile, args[0], enabled)
-}
-
-func runSetApproval(keysFile string, args []string) error {
-	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr,
-			"usage: key-mgmt set-approval <client-id> <required|auto>\n")
-		return errUsage
-	}
-	return setApproval(keysFile, args[0], args[1])
 }
 
 func runSetRoles(keysFile string, args []string) error {
@@ -127,12 +112,10 @@ func runSetRoles(keysFile string, args []string) error {
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: key-mgmt <command> [args]\n\n")
 	fmt.Fprintf(os.Stderr, "commands:\n")
-	fmt.Fprintf(os.Stderr, "  create <client-id> [--write-approval required|auto] [--roles reader,writer,...]\n")
+	fmt.Fprintf(os.Stderr, "  create <client-id> [--roles reader,writer,...]\n")
 	fmt.Fprintf(os.Stderr, "                       Generate a new API key for a client\n")
 	fmt.Fprintf(os.Stderr, "  disable <client-id>  Disable an existing API key\n")
 	fmt.Fprintf(os.Stderr, "  enable <client-id>   Re-enable a disabled API key\n")
-	fmt.Fprintf(os.Stderr, "  set-approval <client-id> <required|auto>\n")
-	fmt.Fprintf(os.Stderr, "                       Set write-approval policy for a client\n")
 	fmt.Fprintf(os.Stderr, "  set-roles <client-id> <role1,role2,...|\"\">\n")
 	fmt.Fprintf(os.Stderr, "                       Set RBAC roles for a client (reader/writer/admin/automation)\n")
 	fmt.Fprintf(os.Stderr, "  list                 List all API keys and their status\n")
@@ -178,11 +161,7 @@ func parseRoles(rolesStr string) ([]string, error) {
 	return roles, nil
 }
 
-func createKey(path, clientID, writeApproval string, roles []string) error {
-	if !validApprovals[writeApproval] {
-		return fmt.Errorf("%q: %w", writeApproval, errInvalidApproval)
-	}
-
+func createKey(path, clientID string, roles []string) error {
 	entries, err := loadOrInit(path)
 	if err != nil {
 		return err
@@ -202,7 +181,7 @@ func createKey(path, clientID, writeApproval string, roles []string) error {
 		return err
 	}
 
-	entries = append(entries, mcpkeys.NewKeyEntry(clientID, key, writeApproval, roles))
+	entries = append(entries, mcpkeys.NewKeyEntry(clientID, key, roles))
 
 	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
 		return err
@@ -210,44 +189,11 @@ func createKey(path, clientID, writeApproval string, roles []string) error {
 
 	fmt.Printf("Created key for %q:\n\n", clientID)
 	fmt.Printf("  Bearer %s\n\n", key)
-	if writeApproval != "" {
-		fmt.Printf("  Write approval: %s\n", writeApproval)
-	}
 	if len(roles) > 0 {
 		fmt.Printf("  Roles: %s\n", strings.Join(roles, ", "))
 	}
 	fmt.Printf("Store this key securely — it cannot be retrieved later.\n")
 	fmt.Printf("Keys file: %s\n", path)
-	return nil
-}
-
-func setApproval(path, clientID, approval string) error {
-	if approval != "required" && approval != "auto" {
-		return fmt.Errorf("%q: %w", approval, errInvalidApproval)
-	}
-
-	entries, err := loadOrInit(path)
-	if err != nil {
-		return err
-	}
-
-	found := false
-	for i := range entries {
-		if entries[i].ID == clientID {
-			entries[i].WriteApproval = approval
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("client %q: %w", clientID, errClientMissing)
-	}
-
-	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
-		return err
-	}
-
-	fmt.Printf("Client %q write-approval set to %q.\n", clientID, approval)
 	return nil
 }
 
@@ -323,8 +269,8 @@ func listKeys(path string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "CLIENT ID\tSTATUS\tWRITE APPROVAL\tROLES\tCREATED\tKEY PREFIX\n")
-	fmt.Fprintf(w, "---------\t------\t--------------\t-----\t-------\t----------\n")
+	fmt.Fprintf(w, "CLIENT ID\tSTATUS\tROLES\tCREATED\tKEY PREFIX\n")
+	fmt.Fprintf(w, "---------\t------\t-----\t-------\t----------\n")
 	for i := range entries {
 		e := &entries[i]
 		status := "enabled"
@@ -341,18 +287,13 @@ func listKeys(path string) error {
 				prefix = prefix[:8] + "..."
 			}
 		}
-		approval := e.WriteApproval
-		if approval == "" {
-			approval = "(default)"
-		}
 		roles := strings.Join(e.Roles, ",")
 		if roles == "" {
 			roles = "(none)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			e.ID,
 			status,
-			approval,
 			roles,
 			e.CreatedAt.Format("2006-01-02"),
 			prefix,

@@ -44,7 +44,10 @@ const initializeInstructions = "NVNM Chain MCP server -- typed " +
 	"registry names are public on-chain, so encode anything sensitive " +
 	"before anchoring. If you have never used this server before, call " +
 	"nvnm_overview first for chain identity, prereqs, and a " +
-	"recommended 6-step agent journey."
+	"recommended 6-step agent journey. Before submitting a signed " +
+	"transaction via evm_send_raw_transaction, the client or agent is " +
+	"responsible for obtaining explicit human confirmation; this server " +
+	"broadcasts what it receives and does not prompt for approval."
 
 // Server wraps the MCP server with its dependencies.
 type Server struct {
@@ -61,9 +64,8 @@ type Server struct {
 // struct beats threading individual scalars.
 //
 // When enableWriteTools is true, prepare-sign-submit tools and
-// evm_send_raw_transaction are registered, gated by
-// cfg.WriteApprovalDefault. The Phase 8.8 onboarding tools and the
-// read tools register regardless of write-tool gating.
+// evm_send_raw_transaction are registered. The Phase 8.8 onboarding tools
+// and the read tools register regardless of write-tool gating.
 //
 // Middleware (if any) is registered via AddReceivingMiddleware.
 //
@@ -127,13 +129,9 @@ func NewServer(
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {
-		chainEnvironment := string(cfg.ChainEnvironment)
-		registerEVMWriteTools(mcpSrv, evmClient, cfg.WriteApprovalDefault, chainEnvironment, logger)
+		registerEVMWriteTools(mcpSrv, evmClient, logger)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
-		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)",
-			slog.String("write_approval_default", cfg.WriteApprovalDefault),
-			slog.String("chain_environment", chainEnvironment),
-		)
+		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
 	}
 
 	return s
@@ -188,9 +186,15 @@ func (s *Server) RunHTTP(
 		slog.Any("allowed_origins", allowedOrigins.Resolved()),
 	)
 
+	// Stateless: true means the SDK mints no per-session id and keeps no
+	// in-memory session map, so any replica can serve any request -- no
+	// load-balancer affinity is required (Option 0, docs/SESSION_AFFINITY.md).
+	// This is safe only because the server makes no server->client requests:
+	// the write-approval elicitation was removed (the lone such request), and
+	// nothing depends on delivering logging notifications.
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return s.mcpServer
-	}, nil)
+	}, &mcp.StreamableHTTPOptions{Stateless: true})
 
 	// Chain (outermost first):
 	//   CORSMiddleware       → browser preflight + cross-origin permission

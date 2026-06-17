@@ -106,7 +106,7 @@ func TestAdmin_Auth_ValidToken(t *testing.T) {
 func TestAdmin_Create_Success(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
 
-	body := map[string]string{"client_id": "new-client", "write_approval": "auto"}
+	body := map[string]string{"client_id": "new-client"}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
 	if resp.StatusCode != http.StatusCreated {
 		defer resp.Body.Close()
@@ -122,9 +122,6 @@ func TestAdmin_Create_Success(t *testing.T) {
 	}
 	if result.ID != "new-client" {
 		t.Fatalf("got client_id %q, want new-client", result.ID)
-	}
-	if result.WriteApproval != "auto" {
-		t.Fatalf("got write_approval %q, want auto", result.WriteApproval)
 	}
 	if !result.Enabled {
 		t.Fatal("expected enabled=true for new key")
@@ -151,18 +148,7 @@ func TestAdmin_Create_Duplicate(t *testing.T) {
 func TestAdmin_Create_MissingClientID(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
 
-	body := map[string]string{"write_approval": "auto"}
-	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("got status %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestAdmin_Create_InvalidApproval(t *testing.T) {
-	ts, _ := startAdminTestServer(t)
-
-	body := map[string]string{"client_id": "test", "write_approval": "maybe"}
+	body := map[string]string{}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -187,10 +173,10 @@ func TestAdmin_List_Empty(t *testing.T) {
 func TestAdmin_List_WithKeys(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("alpha", "required", nil); err != nil {
+	if _, err := mks.Create("alpha", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mks.Create("beta", "auto", nil); err != nil {
+	if _, err := mks.Create("beta", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +200,7 @@ func TestAdmin_List_WithKeys(t *testing.T) {
 func TestAdmin_Update_DisableAndEnable(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("target", "", nil)
+	result, err := mks.Create("target", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,26 +236,6 @@ func TestAdmin_Update_DisableAndEnable(t *testing.T) {
 	}
 }
 
-func TestAdmin_Update_SetApproval(t *testing.T) {
-	ts, _ := startAdminTestServer(t)
-
-	createBody := map[string]string{"client_id": "target", "write_approval": "required"}
-	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, createBody)
-	resp.Body.Close()
-
-	updateBody := map[string]interface{}{"write_approval": "auto"}
-	resp2 := adminRequest(t, ts, "PATCH", "/admin/keys/target", testAdminKey, updateBody)
-	if resp2.StatusCode != http.StatusOK {
-		defer resp2.Body.Close()
-		t.Fatalf("got status %d, want 200", resp2.StatusCode)
-	}
-	var summary KeySummary
-	decodeJSON(t, resp2, &summary)
-	if summary.WriteApproval != "auto" {
-		t.Fatalf("got write_approval %q, want auto", summary.WriteApproval)
-	}
-}
-
 func TestAdmin_Update_NotFound(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
 
@@ -284,7 +250,7 @@ func TestAdmin_Update_NotFound(t *testing.T) {
 func TestAdmin_Update_EmptyBody(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("target", "", nil); err != nil {
+	if _, err := mks.Create("target", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -301,7 +267,7 @@ func TestAdmin_Update_EmptyBody(t *testing.T) {
 func TestAdmin_Delete_Success(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("to-delete", "", nil); err != nil {
+	if _, err := mks.Create("to-delete", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -331,7 +297,7 @@ func TestAdmin_Delete_NotFound(t *testing.T) {
 func TestAdmin_FullLifecycle(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	createBody := map[string]string{"client_id": "lifecycle-client", "write_approval": "required"}
+	createBody := map[string]string{"client_id": "lifecycle-client"}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, createBody)
 	if resp.StatusCode != http.StatusCreated {
 		defer resp.Body.Close()
@@ -413,7 +379,7 @@ func TestAdmin_HotReload_CreatedKeyImmediatelyUsable(t *testing.T) {
 func TestAdmin_HotReload_DisabledKeyImmediatelyRejected(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("soon-disabled", "", nil)
+	result, err := mks.Create("soon-disabled", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +432,7 @@ func TestAdmin_Create_InvalidRole(t *testing.T) {
 func TestAdmin_Update_SetRoles(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("no-role-client", "", nil)
+	result, err := mks.Create("no-role-client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +462,7 @@ func TestAdmin_Update_SetRoles(t *testing.T) {
 func TestAdmin_Update_InvalidRole(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("some-client", "", nil); err != nil {
+	if _, err := mks.Create("some-client", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -513,7 +479,7 @@ func TestAdmin_Update_InvalidRole(t *testing.T) {
 func TestAdmin_Update_NothingProvided(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("some-client", "", nil); err != nil {
+	if _, err := mks.Create("some-client", nil); err != nil {
 		t.Fatal(err)
 	}
 

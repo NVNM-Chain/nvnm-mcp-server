@@ -78,7 +78,7 @@ MCP server binary), not from the caller's machine:
 
 | Env var              | What it controls                                                                                                                                | On disk?                |
 |----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| `MCP_API_KEYS_FILE`  | Path to the managed multi-key JSON store — the production path. Holds many issued keys, each with roles + write-approval policy; hot-reloaded.  | Yes: hashed entries     |
+| `MCP_API_KEYS_FILE`  | Path to the managed multi-key JSON store — the production path. Holds many issued keys, each with roles; hot-reloaded.  | Yes: hashed entries     |
 | `MCP_API_KEY`        | Single-key dev-mode override: accepts exactly one Bearer token, value taken directly from this env var. No roles, no admin API. Local-run only. | No                      |
 | `ADMIN_API_KEY`      | Bearer token that gates the admin REST API at `/admin/keys` (mint / list / patch / revoke caller-facing keys). Requires `MCP_API_KEYS_FILE`.    | No (env-only)           |
 
@@ -99,8 +99,7 @@ entry contains:
   `NewKeyEntry` (the only production constructor) hashes immediately
   and never retains the raw value;
 - `key_prefix` (first 8 characters) for operator identification;
-- `enabled` flag, `created_at` (UTC), `roles` slice, `write_approval`
-  policy.
+- `enabled` flag, `created_at` (UTC), `roles` slice.
 
 Validation: constant-time hash comparison, with a placeholder compare
 on the miss path so unknown-key and known-key request timings match
@@ -140,8 +139,7 @@ signatures without contacting FusionAuth on every request.
 Per request: `jwt.Parse` with `WithLeeway(ClockSkew)` enforces the
 standard validity claims; if those pass, the validator manually checks
 `iss` and `aud`, then extracts `sub` and the configured roles claim.
-Presence of the `automation` role yields `WriteApproval=auto`;
-otherwise `required`.
+Roles are extracted from the token and used for RBAC gating; no write-approval policy is derived from the `automation` role (server-side write approval was removed in Option 0 — see `docs/SESSION_AFFINITY.md`).
 
 | Claim                | Source            | Action                                           | Persists                                                                                                          |
 |----------------------|-------------------|--------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|

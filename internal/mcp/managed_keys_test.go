@@ -21,7 +21,7 @@ func TestManagedKeyStore_CreateAndLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := mks.Create("client-a", "required", nil)
+	result, err := mks.Create("client-a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +48,10 @@ func TestManagedKeyStore_CreateDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mks.Create("client-a", "", nil); err != nil {
+	if _, err := mks.Create("client-a", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mks.Create("client-a", "", nil); err == nil {
+	if _, err := mks.Create("client-a", nil); err == nil {
 		t.Fatal("expected error for duplicate client ID")
 	}
 }
@@ -63,10 +63,10 @@ func TestManagedKeyStore_List(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mks.Create("alpha", "auto", nil); err != nil {
+	if _, err := mks.Create("alpha", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mks.Create("beta", "required", nil); err != nil {
+	if _, err := mks.Create("beta", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,7 +88,7 @@ func TestManagedKeyStore_UpdateEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := mks.Create("client-a", "", nil)
+	result, err := mks.Create("client-a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,36 +117,6 @@ func TestManagedKeyStore_UpdateEnabled(t *testing.T) {
 	}
 }
 
-func TestManagedKeyStore_UpdateApproval(t *testing.T) {
-	path := tempKeysFile(t)
-	mks, err := NewManagedKeyStore(path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := mks.Create("client-a", "required", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	auto := "auto"
-	summary, err := mks.Update("client-a", KeyUpdate{WriteApproval: &auto})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.WriteApproval != "auto" {
-		t.Fatalf("got write_approval %q, want auto", summary.WriteApproval)
-	}
-
-	entry := mks.Lookup(result.Key)
-	if entry == nil {
-		t.Fatal("expected key to be findable")
-	}
-	if entry.WriteApproval != "auto" {
-		t.Fatalf("got write_approval %q in entry, want auto", entry.WriteApproval)
-	}
-}
-
 func TestManagedKeyStore_UpdateMissing(t *testing.T) {
 	path := tempKeysFile(t)
 	mks, err := NewManagedKeyStore(path, nil)
@@ -168,7 +138,7 @@ func TestManagedKeyStore_Delete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := mks.Create("client-a", "", nil)
+	result, err := mks.Create("client-a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +177,7 @@ func TestManagedKeyStore_PersistenceAcrossReloads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := mks1.Create("persistent-client", "auto", nil)
+	result, err := mks1.Create("persistent-client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,9 +195,6 @@ func TestManagedKeyStore_PersistenceAcrossReloads(t *testing.T) {
 	if entry.ID != "persistent-client" {
 		t.Fatalf("got ID %q, want persistent-client", entry.ID)
 	}
-	if entry.WriteApproval != "auto" {
-		t.Fatalf("got write_approval %q, want auto", entry.WriteApproval)
-	}
 }
 
 func TestManagedKeyStore_Counters(t *testing.T) {
@@ -237,10 +204,10 @@ func TestManagedKeyStore_Counters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mks.Create("a", "", nil); err != nil {
+	if _, err := mks.Create("a", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mks.Create("b", "", nil); err != nil {
+	if _, err := mks.Create("b", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,7 +252,7 @@ func TestManagedKeyStore_FilePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, createErr := mks.Create("test", "", nil); createErr != nil {
+	if _, createErr := mks.Create("test", nil); createErr != nil {
 		t.Fatal(createErr)
 	}
 

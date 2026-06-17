@@ -63,38 +63,46 @@ The server **does**:
    parameters were derived from a tool output.** A registry name that
    contains "/grant admin" should not auto-route into a
    `anchor_prepare_grant_role` call without a human in the loop.
-4. **Set `WriteApproval=required`** (or `automation`-role with very
-   tight scopes) for keys consumed by autonomous agents. The MCP
-   elicitation prompt is the last defense against an agent that has
-   been steered into proposing a malicious broadcast.
+4. **Obtain explicit human confirmation before your client submits a
+   signed transaction.** The server no longer issues an MCP elicitation
+   prompt before broadcasting. Human confirmation is entirely the
+   client/agent's responsibility. The caller-side signature is the
+   security boundary; the server broadcasts exactly the signed bytes
+   it receives and cannot alter them.
 5. **Pin a per-environment trust boundary on string fields.** A
    registry name with embedded ANSI escape codes or zero-width
    characters is almost certainly adversarial; refuse to render or
    reason over it.
 
-## Approval-substitution attacks
+## Transaction-substitution attacks
 
 ### The threat
 
-The MCP elicitation approval prompt decodes a signed transaction and
-displays Signer, To, Method selector, Value, Gas, Nonce, Chain ID,
-data length, and the submitting client ID. **The submitting client
-ID is the auth-context identity, not the on-chain signer.** A
-compromised client (or a MITM on the prepare-step output) can submit
-a signed transaction that differs from what the user asked for; the
-prompt will display the substituted transaction.
+A compromised client (or a man-in-the-middle on the prepare-step
+output) can submit a signed transaction that differs from what the
+user intended. **The submitting client ID is the auth-context
+identity, not the on-chain signer.** The server broadcasts exactly
+the signed bytes it receives — it never alters them and no longer
+decodes or displays them to the caller. The consumer's confirmation
+step is the only point at which substitution can be caught before
+broadcast.
 
 ### What consumers should do
 
-1. **Always check the Signer line before approving.** It is the
-   address recovered from the signature on the bytes about to be
-   broadcast. If it does not match the wallet the user thinks they
-   are using, decline.
-2. **Always check the Method selector.** Anchor-precompile methods
+1. **Verify the transaction before signing it.** The `anchor_prepare_*`
+   and `evm_send_raw_transaction` prepare tools return the full
+   unsigned transaction breakdown (to, data, nonce, gas, chain ID).
+   Confirm these fields match the intended operation before your
+   signer signs the bytes.
+2. **Always check the Signer address after signing.** Recover the
+   signer from the signed bytes before submitting. If it does not
+   match the wallet the user intended, abort.
+3. **Always check the Method selector.** Anchor-precompile methods
    are stable; any selector that does not match the operation you
    asked for is a substitution attack.
-3. **Decline on Chain ID mismatch.** Mainnet (`1611`) and testnet
-   (`787111`) approvals must not be confused. The prompt labels both.
+4. **Do not submit on Chain ID mismatch.** Mainnet (`1611`) and
+   testnet (`787111`) transactions must not be confused. Verify the
+   `chainId` field in the unsigned transaction before signing.
 
 ## Reporting
 

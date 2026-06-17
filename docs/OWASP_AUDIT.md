@@ -41,7 +41,7 @@ boundary (operator, reverse proxy, consuming agent).
 | A01 | Broken Access Control | **PARTIAL** | MCP transport authenticated + RBAC-gated (under `MCP_KEYLESS_READS=true` the read surface is intentionally anonymous; only `evm_send_raw_transaction` is gated); health/metrics endpoints rely on network isolation; RBAC enforcement is conditional on roles being assigned. |
 | A02 | Cryptographic Failures | **PARTIAL** | API keys + admin key sha256-hashed at rest with constant-time compare; OTLP TLS default-on; MCP HTTP transport TLS is a reverse-proxy responsibility. |
 | A03 | Injection | **COVERED** | No SQL/shell/template surface; calldata is typed ABI-encoded, never concatenated. Indirect prompt injection via on-chain data is documented as a consumer-side concern. |
-| A04 | Insecure Design | **COVERED** | Prepare-sign-submit keeps zero keys server-side; pre-mortem-driven design; honest wizard state names; human-approval elicitation on writes. |
+| A04 | Insecure Design | **COVERED** | Prepare-sign-submit keeps zero keys server-side; pre-mortem-driven design; honest wizard state names; writes gated by RBAC + `ENABLE_WRITE_TOOLS`; caller-side signature is the security boundary. |
 | A05 | Security Misconfiguration | **PARTIAL** | Secure defaults + fail-loud config validation; K8s/Helm hardened and aligned; K8s `:latest` image tag pinning deferred to the Phase 10 release pipeline. |
 | A06 | Vulnerable and Outdated Components | **COVERED** | `govulncheck` + license scan + Dependabot in CI; deps vendored and built `-mod=vendor`; Docker bases digest-pinned; GPL-exposed `go-ethereum` removed. |
 | A07 | Identification and Authentication Failures | **COVERED** | Two providers (hashed API keys, FusionAuth JWT/JWKS); 256-bit random keys; pre-auth per-IP failure limiter; constant-time compare with miss-path timing flattening. |
@@ -74,9 +74,6 @@ in-scope only as a local-process boundary.
 - **Write tools off by default.** `ENABLE_WRITE_TOOLS` (`internal/config`)
   defaults to `false`; `internal/mcp/server.go` only registers write tools when
   it is `true`.
-- **Write approval.** `internal/mcp/approval.go` resolves a per-client or global
-  approval policy and routes through MCP elicitation when approval is
-  `required` (the default).
 - **Admin API isolation.** `ADMIN_API_ADDR` defaults to `127.0.0.1:8081`;
   `adminAuth` in `internal/mcp/admin.go` compares sha256 hashes under
   `subtle.ConstantTimeCompare`.
@@ -200,18 +197,21 @@ state model, and whether security was designed in or bolted on.
   misleading `ready_to_anchor` (`planning/PHASE_8_DESIGN.md` §3.7.1) — a deliberate
   design choice against a state name that would over-claim what the server can
   actually observe.
-- **Human-in-the-loop by default.** `WRITE_APPROVAL_DEFAULT` defaults to
-  `required`; the `automation` role / `auto` approval is an explicit,
-  per-client opt-out for trusted pipelines.
+- **Write gating.** Writes require both `ENABLE_WRITE_TOOLS=true` (off by
+  default) and an authenticated caller with `writer`, `admin`, or `automation`
+  role. The caller-side signature is the security boundary: the server
+  broadcasts exactly the signed bytes it receives. Human confirmation before
+  submitting a signed transaction is the client/agent's responsibility.
 - **Defense in depth.** Origin guard → per-IP failure limiter → body limit →
   auth → per-client rate limiter, layered in `internal/mcp/server.go`.
 
 ### Residual risk / deferrals
 - **Autonomous-agent abuse.** An agent that *also* holds signing capability can
-  self-approve writes (SECURITY_AUDIT.md AI/agent finding A1). The approval
-  elicitation and rate limiters narrow this, but the residual is inherent to
-  giving an autonomous agent a signer — it is a property of the deployment, not
-  a server defect. Documented for consumers.
+  submit writes without human review (SECURITY_AUDIT.md AI/agent finding A1).
+  The server no longer gates writes via elicitation; the residual is inherent to
+  giving an autonomous agent a signer and is a property of the deployment, not
+  a server defect. Rate limiting narrows the blast radius. Documented for
+  consumers in `docs/SECURITY_CONSUMER_GUIDANCE.md`.
 
 ### Disposition
 **COVERED.** Insecure Design is the category Phase 8 most directly strengthened:
@@ -232,7 +232,7 @@ migration, and the K8s / Helm deployment manifests.
   migration table — even when the matching `NVNM_*` is also set (Phase 8.9; see
   `CLAUDE.md` "Migration hygiene principle"). Stale config cannot drift silently.
 - **Secure defaults.** `ENABLE_WRITE_TOOLS=false`, `OTLP_INSECURE=false`,
-  `ADMIN_API_ADDR=127.0.0.1:8081`, `WRITE_APPROVAL_DEFAULT=required`.
+  `ADMIN_API_ADDR=127.0.0.1:8081`.
 - **No silent fallback.** Config validation refuses to start when the chain
   environment cannot be resolved (SECURITY_AUDIT.md 2026-05-12 Go review) — a
   private-fork operator must set `NVNM_CHAIN_ENVIRONMENT` explicitly.

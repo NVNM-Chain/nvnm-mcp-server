@@ -6,10 +6,12 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
@@ -32,6 +34,30 @@ func writeJSONFile(t *testing.T, path string, v interface{}) {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// TestLoadKeysFile_RejectsLegacyWriteApproval asserts the loader fails
+// loud when a key entry still carries the retired write_approval field,
+// rather than silently ignoring it. Server-side write approval was
+// removed in Option 0; a stale write_approval in a deployed key store is
+// exactly the silent-drift trap fail-loud is meant to catch (mirrors the
+// INVENIAM_* hard-cut). The error must name the offending key id.
+func TestLoadKeysFile_RejectsLegacyWriteApproval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keys.json")
+	raw := `[{"id":"legacy-key","key_hash":"` + strings.Repeat("a", 64) +
+		`","enabled":true,"write_approval":"auto","roles":["writer"]}]`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write keys file: %v", err)
+	}
+
+	_, err := LoadKeysFile(path)
+	if !errors.Is(err, ErrLegacyKeyWriteApproval) {
+		t.Fatalf("LoadKeysFile error = %v, want ErrLegacyKeyWriteApproval", err)
+	}
+	if !strings.Contains(err.Error(), "legacy-key") {
+		t.Errorf("error %q should name the offending key id", err.Error())
 	}
 }
 
@@ -158,7 +184,7 @@ func TestMigration_AlreadyHashedFileUntouched(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "keys.json")
 
-	entries := []KeyEntry{NewKeyEntry("new-1", "fresh-token", "", nil)}
+	entries := []KeyEntry{NewKeyEntry("new-1", "fresh-token", nil)}
 	writeJSONFile(t, path, entries)
 
 	if _, err := NewManagedKeyStore(path, discardLogger()); err != nil {
@@ -182,7 +208,7 @@ func TestMigration_InterruptedWriteRecoveredFromTmp(t *testing.T) {
 		t.Fatalf("write malformed primary: %v", err)
 	}
 	// .tmp: the new contents that should have replaced the primary.
-	good := []KeyEntry{NewKeyEntry("recovered", "good-token", "", nil)}
+	good := []KeyEntry{NewKeyEntry("recovered", "good-token", nil)}
 	writeJSONFile(t, path+".tmp", good)
 
 	entries, err := LoadKeysFile(path)

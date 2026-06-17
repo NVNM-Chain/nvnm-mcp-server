@@ -18,7 +18,7 @@ func TestSaveKeysFile_AtomicNoTempLeak(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "keys.json")
 
-	entries := []KeyEntry{NewKeyEntry("a", "k", "", nil)}
+	entries := []KeyEntry{NewKeyEntry("a", "k", nil)}
 	if err := SaveKeysFile(target, entries); err != nil {
 		t.Fatalf("SaveKeysFile: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSaveKeysFile_KeepsExistingOnFailure(t *testing.T) {
 	target := filepath.Join(dir, "keys.json")
 
 	// Seed an existing file.
-	original := []KeyEntry{NewKeyEntry("orig", "orig-key", "", nil)}
+	original := []KeyEntry{NewKeyEntry("orig", "orig-key", nil)}
 	if err := SaveKeysFile(target, original); err != nil {
 		t.Fatalf("seed SaveKeysFile: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestSaveKeysFile_KeepsExistingOnFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	updated := []KeyEntry{NewKeyEntry("new", "new-key", "", nil)}
+	updated := []KeyEntry{NewKeyEntry("new", "new-key", nil)}
 	if werr := SaveKeysFile(target, updated); werr == nil {
 		t.Fatal("expected SaveKeysFile to fail on read-only directory, got nil")
 	}

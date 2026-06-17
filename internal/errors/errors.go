@@ -37,8 +37,6 @@ var (
 	ErrInvalidChainID         = errors.New("invalid chain ID")
 	ErrEmptyTxHash            = errors.New("empty transaction hash returned from broadcast")
 	ErrWriteDisabled          = errors.New("write tools are not enabled")
-	ErrWriteDeclined          = errors.New("transaction broadcast declined by user")
-	ErrElicitationUnsupported = errors.New("write approval required but client does not support elicitation")
 	ErrPermissionDenied       = errors.New("permission denied")
 	ErrAuthRequired           = errors.New("authentication required")
 )
@@ -102,9 +100,6 @@ func SafeForClient(err error) error {
 		return err
 	}
 	if errors.Is(err, ErrAnchorABIMissing) || errors.Is(err, ErrWriteDisabled) {
-		return err
-	}
-	if errors.Is(err, ErrWriteDeclined) || errors.Is(err, ErrElicitationUnsupported) {
 		return err
 	}
 	if errors.Is(err, ErrPermissionDenied) {

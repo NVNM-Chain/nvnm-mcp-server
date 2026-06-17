@@ -93,7 +93,7 @@ Cold-reader assumptions to head off up front. The server is deliberately scoped 
 
 **Phases 0–11 engineering-side complete as of 2026-06-02; current release is `v1.0.0-rc7`.** Phase 8 closed out on 2026-05-15: foundation types and tool annotations (8.1–8.5), API-key hashing-at-rest migration and constant-time auth (8.6–8.7), five onboarding tools (8.8), the BREAKING env-var hard cut `INVENIAM_*` → `NVNM_*` plus server-identity rename (8.9 — see [`docs/RUNBOOK.md#env-var-migration`](docs/RUNBOOK.md#env-var-migration)), the BREAKING binary + Docker artifact rename (8.13 — `cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`, image at `ghcr.io/nvnm-chain/nvnm-mcp-server`), the OWASP Top 10 self-audit (8.12), and the security assessment in [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md). Phase 9 (OSS Readiness) shipped through 9.16 across May 18–27: SPDX headers, mainnet cutover playbook, multi-arch Cosign-signed images, secrets scrub, DCO branch protection, the canonical org migration to `NVNM-Chain/nvnm-mcp-server` (9.14), and the keyless-read auth middleware (9.16). Phase 9.15 (public repo flip) is business-gated — engineering work complete, hand-off awaiting the launch moment. Phase 10 (DevOps Foundations) shipped engineering-side on 2026-06-02: HTTP-level error-rate SLI with a `class` label ([`mcp_http_responses_total`](deploy/prometheus/alerts.yaml)), [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) with per-alert playbooks, Cosign-verify recipe in [`docs/RUNBOOK.md`](docs/RUNBOOK.md), and Phase 9.14 carried-over k8s manifest cleanups (BREAKING for existing deployments). Phase 11 (Product Launch) shipped engineering-side on 2026-06-02: self-serve API-key request endpoint at `POST /api/v1/keys/request` with admin pending-review endpoints and SMTP integration, wallet wizard hook (`needs_wallet` → wallet generator URL), and the engineering-side Terms of Service draft at [`docs/TERMS.md`](docs/TERMS.md). The remaining Phase 11 exit criteria (counsel sign-offs on ToS / Privacy Policy, Anthropic / OpenAI directory submissions, beta cohort onboarding, mailbox provisioning) are non-engineering scope — see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) for the live tracking.
 
-HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all **authenticated** audit logs and OTel spans. Under keyless reads (`MCP_KEYLESS_READS=true`, the Inveniam-hosted default) only `evm_send_raw_transaction` authenticates and carries a per-client identifier; the `anchor_prepare_*` tools are auth-exempt and anonymous reads carry no `client_id`. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Human-in-the-loop write approval via MCP elicitation is configurable per client (`required` or `auto`); the prompt shows the recovered signer address, the first 4 bytes of calldata (method selector), and the chain environment label so consumers can spot signature-substitution attacks. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
+HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all **authenticated** audit logs and OTel spans. Under keyless reads (`MCP_KEYLESS_READS=true`, the Inveniam-hosted default) only `evm_send_raw_transaction` authenticates and carries a per-client identifier; the `anchor_prepare_*` tools are auth-exempt and anonymous reads carry no `client_id`. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Write access is gated by RBAC role and `ENABLE_WRITE_TOOLS`; obtaining human confirmation before submitting a signed transaction is the caller/agent's responsibility (stated in the server's `initialize` instructions). The signature remains the security boundary — the server holds no keys and cannot alter a signed transaction. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
 
 Write tools construct complete unsigned transactions with both `raw_tx` (for HSM/CLI signers) and `wallet_tx_request` (for MetaMask / EIP-1193 wallets); private keys never touch the server -- see [Write Architecture](#write-architecture-phase-3). Phase 8.4 made EIP-1559 (type-2) the default transaction format; callers that need legacy type-0 set `prefer_legacy_tx: true` on the prepare-tool input. Every tool response carries a `next_actions` hint array (Phase 8.3) so agents can chain calls from response-embedded affordances rather than server-side orchestration. Every tool carries an MCP `ToolAnnotations` payload (Phase 8.2) so clients can tell read-only tools from state-changing ones without inferring spec defaults. Five Phase 8.8 onboarding tools (`nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`) walk first-time agents through wallet generation, funding, and on-chain state derivation; the wizard's `funded_active` state is explicit that "has sent any transaction" is not the same as "has anchored" because the wizard reads only balance and nonce, never transaction contents. OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
@@ -188,7 +188,7 @@ export JWT_CLOCK_SKEW=60s                           # default 60s
 export JWT_ROLES_CLAIM=roles                        # default "roles"
 ```
 
-The `automation` role in the JWT maps to `auto` write approval (it bypasses the human write-approval prompt). All other roles default to `required`.
+The `automation` role grants write access alongside `writer` and `admin`; it is intended for unattended pipelines.
 
 The authenticated client ID — the API key's label, or a keyed HMAC of the JWT `sub` (the raw `sub`, which is email-reversible, is never logged) — flows into audit logs and OTel spans for authenticated requests.
 
@@ -202,7 +202,7 @@ To use the `fusionauth` provider, configure these in your FusionAuth instance (t
    - `reader` — read tools only
    - `writer` — reads + broadcast writes (`evm_send_raw_transaction`)
    - `admin` — the above + `anchor_prepare_grant_role`
-   - `automation` — **bypasses the human write-approval prompt** (`write_approval: auto`); assign only to unattended pipelines.
+   - `automation` — write access for unattended pipelines (same as `writer` + `admin` for broadcast access); assign only to non-interactive callers.
 4. **JWKS** is the standard `<FUSIONAUTH_URL>/.well-known/jwks.json` (auto-discovered unless `FUSIONAUTH_JWKS_URL` is set); ensure it is reachable from the server.
 5. Clients obtain a JWT from FusionAuth (interactive login, or a client-credentials / Entity grant) and present it as `Authorization: Bearer <jwt>`.
 
@@ -261,7 +261,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
 | `OTLP_INSECURE` | `false` | Use TLS for the OTLP gRPC connection. Set to `true` only for sidecar / localhost collectors that do not support TLS. |
-| `WRITE_APPROVAL_DEFAULT` | `required` | Global default for human-in-the-loop write approval. `required` prompts user via MCP elicitation before broadcasting; `auto` skips approval. Per-client overrides via key store. |
+| `WRITE_APPROVAL_DEFAULT` | — | **Removed.** Setting this env var aborts startup with a migration error. See [`docs/RUNBOOK.md#write-approval-removal`](docs/RUNBOOK.md#write-approval-removal). |
 
 ### Observability
 
@@ -451,11 +451,9 @@ make clean          # Remove build artifacts
 
 ```bash
 make key-create NAME=my-agent                            # Create a new API key
-make key-create NAME=pipeline APPROVAL=auto              # Create key with auto write approval
-make key-list                                            # List all keys (ID, enabled, approval, created)
+make key-list                                            # List all keys (ID, enabled, roles, created)
 make key-disable NAME=my-agent                           # Disable a key (rejected at auth)
 make key-enable NAME=my-agent                            # Re-enable a disabled key
-make key-set-approval NAME=my-agent APPROVAL=auto        # Set write approval policy for a client
 ```
 
 Keys are stored in `.mcp-keys.json` (gitignored). Set `MCP_API_KEYS_FILE=.mcp-keys.json` to use them.

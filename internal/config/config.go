@@ -20,6 +20,13 @@ var (
 	ErrLegacyEnvVars  = errors.New(
 		"legacy INVENIAM_* env vars detected; rename to NVNM_* per docs/RUNBOOK.md#env-var-migration",
 	)
+	// ErrLegacyWriteApproval is returned when the retired WRITE_APPROVAL_DEFAULT
+	// env var is detected at startup. Server-side write approval was removed in
+	// Option 0; writes now gate on RBAC + ENABLE_WRITE_TOOLS only.
+	ErrLegacyWriteApproval = errors.New(
+		"legacy WRITE_APPROVAL_DEFAULT env var detected; server-side write " +
+			"approval was removed in Option 0 (writes gate on RBAC + " +
+			"ENABLE_WRITE_TOOLS). Remove it per docs/RUNBOOK.md#write-approval-removal")
 	ErrInvalidTimeout         = errors.New("REQUEST_TIMEOUT must be a positive duration")
 	ErrInvalidTransport       = errors.New("MCP_TRANSPORT must be \"stdio\" or \"http\"")
 	ErrInvalidRetries         = errors.New("RPC_MAX_RETRIES must be non-negative")
@@ -28,7 +35,6 @@ var (
 	ErrInvalidRateBurst       = errors.New("RPC_RATE_BURST must be positive")
 	ErrInvalidBreakerSettings = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
 	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
-	ErrInvalidWriteApproval   = errors.New("WRITE_APPROVAL_DEFAULT must be \"required\" or \"auto\"")
 	ErrInvalidMCPRateLimit    = errors.New("MCP_RATE_LIMIT must be positive")
 	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
 	ErrInvalidAnonRateLimit   = errors.New("MCP_ANON_RATE_LIMIT must be positive")
@@ -92,9 +98,6 @@ type Config struct {
 
 	// Trace sampling
 	OTELTraceSampleRatio float64
-
-	// Write approval: "required" (default) or "auto"
-	WriteApprovalDefault string
 
 	// Per-client MCP rate limiting
 	MCPRateLimit float64 // MCP_RATE_LIMIT: requests/second per client (default 60)
@@ -236,6 +239,9 @@ func Load() (*Config, error) {
 			ErrLegacyEnvVars, strings.Join(legacy, ", "),
 		)
 	}
+	if os.Getenv("WRITE_APPROVAL_DEFAULT") != "" {
+		return nil, ErrLegacyWriteApproval
+	}
 	cfg := &Config{
 		EVMRPCURL:        os.Getenv("NVNM_EVM_RPC_URL"),
 		EVMArchiveRPCURL: os.Getenv("NVNM_EVM_ARCHIVE_RPC_URL"),
@@ -269,8 +275,8 @@ func Load() (*Config, error) {
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
 	// Default to loopback-only. The admin key is the master key (creates
-	// API keys, sets WriteApproval=auto, assigns admin roles), so
-	// exposing :8081 cluster-wide is a privilege-escalation foot-gun.
+	// API keys, assigns admin roles), so exposing :8081 cluster-wide is
+	// a privilege-escalation foot-gun.
 	// Operators that need cluster-internal access set ADMIN_API_ADDR
 	// explicitly (e.g. ":8081") and pair it with a NetworkPolicy.
 	cfg.AdminAPIAddr = envOrDefault("ADMIN_API_ADDR", "127.0.0.1:8081")
@@ -289,8 +295,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid OTEL_TRACE_SAMPLE_RATIO %q: %w", sampleRatioStr, err)
 	}
 	cfg.OTELTraceSampleRatio = sampleRatio
-
-	cfg.WriteApprovalDefault = envOrDefault("WRITE_APPROVAL_DEFAULT", "required")
 
 	if loadErr := cfg.loadMCPRateConfig(); loadErr != nil {
 		return nil, loadErr
@@ -433,9 +437,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Transport != "stdio" && c.Transport != "http" {
 		return fmt.Errorf("%w: got %q", ErrInvalidTransport, c.Transport)
-	}
-	if c.WriteApprovalDefault != "required" && c.WriteApprovalDefault != "auto" {
-		return fmt.Errorf("%w: got %q", ErrInvalidWriteApproval, c.WriteApprovalDefault)
 	}
 	if !c.ChainEnvironment.IsValid() {
 		return fmt.Errorf("%w: got %q", ErrInvalidChainEnvironment, c.ChainEnvironment)

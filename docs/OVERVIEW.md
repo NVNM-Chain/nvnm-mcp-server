@@ -25,7 +25,7 @@ This is not a raw JSON-RPC passthrough. It exposes **21 curated, typed tools** w
 
 **AI-Native Interface.** Built for the Model Context Protocol from the ground up. Every tool returns typed, normalized JSON with consistent field naming, explicit nulls, and human-readable status strings. Designed for both human developers and LLM tool-calling.
 
-**Human-in-the-Loop Controls.** Configurable write approval via MCP elicitation. Before any transaction broadcasts, the server can prompt the human user with decoded transaction details (recipient, value, gas, chain ID) and require explicit approval. Set per client: `required` for interactive agents, `auto` for trusted automation pipelines.
+**Caller-Side Write Confirmation.** The server broadcasts what it receives; human confirmation before submitting a signed transaction is the caller/agent's responsibility. The signature itself is the security boundary — the server holds no private keys and cannot alter a signed transaction. Write access is gated by RBAC role (`writer`/`admin`/`automation`) and the `ENABLE_WRITE_TOOLS` flag.
 
 **Observable by Default.** OpenTelemetry traces and Prometheus metrics on every tool call and upstream RPC request. Per-client identity flows through audit logs and OTel spans. Health and readiness probes for Kubernetes and cloud ALB health checks.
 
@@ -114,7 +114,7 @@ Your Agent          MCP Server           Your Signer          NVNM Chain
 ## Security Posture
 
 - Bearer token authentication with per-client identity and full audit trail (on authenticated requests; keyless reads carry no per-client identity)
-- Human-in-the-loop write approval -- configurable per client (`required` or `auto`)
+- Write access gated by RBAC role and `ENABLE_WRITE_TOOLS`; caller/agent obtains human confirmation before submitting a signed transaction
 - Private keys never touch the server -- prepare-sign-submit by design
 - Error sanitization prevents internal details from leaking to callers
 - Request body limits, hex input caps, and HTTP timeouts against DoS

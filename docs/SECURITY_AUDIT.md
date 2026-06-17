@@ -1123,3 +1123,27 @@ well-known → `404`, no-auth → `401` + `WWW-Authenticate: Bearer`, valid key 
 `200`. The remaining client-side confirmation — that Claude Code itself flips
 to "Connected" — is a black-box client behavior validated separately at
 release, not assertable from the server code.
+
+## Update 2026-06-17: Option 0 — server-side write approval removed
+
+The "Human-in-the-loop approval for write ops — **Completed**" disposition in
+the longer-term-hardening triage above is **superseded**. Server-side write
+approval was removed in the Option 0 stateless multi-replica migration: the MCP
+elicitation prompt before `evm_send_raw_transaction` (the only server→client
+request), the per-client `write_approval` field, the global
+`WRITE_APPROVAL_DEFAULT`, and the FusionAuth `automation → auto` mapping are all
+gone, and `internal/mcp/approval.go` is deleted.
+
+Write authorization now rests on two controls: RBAC role
+(`writer`/`admin`/`automation`) and the `ENABLE_WRITE_TOOLS` flag. Obtaining
+human confirmation before submitting a signed transaction is the client/agent's
+responsibility (stated in the server's `initialize` instructions). The
+caller-side signature remains the security boundary — the server was never the
+write security boundary and holds no key material. The tradeoff (enforced →
+advisory) is recorded in `docs/SESSION_AFFINITY.md` §3.
+
+Migration is fail-loud, consistent with the `INVENIAM_* → NVNM_*` hard cut:
+startup aborts with `ErrLegacyWriteApproval` if `WRITE_APPROVAL_DEFAULT` is set,
+or `ErrLegacyKeyWriteApproval` (naming the offending key IDs) if any key-store
+entry still carries `write_approval`. Operator steps:
+`docs/RUNBOOK.md#write-approval-removal`.

@@ -9,6 +9,39 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Stateless multi-replica operation (Option 0).** The MCP Streamable-HTTP
+  handler now runs with `StreamableHTTPOptions{Stateless: true}`. The server no
+  longer keeps a per-pod session map, so any replica can serve any request and
+  no load-balancer session affinity is required — plain round-robin scales
+  throughput. See `docs/SESSION_AFFINITY.md` for the full rationale.
+- **Write approval is now the client/agent's responsibility, not the server's.**
+  The server-side MCP elicitation prompt before `evm_send_raw_transaction` was
+  the only server→client request and the sole reason sessions had to be sticky;
+  it has been removed. Writes gate on RBAC role (`writer`/`admin`/`automation`)
+  plus `ENABLE_WRITE_TOOLS` only. The `initialize` instructions now state that
+  the client/agent must obtain human confirmation before submitting a signed
+  transaction; the caller-side signature remains the security boundary.
+
+### Removed
+
+- `WRITE_APPROVAL_DEFAULT` env var, the per-key `write_approval` field (admin
+  REST API, key store, and `key-mgmt` CLI `set-approval` command / create
+  `--write-approval` flag), the FusionAuth `automation → auto` approval mapping,
+  and the `required`/`auto` distinction throughout. Writes are no longer gated
+  by a server-side approval policy.
+
+### Migration
+
+- **Breaking, fail-loud.** Startup aborts with `ErrLegacyWriteApproval` if
+  `WRITE_APPROVAL_DEFAULT` is set, and with `ErrLegacyKeyWriteApproval` (naming
+  the offending key IDs) if any API-key-store entry still carries a
+  `write_approval` field. Remove the env var from your config and strip the
+  `write_approval` field from every key entry. See
+  `docs/RUNBOOK.md#write-approval-removal`. Deliberate hard cut (no silent
+  fallback), consistent with the `INVENIAM_* → NVNM_*` migration.
+
 ## [1.0.0-rc7] - 2026-06-12
 
 > **Version naming note.** Tagged `v1.0.0-rc7` (no dot), continuing the

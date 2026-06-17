@@ -16,7 +16,7 @@ func (s *stubKeyLookup) Lookup(rawKey string) *KeyResult {
 	if rawKey != s.key {
 		return nil
 	}
-	return &KeyResult{ID: "bench-client", KeyHash: HashKey(s.key), WriteApproval: "required"}
+	return &KeyResult{ID: "bench-client", KeyHash: HashKey(s.key)}
 }
 
 func (s *stubKeyLookup) Empty() bool { return s.key == "" }

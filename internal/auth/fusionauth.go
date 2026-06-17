@@ -19,9 +19,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// RoleAutomation is the role name that maps to automatic write approval.
-const RoleAutomation = "automation"
-
 // Sentinel errors for FusionAuth validation failures.
 var (
 	ErrMissingBaseURL = errors.New("FusionAuth base URL is required")
@@ -147,21 +144,12 @@ func (v *FusionAuthValidator) Validate(tokenString string) (*Claims, error) {
 	sub, _ := mapClaims["sub"].(string) //nolint:errcheck // sub is optional; empty string is valid
 	roles := v.extractRoles(mapClaims)
 
-	writeApproval := "required"
-	for _, r := range roles {
-		if r == RoleAutomation {
-			writeApproval = "auto"
-			break
-		}
-	}
-
 	// The raw sub is never logged (privacy: it is email-reversible). It
 	// flows only into request-scope memory and into client_id as a keyed
 	// HMAC. See docs/PRIVACY_DISCUSSION.md § 2.1 D4/D9.
 	return &Claims{
-		ClientID:      hmacClientID(sub, v.config.ClientIDHMACKey),
-		Roles:         roles,
-		WriteApproval: writeApproval,
+		ClientID: hmacClientID(sub, v.config.ClientIDHMACKey),
+		Roles:    roles,
 	}, nil
 }
 

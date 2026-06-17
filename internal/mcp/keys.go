@@ -19,6 +19,14 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
+// ErrLegacyKeyWriteApproval is returned when the key store contains entries
+// with the retired write_approval field. Remove the field from every entry
+// per docs/RUNBOOK.md#write-approval-removal.
+var ErrLegacyKeyWriteApproval = errors.New(
+	"key store contains the retired write_approval field; remove it from " +
+		"every entry (server-side write approval was removed in Option 0). " +
+		"See docs/RUNBOOK.md#write-approval-removal")
+
 // keyPrefixLen is the number of raw-key characters captured as
 // KeyPrefix at creation time, for operator-visible listings. 8 chars
 // of a 43-char base64url-encoded 32-byte key keeps enough information
@@ -55,15 +63,14 @@ type KeyEntry struct {
 // Direct KeyEntry literals with Key: set are reserved for the migration
 // helper in this file and the migration regression tests;
 // TestNoRawKeyLiteralsOutsideMigrationTests grep-enforces that constraint.
-func NewKeyEntry(id, rawKey, writeApproval string, roles []string) KeyEntry {
+func NewKeyEntry(id, rawKey string, roles []string) KeyEntry {
 	return KeyEntry{
-		ID:            id,
-		KeyHash:       auth.HashKey(rawKey),
-		KeyPrefix:     keyPrefixOf(rawKey),
-		Enabled:       true,
-		CreatedAt:     time.Now().UTC(),
-		WriteApproval: writeApproval,
-		Roles:         roles,
+		ID:        id,
+		KeyHash:   auth.HashKey(rawKey),
+		KeyPrefix: keyPrefixOf(rawKey),
+		Enabled:   true,
+		CreatedAt: time.Now().UTC(),
+		Roles:     roles,
 	}
 }
 
@@ -171,6 +178,22 @@ func loadKeysFromPath(path string) ([]KeyEntry, error) {
 	var entries []KeyEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
 		return nil, fmt.Errorf("parse keys file: %w", err)
+	}
+	// Fail loud on any entry carrying the retired write_approval field.
+	// Operators must remove it before the server will start; silent
+	// acceptance would mask stale config the same way dual-populated
+	// INVENIAM_*/NVNM_* would.
+	var legacyIDs []string
+	for i := range entries {
+		if entries[i].WriteApproval != "" {
+			legacyIDs = append(legacyIDs, entries[i].ID)
+		}
+	}
+	if len(legacyIDs) > 0 {
+		return nil, fmt.Errorf(
+			"key store %q: entries with retired write_approval field: %v: %w",
+			path, legacyIDs, ErrLegacyKeyWriteApproval,
+		)
 	}
 	return entries, nil
 }
@@ -310,10 +333,9 @@ func (a *KeyLookupAdapter) Lookup(rawKey string) *auth.KeyResult {
 		return nil
 	}
 	return &auth.KeyResult{
-		ID:            entry.ID,
-		KeyHash:       entry.KeyHash,
-		WriteApproval: entry.WriteApproval,
-		Roles:         entry.Roles,
+		ID:      entry.ID,
+		KeyHash: entry.KeyHash,
+		Roles:   entry.Roles,
 	}
 }
 

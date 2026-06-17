@@ -22,7 +22,7 @@ import (
 // --- nvnm_overview ---
 
 func TestOverviewTool_ReturnsChainIdentityAndJourney(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	cfg.ExplorerURL = "https://explorer.example"
 	cfg.DocsURL = "https://docs.example"
 	cfg.BridgeURL = "https://bridge.example"
@@ -74,7 +74,7 @@ func TestWalletStatusTool_StatesDerivedFromBalanceAndNonce(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := testServerConfig(false, ApprovalRequired)
+			cfg := testServerConfig(false)
 			m := &mockEVM{
 				balance: &evm.NormalizedBalance{
 					Address: "0x" + strings.Repeat("a", 40),
@@ -104,7 +104,7 @@ func TestWalletStatusTool_StatesDerivedFromBalanceAndNonce(t *testing.T) {
 }
 
 func TestWalletStatusTool_InvalidAddressRejected(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	h := makeWalletStatusHandler(&mockEVM{}, cfg)
 	_, _, err := h(context.Background(), nil, walletStatusInput{Address: "not-an-address"})
 	if err == nil {
@@ -283,7 +283,7 @@ func TestVerifySignature_MalformedSignatureRejected(t *testing.T) {
 // --- wizard ---
 
 func TestWizard_NoAddressReturnsNeedsWalletWithSamples(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	cfg.BridgeURL = "https://bridge.example"
 	cfg.WalletGeneratorURL = "https://wallet.example"
 	h := makeSetupWizardHandler(&mockEVM{}, cfg)
@@ -339,7 +339,7 @@ func TestWizard_NoAddressReturnsNeedsWalletWithSamples(t *testing.T) {
 }
 
 func TestWizard_UnfundedAddress(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	cfg.BridgeURL = "https://bridge.example"
 	m := &mockEVM{
 		balance: &evm.NormalizedBalance{Address: "0x", Wei: "0", Ether: "0"},
@@ -361,7 +361,7 @@ func TestWizard_UnfundedAddress(t *testing.T) {
 }
 
 func TestWizard_FundedUnused(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	m := &mockEVM{
 		balance: &evm.NormalizedBalance{Address: "0x", Wei: "1000", Ether: "0.000000000000001"},
 		nonce:   0,
@@ -379,7 +379,7 @@ func TestWizard_FundedUnused(t *testing.T) {
 }
 
 func TestWizard_FundedActiveSurfacesPrivacyCaveat(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	m := &mockEVM{
 		balance: &evm.NormalizedBalance{Address: "0x", Wei: "1000", Ether: "0.000000000000001"},
 		nonce:   3,
@@ -403,7 +403,7 @@ func TestWizard_FundedActiveSurfacesPrivacyCaveat(t *testing.T) {
 }
 
 func TestWizard_InvalidAddressRejected(t *testing.T) {
-	cfg := testServerConfig(false, ApprovalRequired)
+	cfg := testServerConfig(false)
 	h := makeSetupWizardHandler(&mockEVM{}, cfg)
 	_, _, err := h(context.Background(), nil, setupWizardInput{
 		Address: "not-an-address",

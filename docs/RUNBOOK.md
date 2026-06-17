@@ -282,7 +282,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
   http://localhost:8081/admin/keys/pending/<request_id>/approve
 ```
 
-This mints a credential with the `reader` role and `required` write-approval policy (consistent with the project's default-deny posture; promote post-issuance via `PATCH /admin/keys/{id}` if a customer needs more), persists the decision under the double-approve guard, then attempts SMTP delivery. The 200 response includes:
+This mints a credential with the `reader` role only (consistent with the project's default-deny posture; promote post-issuance via `PATCH /admin/keys/{id}` if a customer needs write access), persists the decision under the double-approve guard, then attempts SMTP delivery. The 200 response includes:
 
 ```json
 { "request_id": "...", "status": "approved",
@@ -372,11 +372,10 @@ Manage keys via Makefile targets:
 
 ```bash
 make key-create NAME=my-agent                       # Create key, prints key to stdout
-make key-create NAME=pipeline APPROVAL=auto          # Create key with auto write approval
-make key-list                                        # List all keys (ID, enabled, approval, created)
+make key-create NAME=pipeline ROLES=writer           # Create key with the writer role
+make key-list                                        # List all keys (ID, enabled, roles, created)
 make key-disable NAME=my-agent                       # Disable a key
 make key-enable NAME=my-agent                        # Re-enable a key
-make key-set-approval NAME=my-agent APPROVAL=auto    # Set write approval policy for a client
 ```
 
 ### Admin Key Management API
@@ -392,9 +391,9 @@ When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` w
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/admin/keys` | Create a new client key (returns raw key once). Body: `{"client_id": "name", "write_approval": "required\|auto"}` |
+| `POST` | `/admin/keys` | Create a new client key (returns raw key once). Body: `{"client_id": "name", "roles": ["reader","writer"]}` |
 | `GET` | `/admin/keys` | List all keys (redacted, no raw keys). |
-| `PATCH` | `/admin/keys/{id}` | Update enabled/write_approval. Body: `{"enabled": false}` or `{"write_approval": "auto"}` |
+| `PATCH` | `/admin/keys/{id}` | Update enabled/roles. Body: `{"enabled": false}` or `{"roles": ["reader","writer"]}` |
 | `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
 
 All requests require `Authorization: Bearer <ADMIN_API_KEY>`.
@@ -405,23 +404,38 @@ All requests require `Authorization: Bearer <ADMIN_API_KEY>`.
 curl -X POST http://localhost:8081/admin/keys \
   -H "Authorization: Bearer $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"client_id": "new-agent", "write_approval": "required"}'
+  -d '{"client_id": "new-agent", "roles": ["reader"]}'
 ```
 
 **Security:** The admin port should be restricted via firewall or Kubernetes NetworkPolicy to ops tooling only. The admin token is separate from client keys.
 
-### Write approval (human-in-the-loop)
+### Write-approval removal
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `WRITE_APPROVAL_DEFAULT` | `required` | Global default for write approval. `required` prompts users via MCP elicitation before broadcasting signed transactions; `auto` broadcasts without prompting. |
+Server-side write approval was **removed in Option 0** (the stateless
+multi-replica migration; see [`SESSION_AFFINITY.md`](SESSION_AFFINITY.md)).
+The server previously gated `evm_send_raw_transaction` behind an MCP
+elicitation prompt; that was the only server→client request and the sole
+reason the handler needed sticky sessions. It is gone. Writes now gate on
+**RBAC role** (`writer`/`admin`/`automation`) plus the `ENABLE_WRITE_TOOLS`
+flag only. Obtaining human confirmation before submitting a signed
+transaction is now the **client/agent's responsibility** (stated in the
+server's `initialize` instructions); the signature, produced caller-side,
+remains the actual security boundary.
 
-Per-client overrides are set via `write_approval` in the key store (see `make key-set-approval`). Resolution: per-client > global default > `"required"`.
+**Migration — the server fails loud on the retired knobs:**
 
-When approval is `required`:
-- The server decodes the signed transaction and presents details (to, value, gas, nonce, chain ID, data length) to the user via MCP elicitation.
-- The user must accept to proceed; decline or cancel returns an error.
-- If the MCP client does not support elicitation, the request is rejected.
+- `WRITE_APPROVAL_DEFAULT` set in the environment → startup aborts with
+  `ErrLegacyWriteApproval`. **Remove the variable** from your env / ConfigMap
+  / Helm values.
+- A `write_approval` field on **any** entry in the API-key store
+  (`MCP_API_KEYS_FILE`) → startup aborts with `ErrLegacyKeyWriteApproval`,
+  naming the offending key IDs. **Remove the `write_approval` field** from
+  every key entry in the JSON file. Admin-created key stores from before
+  Option 0 carry this field; strip it once.
+
+Both are deliberate hard cuts (no silent fallback), consistent with the
+`INVENIAM_*` env migration above. The admin REST API and the `key-mgmt` CLI
+no longer accept or display a write-approval policy.
 
 ### Secrets management
 
@@ -873,7 +887,7 @@ Then run an MCP client against `http://<host>:8080` for a minimal tool call (e.g
 
 - Configuration: `internal/config/config.go`, `README.md`
 - Authentication: `internal/mcp/auth.go`, `internal/mcp/keys.go`, `internal/auth/context.go`
-- Write approval: `internal/mcp/approval.go`, `internal/mcp/tools_evm_write.go`
+- Write path (RBAC-gated; no server-side approval gate since Option 0): `internal/mcp/tools_evm_write.go`
 - Key management CLI: `cmd/key-mgmt/main.go`
 - Admin key management API: `internal/mcp/admin.go`, `internal/mcp/managed_keys.go`
 - Health server: `internal/telemetry/health.go`

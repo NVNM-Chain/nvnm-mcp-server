@@ -57,8 +57,11 @@ them so researchers don't burn cycles on them.
 - **HTTP transport requires `Origin` header validation** as the outermost
   middleware, with allowlist via `NVNM_ALLOWED_ORIGINS`
   ([`internal/mcp/origin.go`](internal/mcp/origin.go)).
-- **Write tools default to `WRITE_APPROVAL_DEFAULT=required`** — human in the
-  loop via MCP elicitation before broadcasting.
+- **Write tools are gated by RBAC role (`writer`/`admin`/`automation`) and
+  `ENABLE_WRITE_TOOLS`.** Human confirmation before broadcasting a signed
+  transaction is the client/agent's responsibility. The caller-side signature
+  is the security boundary; the server broadcasts exactly the signed bytes
+  it receives. The server no longer issues an MCP elicitation prompt.
 - **Rate limiting** is enforced per API key (token bucket) and per source IP
   (failure-rate limiter for credential-stuffing).
 - **Legacy `INVENIAM_*` env vars are deliberately rejected at startup** with

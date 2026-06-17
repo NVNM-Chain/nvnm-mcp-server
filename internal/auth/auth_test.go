@@ -62,7 +62,7 @@ func TestClaims_HasRole_Empty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestContextWithClaims_RoundTrip(t *testing.T) {
-	c := &Claims{ClientID: "agent-1", Roles: []string{"writer"}, WriteApproval: "auto"}
+	c := &Claims{ClientID: "agent-1", Roles: []string{"writer"}}
 	ctx := ContextWithClaims(context.Background(), c)
 
 	got := ClaimsFromContext(ctx)
@@ -71,9 +71,6 @@ func TestContextWithClaims_RoundTrip(t *testing.T) {
 	}
 	if got.ClientID != "agent-1" {
 		t.Errorf("ClientID = %q, want %q", got.ClientID, "agent-1")
-	}
-	if got.WriteApproval != "auto" {
-		t.Errorf("WriteApproval = %q, want %q", got.WriteApproval, "auto")
 	}
 }
 
@@ -91,17 +88,6 @@ func TestClientIDFromContext_BackwardCompat(t *testing.T) {
 
 	if got := ClientIDFromContext(context.Background()); got != "" {
 		t.Errorf("ClientIDFromContext on empty ctx = %q, want empty", got)
-	}
-}
-
-func TestWriteApprovalFromContext_BackwardCompat(t *testing.T) {
-	ctx := ContextWithClaims(context.Background(), &Claims{WriteApproval: "required"})
-	if got := WriteApprovalFromContext(ctx); got != "required" {
-		t.Errorf("WriteApprovalFromContext = %q, want %q", got, "required")
-	}
-
-	if got := WriteApprovalFromContext(context.Background()); got != "" {
-		t.Errorf("WriteApprovalFromContext on empty ctx = %q, want empty", got)
 	}
 }
 
@@ -124,10 +110,9 @@ func (f *fakeKeyLookup) Lookup(rawKey string) *KeyResult {
 	}
 	// Defensive copy with KeyHash synthesized from the raw key.
 	return &KeyResult{
-		ID:            e.ID,
-		KeyHash:       HashKey(rawKey),
-		WriteApproval: e.WriteApproval,
-		Roles:         e.Roles,
+		ID:      e.ID,
+		KeyHash: HashKey(rawKey),
+		Roles:   e.Roles,
 	}
 }
 
@@ -137,7 +122,7 @@ func (f *fakeKeyLookup) Empty() bool {
 
 func TestAPIKeyValidator_ValidKey(t *testing.T) {
 	lookup := &fakeKeyLookup{entries: map[string]*KeyResult{
-		"test-key-123": {ID: "client-a", WriteApproval: "auto"},
+		"test-key-123": {ID: "client-a"},
 	}}
 	v := NewAPIKeyValidator(lookup)
 	if v == nil {
@@ -150,9 +135,6 @@ func TestAPIKeyValidator_ValidKey(t *testing.T) {
 	}
 	if claims.ClientID != "client-a" {
 		t.Errorf("ClientID = %q, want %q", claims.ClientID, "client-a")
-	}
-	if claims.WriteApproval != "auto" {
-		t.Errorf("WriteApproval = %q, want %q", claims.WriteApproval, "auto")
 	}
 }
 
@@ -314,7 +296,11 @@ func TestFusionAuth_DoesNotLogRawSub(t *testing.T) {
 	}
 }
 
-func TestFusionAuth_AutomationRoleMapsToAutoApproval(t *testing.T) {
+// TestFusionAuth_AutomationRoleInClaims verifies that the automation role
+// is correctly extracted and present in Claims.Roles. The write-approval
+// derivation (automation→auto) was removed in Option 0; roles are now
+// used directly by RBAC, not by a separate approval gate.
+func TestFusionAuth_AutomationRoleInClaims(t *testing.T) {
 	key, jwksServer := setupTestJWKS(t)
 	defer jwksServer.Close()
 
@@ -344,9 +330,6 @@ func TestFusionAuth_AutomationRoleMapsToAutoApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if claims.WriteApproval != "auto" {
-		t.Errorf("WriteApproval = %q, want %q (automation role)", claims.WriteApproval, "auto")
-	}
 	// ClientID is the keyed HMAC of the sub, never the raw sub — that is
 	// the privacy guarantee that keeps the email-reversible sub out of logs.
 	if claims.ClientID == "pipeline-agent" {
@@ -357,40 +340,6 @@ func TestFusionAuth_AutomationRoleMapsToAutoApproval(t *testing.T) {
 	}
 	if !claims.HasRole("writer") || !claims.HasRole("automation") {
 		t.Errorf("roles = %v, want writer and automation", claims.Roles)
-	}
-}
-
-func TestFusionAuth_NonAutomationRoleMapsToRequired(t *testing.T) {
-	key, jwksServer := setupTestJWKS(t)
-	defer jwksServer.Close()
-
-	v, err := NewFusionAuthValidator(&FusionAuthConfig{
-		BaseURL:         "https://auth.example.com",
-		ApplicationID:   "test-app",
-		Issuer:          "https://auth.example.com",
-		JWKSURL:         jwksServer.URL,
-		ClientIDHMACKey: []byte("test-client-id-hmac-key"),
-	}, discardLogger())
-	if err != nil {
-		t.Fatalf("NewFusionAuthValidator: %v", err)
-	}
-	defer v.Close()
-
-	token := signTestJWT(t, key, jwt.MapClaims{
-		"sub":   "human-user",
-		"iss":   "https://auth.example.com",
-		"aud":   "test-app",
-		"roles": []string{"reader", "writer"},
-		"exp":   time.Now().Add(time.Hour).Unix(),
-		"iat":   time.Now().Unix(),
-	})
-
-	claims, err := v.Validate(token)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if claims.WriteApproval != "required" {
-		t.Errorf("WriteApproval = %q, want %q", claims.WriteApproval, "required")
 	}
 }
 
@@ -515,8 +464,8 @@ func TestFusionAuth_AppScopedRoles(t *testing.T) {
 	if !claims.HasRole("admin") {
 		t.Error("expected admin role from app-scoped claims")
 	}
-	if claims.WriteApproval != "auto" {
-		t.Errorf("WriteApproval = %q, want auto (has automation role)", claims.WriteApproval)
+	if !claims.HasRole("automation") {
+		t.Error("expected automation role from app-scoped claims")
 	}
 }
 

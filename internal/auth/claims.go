@@ -6,9 +6,8 @@ package auth
 // Claims holds the authenticated identity produced by any auth provider.
 // Both API key validation and FusionAuth JWT validation produce this type.
 type Claims struct {
-	ClientID      string
-	Roles         []string
-	WriteApproval string // "required", "auto", or "" (use global default)
+	ClientID string
+	Roles    []string
 }
 
 // HasRole returns true if the claims include the specified role.

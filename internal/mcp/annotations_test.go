@@ -90,7 +90,7 @@ func TestConstructorsReturnDistinctPointers(t *testing.T) {
 const expectedToolCount = 21
 
 func TestE2E_AllToolsAreAnnotated(t *testing.T) {
-	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
+	session := startTestServerWithConfig(t, e2eServerConfig{})
 
 	result, err := session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestE2E_AllToolsAreAnnotated(t *testing.T) {
 }
 
 func TestE2E_WriteToolIsAnnotatedDestructive(t *testing.T) {
-	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
+	session := startTestServerWithConfig(t, e2eServerConfig{})
 
 	result, err := session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
@@ -149,7 +149,7 @@ func TestE2E_WriteToolIsAnnotatedDestructive(t *testing.T) {
 }
 
 func TestE2E_AnchorInfoIsClosedWorld(t *testing.T) {
-	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
+	session := startTestServerWithConfig(t, e2eServerConfig{})
 
 	result, err := session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
@@ -194,7 +194,7 @@ func findTool(tools []*mcp.Tool, name string) *mcp.Tool {
 // any in-source hint that still points at the old name.
 func TestE2E_NextActionTargetsAreRegisteredTools(t *testing.T) {
 	// 1. Resolve the registered tool set via the MCP wire protocol.
-	session := startTestServerWithConfig(t, e2eServerConfig{}, nil)
+	session := startTestServerWithConfig(t, e2eServerConfig{})
 	result, err := session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)

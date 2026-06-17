@@ -150,8 +150,6 @@ Sentinel errors:
 - `ErrRecordNotFound` -- anchor record not found
 - `ErrAnchorABIMissing` -- anchor precompile ABI not loaded
 - `ErrWriteDisabled` -- write tools not enabled
-- `ErrWriteDeclined` -- transaction broadcast declined by user
-- `ErrElicitationUnsupported` -- write approval required but client lacks elicitation
 - `ErrUpstreamRPC` -- upstream RPC error (timeout, rate limit, etc.)
 
 Error taxonomy (for MCP responses):
@@ -252,7 +250,6 @@ Responsibilities:
 - Per-tool role-based authorization (`rbac.go`) -- gates each handler on `reader` / `writer` / `admin` / `automation` roles
 - API key store (`keys.go`, `managed_keys.go`) -- file-backed JSON store with hot-reload semantics
 - Admin REST API (`admin.go`) -- runtime key CRUD on a separate port (`:8081`), guarded by `ADMIN_API_KEY`
-- Write approval workflow (`approval.go`) -- MCP elicitation prompt for `evm_send_raw_transaction` based on per-client + global policy
 - Onboarding-tool runtime info (`runtime.go`) -- bundles operator-config values (`ChainEnvironment`, anchor address, default URLs) passed once at server construction so handlers do not reach into `*config.Config` directly
 
 ## 3. MCP Tool Design
@@ -518,8 +515,6 @@ type Config struct {
     EnableStdoutTel  bool          // default false; for dev debugging
     MetricsAddr      string        // default ":9090"; health + metrics server
 
-    // Write approval
-    WriteApprovalDefault string   // WRITE_APPROVAL_DEFAULT; "required" (default) or "auto"
 }
 ```
 
@@ -683,10 +678,10 @@ per-session path:
 | EVM RPC client | one, built in `main.go` | a map keyed by chain, picked from request context |
 | Anchor client + ABI | one | one per chain |
 | `NewServer(..., chainEnvironment, ...)` | one chain label | resolved per call |
-| Approval prompt | one chain ID | per-call chain ID |
+| Chain ID in tx validation | one chain ID | per-call chain ID |
 | Audit logs | one chain implicit | every line carries an explicit `chain=` dimension |
 | Auth / RBAC | one role set | per-chain role scoping (e.g. `writer:mainnet` ≠ `writer:testnet`) |
-| Approval policy (`write_approval`) | per-key | per-key-per-chain |
+| Write gating (`ENABLE_WRITE_TOOLS` + RBAC role) | per-instance | per-instance-per-chain |
 | Resilient client (retry/breaker) | one set of state | one set per chain (testnet flakes must not trip the mainnet breaker) |
 
 Effort estimate: ~1–2 weeks. Not large in LOC; large in design
@@ -761,13 +756,10 @@ Stdio transport is always unauthenticated (local-only, trusted), regardless of p
     "id": "my-agent",
     "key": "mcp_...",
     "enabled": true,
-    "created_at": "2026-04-01T12:00:00Z",
-    "write_approval": "required"
+    "created_at": "2026-04-01T12:00:00Z"
   }
 ]
 ```
-
-The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to use the global default).
 
 **Behaviour:**
 - When keys are configured, all HTTP requests must include `Authorization: Bearer <key>`.
@@ -793,7 +785,6 @@ The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to us
 - Issuer and audience (application ID) are verified on every request.
 - The JWT `sub` claim becomes the client identity for logs and OTel spans.
 - Roles are extracted from the `roles` claim (top-level or nested under the application ID key, FusionAuth-style).
-- The `automation` role maps to `auto` write approval; all other roles default to `required`.
 - The admin key management API does not start in FusionAuth mode (user management is external).
 - FusionAuth's scheme-stripping quirk (issuer without `http://` prefix) is handled.
 
@@ -809,12 +800,10 @@ The `write_approval` field is optional (`"required"`, `"auto"`, or omitted to us
 **Key management** is provided by the `cmd/key-mgmt/` CLI and Makefile targets (for local/dev use):
 
 ```bash
-make key-create NAME=my-agent                       # Create key
-make key-create NAME=pipeline APPROVAL=auto          # Create key with auto write approval
-make key-list                                        # List keys (ID, enabled, approval, created)
-make key-disable NAME=my-agent                       # Disable key
-make key-enable NAME=my-agent                        # Re-enable key
-make key-set-approval NAME=my-agent APPROVAL=auto    # Set write approval policy for a client
+make key-create NAME=my-agent    # Create key
+make key-list                    # List keys (ID, enabled, created)
+make key-disable NAME=my-agent   # Disable key
+make key-enable NAME=my-agent    # Re-enable key
 ```
 
 **Admin Key Management API** (for production/DevOps use):
@@ -834,7 +823,7 @@ The admin API is authenticated by its own bearer token (`ADMIN_API_KEY`), separa
 |---|---|---|
 | `POST` | `/admin/keys` | Create a new client key. Returns the raw key **once**. |
 | `GET` | `/admin/keys` | List all keys (redacted -- prefix only, no raw keys). |
-| `PATCH` | `/admin/keys/{id}` | Update enabled status and/or write approval policy. |
+| `PATCH` | `/admin/keys/{id}` | Update enabled status. |
 | `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
 
 **Security controls:**
@@ -846,29 +835,18 @@ The admin API is authenticated by its own bearer token (`ADMIN_API_KEY`), separa
 - Request body size limit (1 MB).
 - Only starts on HTTP transport (not stdio).
 
-### Human-in-the-Loop Write Approval
+### Write Gating
 
-The `evm_send_raw_transaction` tool supports configurable human approval before broadcasting. This uses MCP **elicitation** (`ServerSession.Elicit()`) to prompt the user with decoded transaction details (to, value, gas, nonce, chain ID, data length) and request explicit accept/decline.
+Write tools are gated at two levels; both must be satisfied for `evm_send_raw_transaction` to execute:
 
-**Configuration:**
+1. **`ENABLE_WRITE_TOOLS=true`** -- write tools are not registered unless this env var is set. Default is `false`. See `docs/RUNBOOK.md` for deployment guidance.
+2. **RBAC role** -- the authenticated caller must hold `writer`, `admin`, or `automation`. `reader` role callers are denied at the tool handler boundary (`requireRole` in `internal/mcp/rbac.go`).
 
-| Level | Setting | Values |
-|---|---|---|
-| Global default | `WRITE_APPROVAL_DEFAULT` env var | `required` (default) or `auto` |
-| Per-client (API key) | `write_approval` field in key store entry | `required`, `auto`, or empty (use global) |
-| Per-client (FusionAuth) | `automation` role in JWT | `automation` role maps to `auto`; absence maps to `required` |
+**Human confirmation is the client/agent's responsibility.** The server no longer issues an MCP elicitation prompt before broadcasting. The caller-side signature is the security boundary: the server broadcasts exactly the signed bytes it receives and cannot alter them. It is the client's or agent's duty to obtain human confirmation before submitting a signed transaction, and to verify the transaction being signed matches what the user intended.
 
-**Resolution order:** Per-client `write_approval` > `WRITE_APPROVAL_DEFAULT` > `"required"` (safe default).
+The server handler (`StreamableHTTPOptions{Stateless: true}`) runs stateless — no per-pod session map, no load-balancer affinity required. See `docs/SESSION_AFFINITY.md` for the full rationale.
 
-**Behaviour:**
-- `required` -- server decodes the signed transaction and sends an elicitation prompt. User must accept to broadcast; decline/cancel returns `ErrWriteDeclined`.
-- `auto` -- transaction is broadcast without prompting (for trusted automation pipelines).
-- If approval is required but the MCP client doesn't support elicitation, the request fails with `ErrElicitationUnsupported`.
-
-**Key design decisions:**
-- Gate at broadcast (`evm_send_raw_transaction`), not prepare -- prepare tools are safe (unsigned txs only).
-- Safe by default -- new clients require explicit opt-in to autonomous writes.
-- Graceful degradation -- fails clearly rather than silently bypassing approval.
+**Fail-loud migration guards** -- if `WRITE_APPROVAL_DEFAULT` is present in the environment, or if a key store entry carries a `write_approval` field, startup fails with `ErrLegacyWriteApproval` / `ErrLegacyKeyWriteApproval` and a pointer to `docs/RUNBOOK.md#write-approval-removal`.
 
 ### Error Sanitization
 
@@ -998,4 +976,4 @@ State transitions are logged at WARN level and recorded in the `evm.rpc.circuit_
 | Trace sampling | OTel SDK ParentBased | Respects upstream decisions, configurable ratio for cost control |
 | Auth provider | Dual: API key + FusionAuth | API keys for simplicity/dev/agents; FusionAuth for production multi-tenant OAuth. Provider-selectable via `AUTH_PROVIDER` |
 | JWT validation | `keyfunc/v3` + `golang-jwt/jwt/v5` | Same stack as TraceChain API; JWKS auto-refresh; proven in production |
-| Write approval (FusionAuth) | Role-based (`automation` role) | No custom JWT claims needed; aligns with RBAC model |
+| Write gating | RBAC role + `ENABLE_WRITE_TOOLS` | No server-side approval state; stateless handler; signature is the security boundary |

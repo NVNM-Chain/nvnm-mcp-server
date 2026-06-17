@@ -405,7 +405,7 @@ func loadAPIKeys(
 		managedKeys = mks
 	case cfg.APIKey != "":
 		logger.Info("using single API key from MCP_API_KEY")
-		entry := mcpserver.NewKeyEntry("static-key", cfg.APIKey, "", nil)
+		entry := mcpserver.NewKeyEntry("static-key", cfg.APIKey, nil)
 		managedKeys = mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry})
 	default:
 		if cfg.Transport == "http" {

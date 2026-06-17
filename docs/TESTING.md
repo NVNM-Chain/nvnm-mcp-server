@@ -61,11 +61,10 @@ Fast, deterministic tests using mocks and stubs. Run with `make test`.
 | `internal/mcp` | `tools_test.go` | 48 | The 16 EVM + anchor MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`) |
 | `internal/mcp` | `tools_onboarding_test.go` | 18 | The 5 Phase 8.8 onboarding tools (`nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`) — state derivation, input validation, `next_actions` |
 | `internal/mcp` | `server_test.go` | 6 | HTTP E2E via `httptest.NewServer`: `ListTools` (all 21 tools), `CallTool` (success + error propagation) |
-| `internal/mcp` | `server_e2e_test.go` | 20 | Write approval E2E (auto/required/declined/canceled/no-elicitation/prompt-details/RPC-error), API key auth E2E (valid/invalid/missing/disabled/no-keys), per-client approval overrides (auto-overrides-required/required-overrides-auto/auth+elicitation), tx decoding, approval message formatting, sentinel error tests |
-| `internal/mcp` | `managed_keys_test.go` | 12 | `ManagedKeyStore` CRUD: create+lookup, duplicate rejection, list redaction, enable/disable, approval update, delete, persistence across reloads, counters, empty store, file permissions |
-| `internal/mcp` | `admin_test.go` | 18 | Admin API E2E: auth (missing/invalid/valid token), create (success/duplicate/missing-id/invalid-approval), list (empty/with-keys), update (disable+enable/set-approval/not-found/empty-body), delete (success/not-found), full lifecycle, hot-reload (created key immediately usable, disabled key immediately rejected) |
-| `internal/mcp` | `approval_test.go` | 9 | `ResolveWriteApproval` policy resolution (7 sub-cases), `CheckWriteApproval` auto-bypass, per-client override |
-| `internal/config` | `config_test.go` | 13 | Environment variable loading, defaults, validation errors, resilience config, `WriteApprovalDefault` (default/override/invalid) |
+| `internal/mcp` | `server_e2e_test.go` | 14 | API key auth E2E (valid/invalid/missing/disabled/no-keys), `TestE2E_SendRawTx_DirectBroadcast_NoElicitation` (writer key broadcasts directly), `TestE2E_StatelessHandler_ServesUnknownSession` (stateless multi-replica behavior), fail-loud migration sentinel error tests |
+| `internal/mcp` | `managed_keys_test.go` | 11 | `ManagedKeyStore` CRUD: create+lookup, duplicate rejection, list redaction, enable/disable, delete, persistence across reloads, counters, empty store, file permissions |
+| `internal/mcp` | `admin_test.go` | 16 | Admin API E2E: auth (missing/invalid/valid token), create (success/duplicate/missing-id), list (empty/with-keys), update (disable+enable/not-found/empty-body), delete (success/not-found), full lifecycle, hot-reload (created key immediately usable, disabled key immediately rejected) |
+| `internal/config` | `config_test.go` | 13 | Environment variable loading, defaults, validation errors, resilience config, `TestLoad_RejectsLegacyWriteApprovalDefault` (fail-loud migration guard) |
 | `internal/errors` | `errors_test.go` | 5 | Sentinel error distinctness, `IsInputError`, `IsTransientError`, `IsNotFound` |
 | `internal/evm` | `tracing_test.go` | 4 | `TracingClient` delegation and error propagation |
 | `internal/evm` | `resilient_test.go` | 8 | Retry with backoff, circuit breaker tripping, rate limiting, `SendRawTransaction` non-retry |
@@ -142,7 +141,7 @@ The anchor read tests depend on a stable registry named `mcp-test-data` (one reg
 
 ### 4. MCP End-to-End HTTP Tests
 
-These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write approval, API key auth, per-client overrides).
+These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write path, API key auth, stateless behavior).
 
 **Basic E2E** (`server_test.go`):
 
@@ -155,17 +154,11 @@ These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock 
 | `TestE2E_CallTool_InvalidAddress` | `evm_get_balance` with bad address returns `IsError=true` |
 | `TestE2E_CallTool_MissingRegistryIDAndName` | `anchor_get_registry` with no args returns `IsError=true` |
 
-**Write approval E2E** (`server_e2e_test.go`):
+**Write path E2E** (`server_e2e_test.go`):
 
 | Test | What's verified |
 |------|-----------------|
-| `TestE2E_SendRawTx_AutoApproval_Succeeds` | Auto policy bypasses elicitation; tx broadcasts successfully |
-| `TestE2E_SendRawTx_RequiredApproval_Accepted` | Human accepts elicitation prompt; tx broadcasts successfully |
-| `TestE2E_SendRawTx_RequiredApproval_Declined` | Human declines; `ErrWriteDeclined` returned |
-| `TestE2E_SendRawTx_RequiredApproval_Canceled` | Human cancels; error returned |
-| `TestE2E_SendRawTx_NoElicitation_RequiredFails` | Client without elicitation handler gets `ErrElicitationUnsupported` |
-| `TestE2E_SendRawTx_ElicitationPromptContainsTxDetails` | Prompt includes To, Value, Gas, Nonce, Chain ID, Data, irreversibility warning |
-| `TestE2E_SendRawTx_AutoApproval_RPCError` | RPC failure propagates correctly after auto-approval |
+| `TestE2E_SendRawTx_DirectBroadcast_NoElicitation` | Writer key broadcasts directly; no elicitation round-trip; RPC result returned |
 
 **API key authentication E2E** (`server_e2e_test.go`):
 
@@ -177,15 +170,20 @@ These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock 
 | `TestE2E_Auth_DisabledKey_ConnectionFails` | Disabled key rejected (while active keys exist) |
 | `TestE2E_Auth_NoKeysConfigured_NoAuthRequired` | No keys configured = auth bypassed |
 
-**Per-client write approval override E2E** (`server_e2e_test.go`):
+**Stateless handler E2E** (`server_e2e_test.go`):
 
 | Test | What's verified |
 |------|-----------------|
-| `TestE2E_PerClientApproval_AutoOverridesGlobalRequired` | Key with `write_approval: "auto"` bypasses elicitation despite global `required` |
-| `TestE2E_PerClientApproval_RequiredOverridesGlobalAuto` | Key with `write_approval: "required"` forces elicitation despite global `auto` |
-| `TestE2E_Auth_ValidKey_SendTx_WithElicitation` | Full auth + approval flow; client ID appears in elicitation prompt |
+| `TestE2E_StatelessHandler_ServesUnknownSession` | Stateless handler (`Stateless: true`) serves a request with an unknown session ID without error, confirming no per-pod session map is required |
 
-This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, error propagation, Bearer token authentication with `AuthMiddleware` (API key and FusionAuth providers), write approval with MCP elicitation, per-client policy override via key store, and client identity propagation.
+**Fail-loud migration E2E** (`server_e2e_test.go` / `config_test.go` / `managed_keys_test.go`):
+
+| Test | What's verified |
+|------|-----------------|
+| `TestLoad_RejectsLegacyWriteApprovalDefault` | `WRITE_APPROVAL_DEFAULT` in environment causes startup failure with `ErrLegacyWriteApproval` |
+| `TestLoadKeysFile_RejectsLegacyWriteApproval` | Key store entry carrying `write_approval` field causes load failure with `ErrLegacyKeyWriteApproval` |
+
+This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, error propagation, Bearer token authentication with `AuthMiddleware` (API key and FusionAuth providers), stateless handler behavior, fail-loud migration guards, and client identity propagation.
 
 **Admin key management E2E** (`admin_test.go`):
 
@@ -197,11 +195,9 @@ This layer validates: HTTP transport, SSE/JSON response framing, MCP session man
 | `TestAdmin_Create_Success` | Key creation returns raw key, correct metadata |
 | `TestAdmin_Create_Duplicate` | Duplicate client ID returns 409 |
 | `TestAdmin_Create_MissingClientID` | Missing client_id returns 400 |
-| `TestAdmin_Create_InvalidApproval` | Bad write_approval value returns 400 |
 | `TestAdmin_List_Empty` | Empty store returns `[]` |
 | `TestAdmin_List_WithKeys` | Listed keys are redacted (no raw keys) |
 | `TestAdmin_Update_DisableAndEnable` | Disable/enable via PATCH affects Lookup |
-| `TestAdmin_Update_SetApproval` | write_approval change persists |
 | `TestAdmin_Update_NotFound` | PATCH for unknown client returns 404 |
 | `TestAdmin_Update_EmptyBody` | PATCH with no fields returns 400 |
 | `TestAdmin_Delete_Success` | DELETE removes key |
@@ -218,7 +214,6 @@ This layer validates: HTTP transport, SSE/JSON response framing, MCP session man
 | `TestManagedKeyStore_CreateDuplicate` | Duplicate client ID returns error |
 | `TestManagedKeyStore_List` | List returns summaries with redacted key prefixes |
 | `TestManagedKeyStore_UpdateEnabled` | Disable → Lookup=nil, enable → Lookup=entry |
-| `TestManagedKeyStore_UpdateApproval` | write_approval change reflects in Lookup |
 | `TestManagedKeyStore_UpdateMissing` | Update for unknown client returns error |
 | `TestManagedKeyStore_Delete` | Delete removes from store and file |
 | `TestManagedKeyStore_DeleteMissing` | Delete for unknown client returns error |
@@ -372,9 +367,9 @@ $ make docker-smoke
 
 **For a new MCP tool**: Add handler tests to `internal/mcp/tools_test.go` using the existing `mockEVM`/`mockAnchor` types. Add the tool name to `TestE2E_ListTools_ContainsExpectedNames` in `server_test.go`.
 
-**For write approval or auth features**: Add E2E tests to `internal/mcp/server_e2e_test.go`. Use `startTestServerWithConfig` for approval-only tests (configurable `approvalDefault` and `ClientOptions` with `ElicitationHandler`). Use `startAuthTestServer` for auth tests (configurable `KeyEntry` list and Bearer token via `bearerTransport`). Use `buildSignedTxHex` to generate real signed transactions for write approval tests.
+**For write path or auth features**: Add E2E tests to `internal/mcp/server_e2e_test.go`. Use `startTestServerWithConfig` for write-path tests. Use `startAuthTestServer` for auth tests (configurable `KeyEntry` list and Bearer token via `bearerTransport`). Use `buildSignedTxHex` to generate real signed transactions for write path tests.
 
-**For FusionAuth-related code**: Add unit tests to `internal/auth/auth_test.go` for JWT/JWKS validation (issuer matching, audience checks, expiry, role extraction, app-scoped roles, signature failures). The existing tests use `httptest.NewServer` to serve a JWKS endpoint and `golang-jwt/jwt/v5` to construct test tokens with controlled keys. `automation` role propagation through to write-approval policy is covered.
+**For FusionAuth-related code**: Add unit tests to `internal/auth/auth_test.go` for JWT/JWKS validation (issuer matching, audience checks, expiry, role extraction, app-scoped roles, signature failures). The existing tests use `httptest.NewServer` to serve a JWKS endpoint and `golang-jwt/jwt/v5` to construct test tokens with controlled keys.
 
 **For admin key management**: Add tests to `internal/mcp/admin_test.go` for API endpoint tests (use `startAdminTestServer` and `adminRequest` helpers). Add tests to `internal/mcp/managed_keys_test.go` for `ManagedKeyStore` CRUD operations (use `tempKeysFile` helper for isolated test files).
 
