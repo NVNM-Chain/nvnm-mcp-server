@@ -557,6 +557,8 @@ docs/
     PHASE_10_DESIGN.md            Phase 10 design contract (DevOps foundations)
     PHASE_11_DESIGN.md            Phase 11 design contract (Product launch)
     WALLET_GENERATOR_DESIGN.md    Wallet generator page design contract (sibling repo)
+    SIGNUP_IDENTITY_REQUIREMENTS.md  Identity/signup contract: FusionAuth roles, JWT claims, data boundary (sibling repo)
+    CLAUDE_API_CONNECTOR_INTEGRATION.md  Integrator guide: Claude API mcp_servers connector + FusionAuth JWT
     FUSIONAUTH_RBAC_TEST_HARNESS.md  Deferred concept note: end-to-end RBAC test harness
 .github/
   workflows/ci.yml           CI pipeline
