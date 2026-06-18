@@ -7,7 +7,7 @@ github.com/MicahParks/keyfunc/v3
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
-# github.com/btcsuite/btcd v0.24.0
+# github.com/btcsuite/btcd v0.24.2
 ## explicit; go 1.17
 github.com/btcsuite/btcd/chaincfg
 github.com/btcsuite/btcd/wire

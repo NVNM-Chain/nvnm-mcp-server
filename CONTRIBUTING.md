@@ -206,6 +206,37 @@ dependency must:
 - Pass `govulncheck` against the proposed version.
 - Survive the existing test suite (CI gates this automatically).
 
+### Triaging Dependabot security alerts
+
+Dependabot and `govulncheck` answer different questions, and on a
+vendored repo they often disagree. Dependabot reasons over the
+**dependency graph** — if a vulnerable module *version* is present in
+`go.mod` it alerts, even when nothing imports the affected package.
+`govulncheck` reasons over the **call graph** — it reports a finding
+only when a vulnerable symbol is reachable from code this module
+actually executes. A HIGH Dependabot alert with a clean `govulncheck`
+is the common case for transitive, unimported modules.
+
+When an alert fires:
+
+1. Confirm reachability — run `govulncheck ./...` (pinned version, as
+   CI does). "Your code is affected by 0 vulnerabilities" means the
+   advisory is not on any execution path.
+2. Check whether the module is even imported —
+   `go mod why <module>`. "main module does not need package …" means
+   it's a require-graph passenger (a sub-module of the same repo is
+   usually what's actually used; e.g. `btcd/btcec/v2` for secp256k1,
+   not the `btcd` root).
+3. **Prefer bumping to a patched version over dismissing the alert**,
+   even when unreachable — a bump silences the recurring graph-level
+   nag permanently, whereas a dismissal lurks and re-surfaces. Reserve
+   dismissal for cases where no patched version exists yet. Follow the
+   `go mod tidy` + `go mod vendor` steps above; the PR diff will
+   include the regenerated `vendor/` tree.
+
+Note the reachability verdict and the import-path reasoning in the PR
+body so a reviewer can see *why* the bump is hygiene vs. a fix.
+
 ## Code of conduct
 
 Participation in this project is governed by the
