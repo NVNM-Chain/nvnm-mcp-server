@@ -57,6 +57,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `METAMASK_GUIDE.md` and `README.md` examples were corrected to pass valid,
   complete inputs. No on-chain behavior change — purely input validation and
   normalization at the prepare boundary.
+- **`anchor_get_records` honored `registry_id` (rc8 E2E follow-on).** The
+  precompile's records query is keyed by registry *name*, so a `registry_id`
+  filter was silently ignored — the registry_id-based lookup modes advertised by
+  the tool returned an empty set even when the registry held records (a silent
+  wrong answer, not an error). `GetRecords` now resolves `registry_id → name`
+  internally (an explicit `registry` name still wins; an unknown id fails loud
+  with a `resolve registry_id` error). Documented the id/name interchangeability
+  in `TOOL_REFERENCE.md`. Integration tests assert id and name return the same
+  records and that a bad id errors.
+- **Clarified `pagination.total` is not authoritative.** The nvnm-testnet-1
+  precompile returns `pagination.total: 0` even with `countTotal=true` and
+  records present (a chain-side limitation, not a client decode bug — the
+  decode struct matches the ABI). Documented on `anchor_get_records` and
+  `anchor_get_registries` that callers should page using the length of the
+  returned slice plus `limit`/`offset`, not `total`.
 
 ## [1.0.0-rc7] - 2026-06-12
 

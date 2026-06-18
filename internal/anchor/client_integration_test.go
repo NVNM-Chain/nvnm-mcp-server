@@ -208,6 +208,72 @@ func TestIntegration_GetRecords_ByRegistry(t *testing.T) {
 	}
 }
 
+// TestIntegration_GetRecords_ByID verifies that querying records by numeric
+// registry_id returns the same records as querying by registry name. The
+// precompile's records query is name-keyed, so the client resolves
+// registry_id -> name internally; before that fix a registry_id filter was
+// silently ignored and returned an empty set.
+func TestIntegration_GetRecords_ByID(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	name := "mcp-test-data"
+
+	// Resolve the registry's numeric id by name.
+	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{Name: &name})
+	if err != nil {
+		t.Fatalf("GetRegistry(name=%q): %v", name, err)
+	}
+	if reg.ID == 0 {
+		t.Fatalf("registry %q has id 0", name)
+	}
+
+	byName, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
+		Registry:   &name,
+		Pagination: &anchor.PageRequest{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("GetRecords(registry=%q): %v", name, err)
+	}
+	if len(byName.Records) == 0 {
+		t.Fatalf("expected records in %q", name)
+	}
+
+	byID, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
+		RegistryID: &reg.ID,
+		Pagination: &anchor.PageRequest{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("GetRecords(registry_id=%d): %v", reg.ID, err)
+	}
+
+	// The by-id query must return the same non-empty set as the by-name query.
+	if len(byID.Records) != len(byName.Records) {
+		t.Fatalf("by-id returned %d records, by-name returned %d (registry_id ignored?)",
+			len(byID.Records), len(byName.Records))
+	}
+	if byID.Records[0].Registry != name {
+		t.Errorf("by-id record Registry = %q, want %q", byID.Records[0].Registry, name)
+	}
+	if byID.Records[0].Checksum != byName.Records[0].Checksum {
+		t.Errorf("by-id first checksum %q != by-name %q",
+			byID.Records[0].Checksum, byName.Records[0].Checksum)
+	}
+}
+
+// TestIntegration_GetRecords_BadID confirms an unknown registry_id fails loud
+// (resolve error) rather than silently returning an empty record set.
+func TestIntegration_GetRecords_BadID(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	badID := uint64(99999999)
+	_, err := c.GetRecords(ctx, anchor.GetRecordsRequest{RegistryID: &badID})
+	if err == nil {
+		t.Fatal("expected error resolving a non-existent registry_id, got nil")
+	}
+}
+
 func TestIntegration_GetRecords_Pagination(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()

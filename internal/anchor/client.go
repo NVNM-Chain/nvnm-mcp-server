@@ -257,6 +257,20 @@ func (c *client) GetRecords(
 		index = *req.Index
 	}
 
+	// The precompile's records query is keyed by registry NAME, not numeric
+	// id. registry_id is a caller convenience, so resolve it to a name here.
+	// An explicit name wins; the id is only resolved when no name was given.
+	// Without this, a registry_id filter was silently ignored and the query
+	// returned an empty set (the registry_id-based modes advertised by the
+	// anchor_get_records tool never worked); a bad id now fails loud instead.
+	if registry == "" && req.RegistryID != nil {
+		reg, regErr := c.GetRegistry(ctx, GetRegistryRequest{ID: req.RegistryID})
+		if regErr != nil {
+			return nil, fmt.Errorf("resolve registry_id %d: %w", *req.RegistryID, regErr)
+		}
+		registry = reg.Name
+	}
+
 	pagination := abiPaginationInput{
 		Key:        []byte{},
 		Offset:     0,

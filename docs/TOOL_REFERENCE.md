@@ -857,7 +857,7 @@ Fetch a paginated list of anchoring registries. Optionally filter by registry\_i
 |-------------------------|--------------|------------------------------------------|
 | `registries`            | `Registry[]` | Array of registry objects                |
 | `pagination`            | `object`     | Pagination metadata (omitted if no pagination requested)|
-| `pagination.total`      | `uint64`     | Total number of matching registries      |
+| `pagination.total`      | `uint64`     | Chain-reported total. **Note:** the nvnm-testnet-1 anchoring precompile returns `0` here even when registries are present (it does not honor `countTotal`); do not treat `total` as authoritative. |
 
 Each element in `registries` has the same fields as [anchor\_get\_registry](#10-anchor_get_registry) output.
 
@@ -917,6 +917,12 @@ Flexibly query anchored records. Supports multiple lookup modes:
 4. **All latest records in a registry:** `registry_id` (with optional pagination)
 5. **All records matching a checksum across registries:** `checksum`
 
+> In any registry-scoped mode you may pass either `registry_id` (numeric) or
+> `registry` (name). The precompile is name-keyed; a `registry_id` is resolved
+> to its name server-side, so the two are interchangeable. If both are given,
+> the explicit `registry` name is used. An unknown `registry_id` fails with a
+> "resolve registry_id" error rather than silently returning an empty set.
+
 ### Input Parameters
 
 | Name          | Type     | Required | Description                                 |
@@ -935,7 +941,7 @@ Flexibly query anchored records. Supports multiple lookup modes:
 |----------------------|-------------|-------------------------------------------------|
 | `records`            | `Record[]`  | Array of record objects                         |
 | `pagination`         | `object`    | Pagination metadata (omitted if no pagination requested)|
-| `pagination.total`   | `uint64`    | Total number of matching records                |
+| `pagination.total`   | `uint64`    | Chain-reported total. **Note:** the nvnm-testnet-1 anchoring precompile returns `0` here even when records are present (it does not honor `countTotal`). Page using the length of `records` plus `limit`/`offset`; do not treat `total` as authoritative. |
 
 **Record fields:**
 
