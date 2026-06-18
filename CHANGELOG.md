@@ -87,6 +87,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for an unknown registry id; it is now mapped to the clean `ErrRegistryNotFound`
   sentinel at the anchor-client boundary.
 
+### Security
+
+- **Tool-handler errors are now sanitized before reaching the client.** Errors
+  returned from a tool handler are surfaced by the MCP SDK as `CallToolResult`
+  content, which bypassed the receiving middleware's `SafeForClient` (that only
+  sees protocol-level method errors). As a result, raw upstream error text —
+  RPC failures, gas-estimation reverts, decode errors, internal Cosmos proto
+  type paths — could leak verbatim to clients. All 21 tools are now registered
+  through a single `addTool` wrapper that routes the handler's error through
+  `SafeForClient`: known sentinels (not-found, auth, permission, input) pass
+  through unchanged; everything else collapses to a generic upstream-failure
+  message. Internal-implementation disclosure, not credential exposure (keys and
+  tokens are never placed in error text), but closed as defense-in-depth.
+
 ## [1.0.0-rc7] - 2026-06-12
 
 > **Version naming note.** Tagged `v1.0.0-rc7` (no dot), continuing the

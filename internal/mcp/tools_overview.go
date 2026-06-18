@@ -131,7 +131,7 @@ var prereqsSummary = []string{
 }
 
 func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "nvnm_overview",
 		Title: "NVNM Chain Overview",
 		Description: "Lobby tool. Returns chain identity (env, chain ID, " +

@@ -70,7 +70,7 @@ type verifyHashOutput struct {
 }
 
 func registerVerifyHashTool(srv *mcp.Server) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "nvnm_setup_verify_hash",
 		Title: "Verify Hash (setup challenge)",
 		Description: "Issues a deterministic per-address challenge and " +
@@ -148,7 +148,7 @@ type verifySignatureOutput struct {
 }
 
 func registerVerifySignatureTool(srv *mcp.Server) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "nvnm_setup_verify_signature",
 		Title: "Verify Signature (setup challenge)",
 		Description: "Issues a deterministic per-address challenge and " +

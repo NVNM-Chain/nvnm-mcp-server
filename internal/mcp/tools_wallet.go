@@ -58,7 +58,7 @@ type walletStatusOutput struct {
 }
 
 func registerWalletTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Config) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "wallet_status",
 		Title: "Wallet Status",
 		Description: "Returns a one-shot snapshot of an EVM address: " +

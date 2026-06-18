@@ -75,7 +75,7 @@ type setupWizardOutput struct {
 }
 
 func registerSetupWizardTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Config) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "nvnm_setup_wizard",
 		Title: "Setup Wizard",
 		Description: "Walks through the four onboarding states " +

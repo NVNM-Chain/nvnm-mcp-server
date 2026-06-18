@@ -19,7 +19,7 @@ func registerAnchorTools(
 	anchorClient anchor.Client,
 	_ *slog.Logger,
 ) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_info",
 		Title: "Anchor Precompile Info",
 		Description: "Returns configuration status of the anchoring precompile, " +
@@ -27,7 +27,7 @@ func registerAnchorTools(
 		Annotations: newClosedWorldReadOnly(),
 	}, makeAnchorInfoHandler(anchorClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_get_registry",
 		Title: "Get Registry",
 		Description: "Fetch a single anchoring registry by its numeric ID or unique name. " +
@@ -35,7 +35,7 @@ func registerAnchorTools(
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRegistryHandler(anchorClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_get_registries",
 		Title: "List Registries",
 		Description: "Fetch a paginated list of anchoring registries. " +
@@ -43,7 +43,7 @@ func registerAnchorTools(
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRegistriesHandler(anchorClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_get_records",
 		Title: "Get Records",
 		Description: "Flexibly query anchored records. Supports lookup by: " +

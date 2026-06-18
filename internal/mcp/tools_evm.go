@@ -19,7 +19,7 @@ import (
 )
 
 func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_chain_id",
 		Title: "Get Chain ID",
 		Description: "Returns the chain ID and latest block number " +
@@ -27,7 +27,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeChainIDHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_block",
 		Title: "Get Block",
 		Description: "Returns a block by number or hash. " +
@@ -36,7 +36,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBlockHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_transaction",
 		Title: "Get Transaction",
 		Description: "Returns transaction details by hash, " +
@@ -44,7 +44,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetTransactionHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_transaction_receipt",
 		Title: "Get Transaction Receipt",
 		Description: "Returns the receipt for a mined transaction, " +
@@ -59,7 +59,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetReceiptHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_balance",
 		Title: "Get Balance",
 		Description: "Returns the balance of an address in both wei and ether. " +
@@ -67,7 +67,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBalanceHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_code",
 		Title: "Get Code",
 		Description: "Returns the contract bytecode at an address, " +
@@ -75,7 +75,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetCodeHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_logs",
 		Title: "Get Logs",
 		Description: "Returns event logs emitted by smart contracts matching a filter. " +
@@ -87,7 +87,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetLogsHandler(evmClient))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_call_contract",
 		Title: "Call Contract",
 		Description: "Execute a read-only (eth_call) call to any smart contract. " +

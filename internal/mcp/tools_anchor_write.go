@@ -31,14 +31,14 @@ func registerAnchorWriteTools(
 		"server or chain state by itself) but requires the writer, admin, or " +
 		"automation role because the output is a signing-ready payload."
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:        "anchor_prepare_add_registry",
 		Title:       "Prepare Add Registry Transaction",
 		Description: "Construct an unsigned addRegistry transaction. " + walletSigningPaths,
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareAddRegistryHandler(anchorClient, logger))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_add_record",
 		Title: "Prepare Add Record Transaction",
 		Description: "Construct an unsigned addRecord transaction to anchor " +
@@ -47,7 +47,7 @@ func registerAnchorWriteTools(
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareAddRecordHandler(anchorClient, logger))
 
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_grant_role",
 		Title: "Prepare Grant Role Transaction",
 		Description: "Construct an unsigned grantRole transaction to assign " +

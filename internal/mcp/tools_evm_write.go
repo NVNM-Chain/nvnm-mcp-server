@@ -20,7 +20,7 @@ func registerEVMWriteTools(
 	evmClient evm.Client,
 	logger *slog.Logger,
 ) {
-	mcp.AddTool(srv, &mcp.Tool{
+	addTool(srv, &mcp.Tool{
 		Name:  "evm_send_raw_transaction",
 		Title: "Send Raw Transaction",
 		Description: "Broadcast a signed transaction to the network. " +
