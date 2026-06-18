@@ -6,13 +6,16 @@ package anchor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
 
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
@@ -340,4 +343,31 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestGetRegistry_NotFoundMapsToSentinel verifies that the raw "collections:
+// not found" RPC error for an unknown registry id is mapped to the clean
+// ErrRegistryNotFound sentinel and does not leak the internal Cosmos proto
+// type path to the caller.
+func TestGetRegistry_NotFoundMapsToSentinel(t *testing.T) {
+	abiPath := testABIPath(t)
+	logger := logging.New("error")
+	mock := &mockEVMClient{
+		callContractFn: func(_ context.Context, _ defitypes.Call, _ *big.Int) ([]byte, error) {
+			return nil, errors.New(
+				"RPC error: -32000 rpc error: code = Internal desc = collections: " +
+					"not found: key '999' of type github.com/cosmos/gogoproto/" +
+					"mantrachain.anchoring.v1.Registry")
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 58887, abiPath, logger)
+
+	id := uint64(999)
+	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id})
+	if !errors.Is(err, apperrors.ErrRegistryNotFound) {
+		t.Fatalf("want ErrRegistryNotFound, got %v", err)
+	}
+	if strings.Contains(err.Error(), "mantrachain") || strings.Contains(err.Error(), "gogoproto") {
+		t.Errorf("error leaks internal proto type path: %v", err)
+	}
 }

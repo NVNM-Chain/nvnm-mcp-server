@@ -152,7 +152,12 @@ func (c *client) TransactionByHash(ctx context.Context, hash defitypes.Hash) (*N
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
-	if tx == nil {
+	// A missing hash yields either a nil tx or (with some RPC/decoder
+	// combinations) a non-nil zero-value struct with no Hash. Treat both as
+	// not-found: a real transaction -- pending or mined -- always carries a
+	// hash. Without the Hash check a garbage hash decoded into an empty
+	// struct, whose nil BlockNumber then read as "pending" with an empty hash.
+	if tx == nil || tx.Hash == nil {
 		return nil, apperrors.ErrTxNotFound
 	}
 	// defiweb's OnChainTransaction surfaces BlockNumber/BlockHash; a

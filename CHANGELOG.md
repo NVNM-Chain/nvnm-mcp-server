@@ -72,6 +72,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   decode struct matches the ABI). Documented on `anchor_get_records` and
   `anchor_get_registries` that callers should page using the length of the
   returned slice plus `limit`/`offset`, not `total`.
+- **`evm_get_transaction` now populates `from` and reports not-found explicitly
+  (rc8 E2E findings).** The transaction normalizer never mapped the recovered
+  sender, so a real mined tx came back with an empty `from`; it is now mapped.
+  Separately, a well-formed but non-existent hash yielded a zero-value object
+  that read as `is_pending: true` with an empty hash, because the not-found
+  guard only checked for a nil transaction (the RPC/decoder returns a non-nil
+  empty struct). It now also treats a missing hash as not-found (a real
+  transaction — pending or mined — always carries a hash) and returns
+  `ErrTxNotFound`.
+- **`anchor_get_registry`/`anchor_get_records` no longer leak the internal
+  Cosmos proto type path on a not-found.** The precompile returns a raw
+  `collections: not found … of type …mantrachain.anchoring.v1.Registry` error
+  for an unknown registry id; it is now mapped to the clean `ErrRegistryNotFound`
+  sentinel at the anchor-client boundary.
 
 ## [1.0.0-rc7] - 2026-06-12
 

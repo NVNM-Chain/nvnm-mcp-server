@@ -127,6 +127,12 @@ func normalizeOnChainTransaction(tx *defitypes.OnChainTransaction, isPending boo
 		to := AddressHex(*tx.To)
 		nt.To = &to
 	}
+	// The node recovers and returns the sender in eth_getTransactionByHash;
+	// defiweb surfaces it as Transaction.From. Map it so callers see who
+	// sent the tx instead of an empty "from".
+	if tx.From != nil {
+		nt.From = AddressHex(*tx.From)
+	}
 	return nt
 }
 

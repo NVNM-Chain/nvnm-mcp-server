@@ -7,15 +7,18 @@ package evm_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
 	defitypes "github.com/defiweb/go-eth/types"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
@@ -225,5 +228,43 @@ func TestIntegration_BlockByHash(t *testing.T) {
 	}
 	if blockByHash.Hash != block.Hash {
 		t.Errorf("hash mismatch: got %s, want %s", blockByHash.Hash, block.Hash)
+	}
+}
+
+// TestIntegration_TransactionByHash_PopulatesFrom verifies the normalized
+// transaction carries the recovered sender. A real mined tx previously came
+// back with an empty `from` because the normalizer never mapped it.
+func TestIntegration_TransactionByHash_PopulatesFrom(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	// Permanent testnet tx: addRecord into ElicitTest-rc6 (registry 741),
+	// sent by the funded test wallet below.
+	const txHash = "0x7e0b28b30916a3dcc14c4ffe9a5ed6be06acd3d4f4c618161fbb1e6c1acf2188"
+	const sender = "0x9f8a6425F7AD925701fE1CdF85fd883340b2A9CD"
+
+	tx, err := c.TransactionByHash(ctx, mustHashFromHex(txHash))
+	if err != nil {
+		t.Fatalf("TransactionByHash: %v", err)
+	}
+	if tx.IsPending {
+		t.Error("a mined tx must not be reported as pending")
+	}
+	if !strings.EqualFold(tx.From, sender) {
+		t.Errorf("From = %q, want %q", tx.From, sender)
+	}
+}
+
+// TestIntegration_TransactionByHash_NotFound verifies that a well-formed but
+// non-existent hash is reported as an explicit not-found rather than a
+// zero-value object that misleadingly reads as "pending" with an empty hash.
+func TestIntegration_TransactionByHash_NotFound(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	garbage := "0x" + strings.Repeat("ab", 32)
+	_, err := c.TransactionByHash(ctx, mustHashFromHex(garbage))
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("want ErrTxNotFound for a non-existent hash, got %v", err)
 	}
 }

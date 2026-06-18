@@ -166,6 +166,14 @@ func (c *client) GetRegistry(
 
 	output, err := c.callPrecompile(ctx, "registries", registryID, name, pagination)
 	if err != nil {
+		// The precompile returns a raw "collections: not found" RPC error for
+		// an unknown id, which would otherwise leak the internal Cosmos proto
+		// type path to the client. Map it to the clean ErrRegistryNotFound
+		// sentinel. String matching is unavoidable here: the node signals
+		// not-found only through the error text, not a typed or coded error.
+		if strings.Contains(err.Error(), "not found") {
+			return nil, fmt.Errorf("registry lookup failed: %w", apperrors.ErrRegistryNotFound)
+		}
 		return nil, err
 	}
 
@@ -218,6 +226,14 @@ func (c *client) GetRegistries(
 
 	output, err := c.callPrecompile(ctx, "registries", registryID, name, pagination)
 	if err != nil {
+		// The precompile returns a raw "collections: not found" RPC error for
+		// an unknown id, which would otherwise leak the internal Cosmos proto
+		// type path to the client. Map it to the clean ErrRegistryNotFound
+		// sentinel. String matching is unavoidable here: the node signals
+		// not-found only through the error text, not a typed or coded error.
+		if strings.Contains(err.Error(), "not found") {
+			return nil, fmt.Errorf("registry lookup failed: %w", apperrors.ErrRegistryNotFound)
+		}
 		return nil, err
 	}
 
