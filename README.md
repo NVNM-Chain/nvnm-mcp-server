@@ -349,7 +349,7 @@ The MCP server handles all blockchain complexity (ABI encoding, nonce lookup, ga
 
 ```js
 const prepared = await callMCPTool("anchor_prepare_add_record", {
-  from, registry, uri, checksum
+  from, registry, uri, checksum, checksum_algo, metadata // checksum_algo + metadata are required (metadata may be "{}")
 });
 
 // Pass wallet_tx_request directly to MetaMask

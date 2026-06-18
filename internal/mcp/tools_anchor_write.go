@@ -69,13 +69,16 @@ type prepareAddRegistryInput struct {
 }
 
 type prepareAddRecordInput struct {
-	From         string `json:"from" jsonschema:"Sender EVM address (0x...)"`
-	Registry     string `json:"registry" jsonschema:"Registry name"`
-	URI          string `json:"uri" jsonschema:"Document URI"`
-	Checksum     string `json:"checksum" jsonschema:"Document checksum hash"`
-	ChecksumAlgo string `json:"checksum_algo,omitempty" jsonschema:"Hash algorithm (e.g. sha256)"`
+	From     string `json:"from" jsonschema:"Sender EVM address (0x...)"`
+	Registry string `json:"registry" jsonschema:"Registry name"`
+	URI      string `json:"uri" jsonschema:"Document URI"`
+	//nolint:lll // descriptive prose for agents
+	Checksum string `json:"checksum" jsonschema:"Document checksum as a hex digest, max 64 chars (e.g. a SHA-256 digest is 64 hex chars). A leading 0x is accepted and stripped."`
+	//nolint:lll // descriptive prose for agents
+	ChecksumAlgo string `json:"checksum_algo" jsonschema:"Hash algorithm, e.g. sha256. Required by the anchoring precompile -- must be non-empty."`
 	Status       string `json:"status,omitempty" jsonschema:"Record status (default: Active)"`
-	Metadata     string `json:"metadata,omitempty" jsonschema:"Optional JSON metadata"`
+	//nolint:lll // descriptive prose for agents
+	Metadata string `json:"metadata" jsonschema:"JSON metadata string. Required by the anchoring precompile and must be non-empty; pass {} if you have none."`
 	//nolint:lll // descriptive prose for agents
 	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }

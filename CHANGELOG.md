@@ -42,6 +42,22 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/RUNBOOK.md#write-approval-removal`. Deliberate hard cut (no silent
   fallback), consistent with the `INVENIAM_* → NVNM_*` migration.
 
+### Fixed
+
+- **`anchor_prepare_add_record` input ergonomics (rc8 E2E findings).** The
+  anchoring precompile rejects an empty `checksum_algo` or `metadata` and caps
+  `checksum` at 64 chars, but those constraints were undiscoverable from the
+  tool schema and surfaced only as opaque gas-estimation errors. Now:
+  `checksum_algo` and `metadata` are marked **required** in the tool schema and
+  validated client-side (fail-loud, wrapping `missing required parameter`)
+  before any RPC; and a `checksum` passed in its natural `0x`-prefixed form is
+  stripped to the bare hex digest server-side so both representations work
+  (`anchor_prepare_grant_role`'s optional record-scoping `checksum` is
+  normalized the same way). Documented in `TOOL_REFERENCE.md`; the
+  `METAMASK_GUIDE.md` and `README.md` examples were corrected to pass valid,
+  complete inputs. No on-chain behavior change — purely input validation and
+  normalization at the prepare boundary.
+
 ## [1.0.0-rc7] - 2026-06-12
 
 > **Version naming note.** Tagged `v1.0.0-rc7` (no dot), continuing the

@@ -1070,10 +1070,10 @@ Construct an unsigned `addRecord` transaction to anchor a document checksum and 
 | `from`          | `string` | required | Sender EVM address (0x-prefixed)               |
 | `registry`      | `string` | required | Registry name                                  |
 | `uri`           | `string` | required | Document URI                                   |
-| `checksum`      | `string` | required | Document checksum hash                         |
-| `checksum_algo` | `string` | optional | Hash algorithm (e.g., `sha256`)                |
+| `checksum`      | `string` | required | Document checksum as a hex digest, **max 64 chars** (a SHA-256 digest is 64 hex chars). A leading `0x` is accepted and stripped server-side. |
+| `checksum_algo` | `string` | required | Hash algorithm (e.g., `sha256`). The anchoring precompile rejects an empty value, so it is validated as required. |
 | `status`        | `string` | optional | Record status (default: `Active`)              |
-| `metadata`      | `string` | optional | Optional JSON metadata                         |
+| `metadata`      | `string` | required | JSON metadata. The anchoring precompile rejects an empty value, so it is validated as required — pass `{}` if you have none. |
 
 ### Output Fields
 
@@ -1082,6 +1082,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ### Error Conditions
 
 - Invalid `from` address.
+- Missing/empty `checksum`, `checksum_algo`, or `metadata` (validated client-side before any RPC; wraps `missing required parameter`).
 - Registry not found by name.
 - ABI encoding failure.
 - Nonce lookup failure (RPC error).
@@ -1098,7 +1099,8 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "uri": "ipfs://QmXyz...",
   "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "checksum_algo": "sha256",
-  "status": "Active"
+  "status": "Active",
+  "metadata": "{\"category\": \"finance\"}"
 }
 ```
 

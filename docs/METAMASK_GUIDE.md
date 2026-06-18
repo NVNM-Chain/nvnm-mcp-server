@@ -54,8 +54,9 @@ Call any anchor write tool from your MCP client. Example for adding a record:
     "from": "0xYourWalletAddress",
     "registry": "my-documents",
     "uri": "https://example.com/contract.pdf",
-    "checksum": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "checksum_algo": "sha256"
+    "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "checksum_algo": "sha256",
+    "metadata": "{}"
   }
 }
 ```

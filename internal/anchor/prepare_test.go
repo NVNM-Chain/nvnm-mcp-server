@@ -109,6 +109,44 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			},
 			wantErr: "checksum is required",
 		},
+		{
+			// The anchoring precompile rejects an empty checksum_algo
+			// during gas estimation; fail loud client-side instead with
+			// a precise message (E2E rc8 finding).
+			name: "missing checksum_algo",
+			req: PrepareAddRecordRequest{
+				From:     "0x1234567890abcdef1234567890abcdef12345678",
+				Registry: "test-reg",
+				Checksum: "abc123",
+				Metadata: "{}",
+			},
+			wantErr: "checksum_algo is required",
+		},
+		{
+			// The precompile likewise rejects empty metadata; surface it
+			// before the opaque on-chain gas-estimation error.
+			name: "missing metadata",
+			req: PrepareAddRecordRequest{
+				From:         "0x1234567890abcdef1234567890abcdef12345678",
+				Registry:     "test-reg",
+				Checksum:     "abc123",
+				ChecksumAlgo: "sha256",
+			},
+			wantErr: "metadata is required",
+		},
+		{
+			// A bare "0x" normalizes to an empty checksum and must be
+			// rejected as missing, not passed through.
+			name: "checksum is only 0x prefix",
+			req: PrepareAddRecordRequest{
+				From:         "0x1234567890abcdef1234567890abcdef12345678",
+				Registry:     "test-reg",
+				Checksum:     "0x",
+				ChecksumAlgo: "sha256",
+				Metadata:     "{}",
+			},
+			wantErr: "checksum is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -256,6 +294,67 @@ func TestPrepareAddRecord_BuildsUnsignedTx(t *testing.T) {
 	}
 	if tx.Data == "" || tx.Data == "0x" {
 		t.Error("Data should contain ABI-encoded calldata")
+	}
+}
+
+func TestNormalizeChecksum(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare hex unchanged", "abc123", "abc123"},
+		{"lowercase 0x stripped", "0xabc123", "abc123"},
+		{"uppercase 0X stripped", "0Xabc123", "abc123"},
+		{"only prefix becomes empty", "0x", ""},
+		{"empty stays empty", "", ""},
+		{"0x in the middle untouched", "ab0xcd", "ab0xcd"},
+		{"64-hex digest unchanged", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeChecksum(tt.in); got != tt.want {
+				t.Errorf("normalizeChecksum(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPrepareAddRecord_StripsChecksumPrefix proves the 0x-prefixed and
+// bare-hex forms of the same digest produce byte-identical calldata --
+// i.e. the prefix is stripped before ABI encoding, so a caller passing
+// the natural 0x form gets the same on-chain record (E2E rc8 finding:
+// the precompile caps checksum at 64 chars, so 0x+64-hex would fail).
+func TestPrepareAddRecord_StripsChecksumPrefix(t *testing.T) {
+	abiPath := testABIPath(t)
+	logger := logging.New("error")
+	c := NewClient(&mockEVMClient{}, PrecompileAddress, 58887, abiPath, logger)
+
+	const digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	base := PrepareAddRecordRequest{
+		From:         "0x1234567890abcdef1234567890abcdef12345678",
+		Registry:     "test-registry",
+		URI:          "https://example.com/doc",
+		ChecksumAlgo: "sha256",
+		Metadata:     "{\"file\":\"test.pdf\"}",
+	}
+
+	bareReq := base
+	bareReq.Checksum = digest
+	bare, err := c.PrepareAddRecord(context.Background(), bareReq)
+	if err != nil {
+		t.Fatalf("PrepareAddRecord (bare): %v", err)
+	}
+
+	prefixedReq := base
+	prefixedReq.Checksum = "0x" + digest
+	prefixed, err := c.PrepareAddRecord(context.Background(), prefixedReq)
+	if err != nil {
+		t.Fatalf("PrepareAddRecord (0x-prefixed): %v", err)
+	}
+
+	if bare.Data != prefixed.Data {
+		t.Errorf("calldata differs after prefix strip:\n bare     = %s\n prefixed = %s", bare.Data, prefixed.Data)
 	}
 }
 

@@ -65,8 +65,22 @@ func (c *client) PrepareAddRecord(
 	if req.Registry == "" {
 		return nil, fmt.Errorf("registry is required: %w", apperrors.ErrMissingRequired)
 	}
-	if req.Checksum == "" {
+	// The anchoring precompile caps the checksum at 64 chars and rejects a
+	// 0x prefix (0x + 64-hex digest = 66 chars). Accept the natural
+	// 0x-prefixed form and strip it so both representations work.
+	checksum := normalizeChecksum(req.Checksum)
+	if checksum == "" {
 		return nil, fmt.Errorf("checksum is required: %w", apperrors.ErrMissingRequired)
+	}
+	// checksum_algo and metadata are marked optional in the tool schema but
+	// the precompile rejects them empty during gas estimation; fail loud
+	// here with a precise message instead of surfacing the opaque on-chain
+	// error (E2E rc8 findings #3 and the checksum_algo follow-on).
+	if req.ChecksumAlgo == "" {
+		return nil, fmt.Errorf("checksum_algo is required: %w", apperrors.ErrMissingRequired)
+	}
+	if req.Metadata == "" {
+		return nil, fmt.Errorf("metadata is required: %w", apperrors.ErrMissingRequired)
 	}
 
 	// The ABI expects a single tuple struct for addRecord. Field tags
@@ -93,7 +107,7 @@ func (c *client) PrepareAddRecord(
 	record := recordTuple{
 		Registry:     req.Registry,
 		URI:          req.URI,
-		Checksum:     req.Checksum,
+		Checksum:     checksum,
 		ChecksumAlgo: req.ChecksumAlgo,
 		Metadata:     req.Metadata,
 		Timestamp:    "",
@@ -135,8 +149,10 @@ func (c *client) PrepareGrantRole(
 	if err != nil {
 		return nil, fmt.Errorf("account %q: %w", req.Account, apperrors.ErrInvalidAddress)
 	}
+	// Normalize an optional record-scoping checksum the same way as
+	// addRecord so a 0x-prefixed digest matches the stored bare-hex form.
 	calldata, err := c.parsedABI.Methods["grantRole"].EncodeArgs(
-		req.RegistryID, req.Checksum, account, req.Role,
+		req.RegistryID, normalizeChecksum(req.Checksum), account, req.Role,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("pack grantRole: %w", err)
@@ -317,6 +333,19 @@ func (c *client) buildDynamicFeeUnsignedTx(
 			MaxPriorityFeePerGas: "0x" + tipCap.Text(16),
 		},
 	}, nil
+}
+
+// normalizeChecksum strips a leading 0x/0X prefix from a checksum digest.
+// The anchoring precompile stores and length-checks the bare hex form
+// (max 64 chars), so a caller passing the natural 0x-prefixed 32-byte
+// hash (66 chars) would otherwise be rejected. The bare and 0x-prefixed
+// forms denote the same digest, so stripping is a lossless normalization,
+// not a silent fallback. A leading "0x" not at the start is left intact.
+func normalizeChecksum(checksum string) string {
+	if len(checksum) >= 2 && checksum[0] == '0' && (checksum[1] == 'x' || checksum[1] == 'X') {
+		return checksum[2:]
+	}
+	return checksum
 }
 
 // applyGasBuffer adds a safety margin to the gas estimate.
