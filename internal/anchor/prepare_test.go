@@ -135,6 +135,35 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			wantErr: "metadata is required",
 		},
 		{
+			// F3a: the precompile rejects the literal empty JSON object
+			// "{}" ("metadata cannot be empty"), yet older schema guidance
+			// told callers to "pass {} if you have none". The server's own
+			// check only tested == "", so "{}" passed here and died on-chain
+			// behind an opaque "upstream operation failed". Reject it loudly
+			// client-side with an actionable message instead.
+			name: "metadata is empty JSON object",
+			req: PrepareAddRecordRequest{
+				From:         "0x1234567890abcdef1234567890abcdef12345678",
+				Registry:     "test-reg",
+				Checksum:     "abc123",
+				ChecksumAlgo: "sha256",
+				Metadata:     "{}",
+			},
+			wantErr: "{}",
+		},
+		{
+			// Whitespace around the empty object is rejected the same way.
+			name: "metadata is empty JSON object with whitespace",
+			req: PrepareAddRecordRequest{
+				From:         "0x1234567890abcdef1234567890abcdef12345678",
+				Registry:     "test-reg",
+				Checksum:     "abc123",
+				ChecksumAlgo: "sha256",
+				Metadata:     "  {}  ",
+			},
+			wantErr: "{}",
+		},
+		{
 			// A bare "0x" normalizes to an empty checksum and must be
 			// rejected as missing, not passed through.
 			name: "checksum is only 0x prefix",

@@ -164,6 +164,43 @@ func TestE2E_ListTools_ContainsExpectedNames(t *testing.T) {
 	}
 }
 
+// F4: anchor_prepare_grant_role enforces requireRole(ctx, "admin") only,
+// but its description used to inherit the shared signing-paths prose that
+// advertised "the writer, admin, or automation role" -- a copy-paste from
+// add_registry/add_record, which DO allow those three. A writer token got
+// "requires role admin: permission denied" despite the schema. The
+// description must name only the role the handler actually accepts.
+func TestE2E_GrantRoleDescription_MatchesAdminOnlyEnforcement(t *testing.T) {
+	session := startTestServer(t)
+
+	result, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	var desc string
+	for _, tool := range result.Tools {
+		if tool.Name == "anchor_prepare_grant_role" {
+			desc = tool.Description
+			break
+		}
+	}
+	if desc == "" {
+		t.Fatal("anchor_prepare_grant_role not found or has empty description")
+	}
+	if !strings.Contains(desc, "admin") {
+		t.Errorf("grant_role description must state the admin requirement; got %q", desc)
+	}
+	// The handler denies writer and automation, so the description must not
+	// advertise them as accepted roles.
+	if strings.Contains(desc, "writer") {
+		t.Errorf("grant_role description must NOT claim the writer role (handler denies it); got %q", desc)
+	}
+	if strings.Contains(desc, "automation") {
+		t.Errorf("grant_role description must NOT claim the automation role (handler denies it); got %q", desc)
+	}
+}
+
 func TestE2E_CallTool_ChainID(t *testing.T) {
 	session := startTestServer(t)
 

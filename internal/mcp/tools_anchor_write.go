@@ -19,6 +19,11 @@ func registerAnchorWriteTools(
 	anchorClient anchor.Client,
 	logger *slog.Logger,
 ) {
+	// walletSigningPaths describes the two signing outputs every prepare
+	// tool returns. It intentionally does NOT name the required role -- that
+	// differs per tool (see accessControl* below) and a shared role sentence
+	// previously leaked add_record's writer/admin/automation set onto
+	// grant_role, which is admin-only (rc8 E2E F4).
 	const walletSigningPaths = "Returns two signing paths: " +
 		"(1) wallet_tx_request -- pass this object directly to a MetaMask / EIP-1193 " +
 		"wallet via eth_sendTransaction; the wallet signs and broadcasts, " +
@@ -26,15 +31,25 @@ func registerAnchorWriteTools(
 		"(2) raw_tx -- RLP-encoded unsigned bytes for local or headless signers; " +
 		"sign externally, then broadcast via evm_send_raw_transaction. " +
 		"Confirm either path with evm_get_transaction_receipt(tx_hash). " +
-		"The server never holds or receives private keys. " +
-		"Access control: this tool is annotated read-only (it does not modify " +
-		"server or chain state by itself) but requires the writer, admin, or " +
-		"automation role because the output is a signing-ready payload."
+		"The server never holds or receives private keys."
+
+	// accessControlReadWrite matches requireRole(ctx, "writer", "admin",
+	// "automation") on add_registry / add_record.
+	const accessControlReadWrite = " Access control: this tool is annotated " +
+		"read-only (it does not modify server or chain state by itself) but " +
+		"requires the writer, admin, or automation role because the output is " +
+		"a signing-ready payload."
+
+	// accessControlAdminOnly matches requireRole(ctx, "admin") on grant_role.
+	const accessControlAdminOnly = " Access control: this tool is annotated " +
+		"read-only (it does not modify server or chain state by itself) but " +
+		"requires the admin role -- granting roles is an administrative " +
+		"operation -- and the output is a signing-ready payload."
 
 	addTool(srv, &mcp.Tool{
 		Name:        "anchor_prepare_add_registry",
 		Title:       "Prepare Add Registry Transaction",
-		Description: "Construct an unsigned addRegistry transaction. " + walletSigningPaths,
+		Description: "Construct an unsigned addRegistry transaction. " + walletSigningPaths + accessControlReadWrite,
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareAddRegistryHandler(anchorClient, logger))
 
@@ -43,7 +58,7 @@ func registerAnchorWriteTools(
 		Title: "Prepare Add Record Transaction",
 		Description: "Construct an unsigned addRecord transaction to anchor " +
 			"a document checksum and URI in a registry. " + walletSigningPaths +
-			" After confirming, verify with anchor_get_records.",
+			accessControlReadWrite + " After confirming, verify with anchor_get_records.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareAddRecordHandler(anchorClient, logger))
 
@@ -52,7 +67,7 @@ func registerAnchorWriteTools(
 		Title: "Prepare Grant Role Transaction",
 		Description: "Construct an unsigned grantRole transaction to assign " +
 			"admin or editor permissions on a registry or specific record. " +
-			walletSigningPaths,
+			walletSigningPaths + accessControlAdminOnly,
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareGrantRoleHandler(anchorClient, logger))
 }
@@ -78,7 +93,7 @@ type prepareAddRecordInput struct {
 	ChecksumAlgo string `json:"checksum_algo" jsonschema:"Hash algorithm, e.g. sha256. Required by the anchoring precompile -- must be non-empty."`
 	Status       string `json:"status,omitempty" jsonschema:"Record status (default: Active)"`
 	//nolint:lll // descriptive prose for agents
-	Metadata string `json:"metadata" jsonschema:"JSON metadata string. Required by the anchoring precompile and must be non-empty; pass {} if you have none."`
+	Metadata string `json:"metadata" jsonschema:"Metadata string. Required by the anchoring precompile and must be non-empty -- the empty JSON object {} is rejected. If you have no structured metadata, pass a short label (e.g. the document name) or a JSON object with at least one field."`
 	//nolint:lll // descriptive prose for agents
 	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }

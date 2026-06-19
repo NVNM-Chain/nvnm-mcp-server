@@ -77,7 +77,12 @@ func registerVerifyHashTool(srv *mcp.Server) {
 			"verifies that the caller can produce its SHA-256 digest. " +
 			"Use during onboarding to prove an off-chain hashing path " +
 			"works before broadcasting an anchor transaction. Pure " +
-			"compute, no chain calls.",
+			"compute, no chain calls. " +
+			"Challenge derivation: challenge = \"0x\" + hex(sha256(lowercase(address) " +
+			"+ \":nvnm-setup-challenge-v1\")); submit hash = \"0x\" + hex(sha256(challenge)) " +
+			"hashing the challenge string's UTF-8 bytes including the 0x prefix. " +
+			"The response always echoes `challenge` and `expected`; on a mismatch it " +
+			"returns ok=false with those fields (not an error) so you can self-correct.",
 		Annotations: newClosedWorldReadOnly(),
 	}, makeVerifyHashHandler())
 }
@@ -121,7 +126,12 @@ func makeVerifyHashHandler() mcp.ToolHandlerFor[verifyHashInput, verifyHashOutpu
 						"`expected` field.",
 				},
 			}
-			return nil, out, fmt.Errorf("hash mismatch: %w", apperrors.ErrInvalidHash)
+			// A mismatch is a legitimate verification outcome, not a tool
+			// failure. Return success (nil error) so the remediation payload
+			// (challenge, expected, next_actions) reaches the caller -- the
+			// SDK discards structured output when the handler returns an
+			// error. ok=false carries the verdict.
+			return nil, out, nil
 		}
 		out.NextActions = []NextAction{
 			{Tool: "nvnm_setup_verify_signature", Hint: "Hash path proven. Next: prove your signing path works."},
@@ -155,7 +165,12 @@ func registerVerifySignatureTool(srv *mcp.Server) {
 			"verifies an EIP-191 `personal_sign` signature over it. " +
 			"Use during onboarding to prove the signing path works " +
 			"before broadcasting an anchor transaction. Pure compute, " +
-			"no chain calls.",
+			"no chain calls. " +
+			"Challenge derivation: challenge = \"0x\" + hex(sha256(lowercase(address) " +
+			"+ \":nvnm-setup-challenge-v1\")); sign it with EIP-191 personal_sign over the " +
+			"challenge string (do not pre-hash) and submit the 65-byte 0x-prefixed signature. " +
+			"The response always echoes `challenge`; on a mismatch it returns ok=false with " +
+			"`recovered_address` (not an error) so you can see which key actually signed.",
 		Annotations: newClosedWorldReadOnly(),
 	}, makeVerifySignatureHandler())
 }
@@ -189,11 +204,23 @@ func makeVerifySignatureHandler() mcp.ToolHandlerFor[verifySignatureInput, verif
 		// raw message and the 65-byte signature.
 		recovered, recErr := deficrypto.ECRecoverer.RecoverMessage([]byte(challenge), sig)
 		if recErr != nil || recovered == nil {
+			// Could not recover any signer from the signature over this
+			// challenge. Treat as a verification outcome (ok=false) and
+			// return the challenge + remediation so the caller learns what
+			// to sign, rather than erroring and dropping the struct.
 			return nil, verifySignatureOutput{
-					Address:   addr.String(),
-					Challenge: challenge,
+				OK:        false,
+				Address:   addr.String(),
+				Challenge: challenge,
+				NextActions: []NextAction{
+					{
+						Tool: "nvnm_setup_verify_signature",
+						Hint: "Could not recover a signer. Produce an EIP-191 personal_sign " +
+							"signature over the `challenge` string in this response (do not pre-hash), " +
+							"then resubmit.",
+					},
 				},
-				fmt.Errorf("recover signer: %w", apperrors.ErrInvalidSignature)
+			}, nil
 		}
 
 		ok := *recovered == addr
@@ -211,7 +238,9 @@ func makeVerifySignatureHandler() mcp.ToolHandlerFor[verifySignatureInput, verif
 						"challenge with the private key for the input address; do not pre-hash.",
 				},
 			}
-			return nil, out, fmt.Errorf("signer mismatch: %w", apperrors.ErrInvalidSignature)
+			// Mismatch is a verification outcome, not a tool failure: return
+			// success so recovered_address + remediation reach the caller.
+			return nil, out, nil
 		}
 		out.NextActions = []NextAction{
 			{Tool: "wallet_status", Hint: "Signing path proven. Check the wallet's on-chain state and move on to anchor tools."},

@@ -82,6 +82,20 @@ func (c *client) PrepareAddRecord(
 	if req.Metadata == "" {
 		return nil, fmt.Errorf("metadata is required: %w", apperrors.ErrMissingRequired)
 	}
+	// The precompile also rejects the literal empty JSON object "{}"
+	// ("metadata cannot be empty"). Older schema guidance wrongly told
+	// callers to pass "{}" when they had none, which passed this check and
+	// then died on-chain behind an opaque error (rc8 E2E F3a). Match the
+	// precompile contract here with an actionable message. Whitespace is
+	// trimmed so "  {}  " is caught too; a non-empty value such as a short
+	// label or a JSON object with at least one field is accepted.
+	if strings.TrimSpace(req.Metadata) == "{}" {
+		return nil, fmt.Errorf(
+			"metadata must not be the empty JSON object \"{}\" (the anchoring "+
+				"precompile rejects it); pass a non-empty value such as a short "+
+				"label or a JSON object with at least one field: %w",
+			apperrors.ErrMissingRequired)
+	}
 
 	// The ABI expects a single tuple struct for addRecord. Field tags
 	// must match the on-chain component names so the encoder maps them
@@ -196,6 +210,14 @@ func (c *client) buildUnsignedTx(
 	}
 	gasEstimate, err := c.evmClient.EstimateGas(ctx, msg)
 	if err != nil {
+		// Gas estimation runs the precompile, so a revert here is often a
+		// caller-input rejection (e.g. an oversized checksum the server does
+		// not pre-validate). Surface a curated, safe reason when recognized;
+		// otherwise let SafeForClient collapse it to avoid leaking raw chain
+		// detail (rc8 E2E F5).
+		if reason, ok := classifyPrecompileRevert(err); ok {
+			return nil, fmt.Errorf("%s: %w", reason, apperrors.ErrPrecompileValidation)
+		}
 		return nil, fmt.Errorf("estimate gas: %w", err)
 	}
 	gasLimit := applyGasBuffer(gasEstimate)

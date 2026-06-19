@@ -33,6 +33,17 @@ func addTool[In, Out any](
 
 // sanitizeToolErr wraps a tool handler so its returned error is passed through
 // apperrors.SafeForClient before the SDK surfaces it to the client.
+//
+// IMPORTANT for handler authors: when a handler returns a non-nil error, the
+// SDK turns the result into an IsError CallToolResult whose content is ONLY
+// the error text -- any structured Out value the handler also returned is
+// discarded before it reaches the client. So never return a populated Out
+// struct alongside an error expecting the caller to read it (that bug bit the
+// nvnm_setup_verify_* tools: their remediation payload was silently dropped).
+// If a non-success result is a legitimate outcome the caller must inspect
+// (e.g. a verification mismatch with remediation), return it as a SUCCESS
+// (nil error) with an ok=false field. Reserve Go errors for "the tool could
+// not run" (bad input, upstream failure).
 func sanitizeToolErr[In, Out any](
 	h mcp.ToolHandlerFor[In, Out],
 ) mcp.ToolHandlerFor[In, Out] {

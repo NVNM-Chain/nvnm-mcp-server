@@ -562,8 +562,8 @@ All "Immediate Fixes" and "Before Red Team" items have been implemented. Each fi
 | Aspect | Detail |
 |---|---|
 | Fix | Error sanitization at MCP boundary + RPC URL leak removed |
-| Files | `internal/evm/client.go`, `internal/errors/errors.go`, `internal/telemetry/middleware.go` |
-| Changes | `NewClient` error no longer includes the raw RPC URL. New `SafeForClient()` function in `internal/errors/` classifies errors: input/not-found errors pass through unchanged; upstream and internal errors are replaced with generic messages. Applied in the telemetry middleware so OTel spans still get the full error for internal debugging, but the MCP response to the client is sanitized. |
+| Files | `internal/evm/client.go`, `internal/errors/errors.go`, `internal/anchor/revert.go`, `internal/telemetry/middleware.go` |
+| Changes | `NewClient` error no longer includes the raw RPC URL. New `SafeForClient()` function in `internal/errors/` classifies errors: input/not-found errors pass through unchanged; upstream and internal errors are replaced with generic messages. Applied in the telemetry middleware so OTel spans still get the full error for internal debugging, but the MCP response to the client is sanitized. **Precompile revert reasons** (from gas estimation) are classified at the anchor boundary (`internal/anchor/revert.go`) against a fixed allowlist: a recognized caller-input rejection (e.g. an oversized checksum) is surfaced as `ErrPrecompileValidation` carrying a **canonical, hard-coded reason** — never the raw revert string — so actionable input errors reach the caller while internal type paths (e.g. Cosmos proto paths) still collapse to the generic message. |
 | Verification | `go test ./...` passes |
 
 #### Finding 8: No Audit Trail for Write Operations -- REMEDIATED

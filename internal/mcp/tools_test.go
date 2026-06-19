@@ -36,6 +36,7 @@ type mockEVM struct {
 	returnErr   error
 	lastAddress defitypes.Address
 	lastHash    defitypes.Hash
+	lastCall    defitypes.Call
 }
 
 func (m *mockEVM) ChainID(_ context.Context) (*big.Int, error)         { return big.NewInt(58887), m.returnErr }
@@ -68,7 +69,8 @@ func (m *mockEVM) CodeAt(_ context.Context, addr defitypes.Address, _ *big.Int) 
 }
 
 //nolint:gocritic // hugeParam: matches go-ethereum's CallContract signature
-func (m *mockEVM) CallContract(_ context.Context, _ defitypes.Call, _ *big.Int) ([]byte, error) {
+func (m *mockEVM) CallContract(_ context.Context, call defitypes.Call, _ *big.Int) ([]byte, error) {
+	m.lastCall = call
 	return m.callResult, m.returnErr
 }
 func (m *mockEVM) FilterLogs(_ context.Context, _ defitypes.FilterLogsQuery) ([]evm.NormalizedLog, error) {
@@ -434,6 +436,51 @@ func TestHandler_CallContract_WithBlock(t *testing.T) {
 	}
 	if out.Result != "0xab" {
 		t.Errorf("Result = %q, want %q", out.Result, "0xab")
+	}
+}
+
+// F6: evm_call_contract exposes an optional `from`. Without it eth_call runs
+// as the zero address, so permissioned-function simulations always revert.
+// When supplied, the address must be forwarded to the eth_call message.
+func TestHandler_CallContract_PassesFromAddress(t *testing.T) {
+	m := &mockEVM{callResult: []byte{0x01}}
+	handler := makeCallContractHandler(m)
+
+	const fromHex = "0x1111111111111111111111111111111111111111"
+	_, _, err := handler(ctx, nil, callContractInput{To: testAddr, Data: "0xab", From: fromHex})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.lastCall.From == nil {
+		t.Fatal("From must be set on the eth_call message when supplied")
+	}
+	want, _ := defitypes.AddressFromHex(fromHex)
+	if *m.lastCall.From != want {
+		t.Errorf("From = %v, want %v", m.lastCall.From, want)
+	}
+}
+
+// When `from` is omitted the sender stays nil (zero-address eth_call), so the
+// existing behavior is preserved for callers that don't need it.
+func TestHandler_CallContract_OmittedFromLeavesNilSender(t *testing.T) {
+	m := &mockEVM{callResult: []byte{0x01}}
+	handler := makeCallContractHandler(m)
+
+	if _, _, err := handler(ctx, nil, callContractInput{To: testAddr, Data: "0xab"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.lastCall.From != nil {
+		t.Errorf("From should stay nil when not supplied; got %v", m.lastCall.From)
+	}
+}
+
+// A malformed `from` is a caller-input error, surfaced as such.
+func TestHandler_CallContract_InvalidFromRejected(t *testing.T) {
+	handler := makeCallContractHandler(&mockEVM{})
+
+	_, _, err := handler(ctx, nil, callContractInput{To: testAddr, Data: "0xab", From: testBadAddr})
+	if err == nil {
+		t.Fatal("expected error for invalid from address")
 	}
 }
 

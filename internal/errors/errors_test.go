@@ -24,6 +24,7 @@ func TestIsInputError(t *testing.T) {
 		{"ErrInvalidRegistryID", ErrInvalidRegistryID, true},
 		{"ErrInvalidRecordID", ErrInvalidRecordID, true},
 		{"ErrInvalidChecksum", ErrInvalidChecksum, true},
+		{"ErrPrecompileValidation", ErrPrecompileValidation, true},
 		{"wrapped input error", fmt.Errorf("context: %w", ErrInvalidAddress), true},
 		{"ErrBlockNotFound is not input error", ErrBlockNotFound, false},
 		{"ErrUpstreamRPC is not input error", ErrUpstreamRPC, false},

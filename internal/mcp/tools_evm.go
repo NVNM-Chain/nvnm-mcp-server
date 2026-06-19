@@ -132,8 +132,10 @@ type getLogsInput struct {
 }
 
 type callContractInput struct {
-	To       string `json:"to" jsonschema:"Contract address (0x-prefixed),required"`
-	Data     string `json:"data" jsonschema:"Hex-encoded calldata (0x-prefixed),required"`
+	To   string `json:"to" jsonschema:"Contract address (0x-prefixed),required"`
+	Data string `json:"data" jsonschema:"Hex-encoded calldata (0x-prefixed),required"`
+	//nolint:lll // schema docstring
+	From     string `json:"from,omitempty" jsonschema:"Optional caller address (0x-prefixed) to run the call as. Omit to call as the zero address; supply it to simulate permissioned functions that check msg.sender."`
 	BlockNum *int64 `json:"block_number,omitempty" jsonschema:"Block number (omit for latest)"`
 }
 
@@ -373,6 +375,16 @@ func makeCallContractHandler(
 		msg := defitypes.Call{
 			To:    &toCopy,
 			Input: data,
+		}
+		// Optional sender: eth_call defaults to the zero address, which
+		// reverts any function that checks msg.sender. Supplying `from`
+		// lets callers simulate permissioned reads (F6).
+		if input.From != "" {
+			fromAddr, ferr := parseAddress(input.From)
+			if ferr != nil {
+				return nil, callContractOutput{}, ferr
+			}
+			msg.From = &fromAddr
 		}
 		var blockNum *big.Int
 		if input.BlockNum != nil {

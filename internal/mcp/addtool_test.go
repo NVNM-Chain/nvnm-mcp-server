@@ -46,6 +46,7 @@ func TestSanitizeToolErr_PassesKnownSentinels(t *testing.T) {
 		apperrors.ErrTxNotFound,
 		apperrors.ErrAuthRequired,
 		apperrors.ErrMissingRequired,
+		apperrors.ErrPrecompileValidation,
 	} {
 		h := func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
 			return nil, struct{}{}, sentinel

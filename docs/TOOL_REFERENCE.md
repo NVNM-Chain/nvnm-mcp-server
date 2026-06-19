@@ -217,6 +217,8 @@ Four-state prose-guided onboarding flow: `needs_wallet` / `unfunded` / `funded_u
 
 Stateless hashing challenge. The server derives a deterministic per-address challenge string and the caller proves they can compute `SHA-256` of it. No on-chain state, no per-session state.
 
+**Challenge derivation** (so the tool is usable without trial-and-error): `challenge = "0x" + hex(sha256(lowercase(address) + ":nvnm-setup-challenge-v1"))`. Submit `hash = "0x" + hex(sha256(challenge))`, hashing the challenge string's UTF-8 bytes **including** the `0x` prefix. Every response echoes `challenge` and `expected`, so a first call with any value reveals what to submit next.
+
 ### Input Parameters
 
 | Field | Type | Required | Description |
@@ -235,17 +237,24 @@ Stateless hashing challenge. The server derives a deterministic per-address chal
 | `got` | `string` | The caller-supplied digest, normalized (lowercase, 0x-prefixed). |
 | `next_actions` | `[]NextAction` | On success, points at `nvnm_setup_verify_signature`. On mismatch, points back at `nvnm_setup_verify_hash` with a recompute hint. |
 
+### Verification outcome vs. error
+
+A **hash mismatch is not an error** — it is a successful call that returns `ok: false` with `challenge`, `expected`, `got`, and a recompute hint in `next_actions`, so the caller can self-correct. (Errors discard structured output over the wire, so a mismatch must not be returned as one.)
+
 ### Error Conditions
+
+These mean the tool could not run; they return a JSON-RPC error, not `ok: false`:
 
 - Invalid address format.
 - Missing `hash` (returns `missing_required`).
-- Hash mismatch (returns `invalid_hash`; the response body still carries `expected` and `got` so the caller can debug their hashing path).
 
 ---
 
 ## nvnm\_setup\_verify\_signature
 
 Stateless signing challenge. Uses the same per-address challenge as `nvnm_setup_verify_hash`; the caller produces an EIP-191 `personal_sign` signature over it, and the server recovers the signer address and compares it to the supplied `address`.
+
+**Challenge derivation:** `challenge = "0x" + hex(sha256(lowercase(address) + ":nvnm-setup-challenge-v1"))`. Sign the challenge string with EIP-191 `personal_sign` (**do not pre-hash**) and submit the 65-byte `0x`-prefixed signature. Every response echoes `challenge`.
 
 ### Input Parameters
 
@@ -264,12 +273,16 @@ Stateless signing challenge. Uses the same per-address challenge as `nvnm_setup_
 | `recovered_address` | `string` | The address ECDSA-recovered from the signature (omitted on parse failure). |
 | `next_actions` | `[]NextAction` | On success, points at `anchor_get_registries` / `anchor_prepare_*`. On mismatch, points back at `nvnm_setup_verify_signature` with a re-sign hint. |
 
+### Verification outcome vs. error
+
+A **signer mismatch and a recovery failure are not errors** — both return a successful call with `ok: false`, `challenge`, and a re-sign hint in `next_actions` (a mismatch also carries `recovered_address` so the caller sees which key actually signed). This lets the remediation reach the caller, which an error path would discard.
+
 ### Error Conditions
 
+These mean the tool could not run; they return a JSON-RPC error, not `ok: false`:
+
 - Invalid address format.
-- Malformed `signature` (wrong length, non-hex, or unparseable as `r||s||v`).
-- ECDSA recovery failure (e.g., bad `v` byte).
-- Recovered signer does not match the supplied address.
+- Missing or malformed `signature` (wrong length, non-hex, or unparseable as `r||s||v`).
 
 ---
 
@@ -704,6 +717,7 @@ Execute a read-only contract call. Provide the contract address and hex-encoded 
 |----------------|----------|----------|------------------------------------------|
 | `to`           | `string` | required | Contract address (0x-prefixed)           |
 | `data`         | `string` | required | Hex-encoded calldata (0x-prefixed)       |
+| `from`         | `string` | optional | Caller address (0x-prefixed) to run the call as. Omit to call as the zero address; supply it to simulate permissioned functions that check `msg.sender`. |
 | `block_number` | `int64`  | optional | Block number (omit for latest)           |
 
 ### Output Fields
@@ -1079,7 +1093,7 @@ Construct an unsigned `addRecord` transaction to anchor a document checksum and 
 | `checksum`      | `string` | required | Document checksum as a hex digest, **max 64 chars** (a SHA-256 digest is 64 hex chars). A leading `0x` is accepted and stripped server-side. |
 | `checksum_algo` | `string` | required | Hash algorithm (e.g., `sha256`). The anchoring precompile rejects an empty value, so it is validated as required. |
 | `status`        | `string` | optional | Record status (default: `Active`)              |
-| `metadata`      | `string` | required | JSON metadata. The anchoring precompile rejects an empty value, so it is validated as required — pass `{}` if you have none. |
+| `metadata`      | `string` | required | Metadata string. The anchoring precompile rejects both an empty value and the literal empty JSON object `{}`, so the server rejects both with an actionable message. If you have no structured metadata, pass a short label (e.g. the document name) or a JSON object with at least one field. |
 
 ### Output Fields
 

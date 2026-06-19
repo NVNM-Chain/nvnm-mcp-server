@@ -165,20 +165,31 @@ func TestVerifyHash_SuccessAcceptsExpectedDigest(t *testing.T) {
 	}
 }
 
-func TestVerifyHash_FailureRejectsWrongDigest(t *testing.T) {
+// F2: a hash mismatch is a legitimate verification outcome, not a tool
+// failure. It must return a successful result (nil error) carrying the
+// remediation payload -- challenge, expected digest, and next_actions --
+// because the SDK discards the structured output when a handler returns a
+// non-nil error, which is exactly what the caller needs to self-correct.
+func TestVerifyHash_MismatchReturnsRemediationNotError(t *testing.T) {
 	h := makeVerifyHashHandler()
 	_, out, err := h(context.Background(), nil, verifyHashInput{
 		Address: "0x" + strings.Repeat("a", 40),
 		Hash:    "0x" + strings.Repeat("0", 64),
 	})
-	if err == nil {
-		t.Fatal("expected error for wrong digest")
-	}
-	if !errors.Is(err, apperrors.ErrInvalidHash) {
-		t.Errorf("error should wrap ErrInvalidHash; got %v", err)
+	if err != nil {
+		t.Fatalf("mismatch must not return an error (SDK would drop the remediation struct); got %v", err)
 	}
 	if out.OK {
 		t.Error("OK should be false on mismatch")
+	}
+	if out.Challenge == "" {
+		t.Error("Challenge must reach the caller so they can recompute the digest")
+	}
+	if out.Expected == "" {
+		t.Error("Expected digest must reach the caller")
+	}
+	if len(out.NextActions) == 0 {
+		t.Error("NextActions remediation must reach the caller")
 	}
 }
 
@@ -240,7 +251,11 @@ func TestVerifySignature_RoundTripWithFreshKey(t *testing.T) {
 	}
 }
 
-func TestVerifySignature_WrongSignerRejected(t *testing.T) {
+// F2: a signer mismatch is a legitimate verification outcome, not a tool
+// failure. Like the hash case, it must return nil error with a populated
+// struct so the challenge, recovered address, and remediation reach the
+// caller instead of being dropped by the SDK's error path.
+func TestVerifySignature_MismatchReturnsRemediationNotError(t *testing.T) {
 	signingKey := defiwallet.NewRandomKey()
 	otherKey := defiwallet.NewRandomKey()
 	// Sign with signingKey but claim the signature was for otherKey.
@@ -255,14 +270,20 @@ func TestVerifySignature_WrongSignerRejected(t *testing.T) {
 		Address:   otherKey.Address().String(),
 		Signature: sig.String(),
 	})
-	if retErr == nil {
-		t.Fatal("expected error for mismatched signer")
-	}
-	if !errors.Is(retErr, apperrors.ErrInvalidSignature) {
-		t.Errorf("error should wrap ErrInvalidSignature; got %v", retErr)
+	if retErr != nil {
+		t.Fatalf("mismatch must not return an error (SDK would drop the remediation struct); got %v", retErr)
 	}
 	if out.OK {
 		t.Error("OK should be false on mismatch")
+	}
+	if out.Challenge == "" {
+		t.Error("Challenge must reach the caller")
+	}
+	if out.RecoveredAt == "" {
+		t.Error("RecoveredAt must reach the caller so they can see which key actually signed")
+	}
+	if len(out.NextActions) == 0 {
+		t.Error("NextActions remediation must reach the caller")
 	}
 }
 

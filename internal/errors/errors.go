@@ -19,6 +19,12 @@ var (
 	ErrInvalidRecordID   = errors.New("invalid record ID")
 	ErrInvalidChecksum   = errors.New("invalid checksum")
 	ErrInputTooLarge     = errors.New("input exceeds maximum allowed size")
+	// ErrPrecompileValidation marks a caller-input rejection that the
+	// anchoring precompile reported (e.g. a value the server does not
+	// pre-validate). It is treated as an input error so SafeForClient
+	// surfaces the curated reason instead of collapsing it. The reason
+	// text is drawn from a fixed allowlist, never from raw chain output.
+	ErrPrecompileValidation = errors.New("precompile rejected input")
 )
 
 // Not-found errors.
@@ -71,7 +77,8 @@ func IsInputError(err error) bool {
 		errors.Is(err, ErrInvalidRegistryID) ||
 		errors.Is(err, ErrInvalidRecordID) ||
 		errors.Is(err, ErrInvalidChecksum) ||
-		errors.Is(err, ErrInputTooLarge)
+		errors.Is(err, ErrInputTooLarge) ||
+		errors.Is(err, ErrPrecompileValidation)
 }
 
 // IsTransientError returns true if the error is a transient upstream error that may be retried.

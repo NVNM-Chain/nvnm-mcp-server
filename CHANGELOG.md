@@ -9,6 +9,43 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc10] - 2026-06-19
+
+Fixes from the rc9 dmome21 full smoke test (testnet, real MCP client),
+re-verified end-to-end against a local rc10 binary over the real MCP protocol.
+
+### Added
+
+- `evm_call_contract` accepts an optional `from` address so callers can
+  simulate permissioned reads that check `msg.sender`; omitting it preserves
+  the prior zero-address behavior. (smoke F6)
+
+### Changed
+
+- Recognized, caller-input precompile revert reasons (e.g. an oversized
+  checksum) now surface to the client as an actionable message instead of the
+  generic `upstream operation failed`. Reasons are drawn from a fixed allowlist
+  at the anchor boundary and carried by a new `ErrPrecompileValidation`
+  sentinel; raw chain text (internal type paths) still collapses. (smoke F5)
+
+### Fixed
+
+- `nvnm_setup_verify_hash` / `nvnm_setup_verify_signature`: a hash/signature
+  mismatch is now returned as a successful result with `ok: false` and the
+  full remediation payload (`challenge`, `expected`/`recovered_address`,
+  `next_actions`) instead of an error. The SDK discards structured output when
+  a handler returns an error, so the remediation the tools were designed to
+  give was previously dropped over the wire. Challenge derivation is now
+  documented in the tool descriptions. (smoke F2)
+- `anchor_prepare_add_record`: the server now rejects the empty JSON object
+  `{}` (and whitespace-only variants) for `metadata` with an actionable
+  message, matching the anchoring precompile, which rejects it on-chain. Prior
+  guidance to "pass `{}`" was corrected in the tool schema, README, and
+  MetaMask guide. (smoke F3a)
+- `anchor_prepare_grant_role`: tool description now states it requires the
+  `admin` role only, matching enforcement; it previously inherited shared prose
+  that incorrectly advertised the writer/admin/automation roles. (smoke F4)
+
 ## [1.0.0-rc9] - 2026-06-19
 
 ### Fixed
@@ -1391,7 +1428,8 @@ typed JSON with `snake_case` field names.
   script must be extended.
 - Self-serve API key request workflow is on the backlog (Medium priority).
 
-[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc9...HEAD
+[Unreleased]: https://github.com/NVNM-Chain/nvnm-mcp-server/compare/v1.0.0-rc10...HEAD
+[1.0.0-rc10]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc10
 [1.0.0-rc9]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc9
 [1.0.0-rc8]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc8
 [1.0.0-rc7]: https://github.com/NVNM-Chain/nvnm-mcp-server/releases/tag/v1.0.0-rc7
