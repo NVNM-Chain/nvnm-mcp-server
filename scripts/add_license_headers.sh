@@ -6,7 +6,7 @@
 # expected SPDX line as its first line is left alone, so re-running
 # this script is safe.
 #
-# Phase 9.3 (OSS Readiness): see docs/IMPLEMENTATION_PLAN.md.
+# Phase 9.3 (OSS Readiness) work.
 # The commit hash of the bulk-header commit is recorded in
 # .git-blame-ignore-revs so `git blame` skips the rewrite.
 

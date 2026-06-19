@@ -89,8 +89,7 @@ func TestE2E_Initialize_IncludesInstructions(t *testing.T) {
 	// true property is non-custody (the server holds no private keys);
 	// an earlier version asserted a "no events" claim that was factually
 	// wrong -- the anchor precompile does emit events exposing the
-	// anchored hash and registry name (see PRIVACY_DISCUSSION.md 5.3,
-	// corrected 2026-06-11).
+	// anchored hash and registry name (corrected 2026-06-11).
 	if !strings.Contains(res.Instructions, "no private keys") {
 		t.Errorf("Instructions should surface the non-custody privacy property, got: %q", res.Instructions)
 	}

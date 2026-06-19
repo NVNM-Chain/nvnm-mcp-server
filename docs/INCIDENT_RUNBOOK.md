@@ -369,7 +369,7 @@ kube_pod_container_status_restarts_total{pod=~"nvnm-mcp-server-.*"}
   pre-restart container).
 - Verify Service and ServiceMonitor exist in the new `nvnm-mcp`
   namespace (Phase 9.14 rollover surface — see
-  [`RUNBOOK.md` § "K8s manifest migration"](RUNBOOK.md#k8s-manifest-migration-phase-9-14-follow-up)).
+  [`RUNBOOK.md` § "K8s manifest migration"](RUNBOOK.md#k8s-manifest-migration-phase-914-follow-up)).
 - Health probes themselves are independent of `/metrics`; check
   `/healthz` and `/readyz` from a sidecar or `kubectl port-forward`
   to isolate scrape-vs-server.
@@ -530,7 +530,5 @@ new dashboards.
 - [`docs/RUNBOOK.md`](RUNBOOK.md) — deployment + day-two operations.
 - [`docs/DATA_HANDLING.md`](DATA_HANDLING.md) § 7 — metrics taxonomy
   + privacy posture.
-- [`docs/planning/PHASE_10_DESIGN.md`](planning/PHASE_10_DESIGN.md) — design rationale
-  for the Phase 10 SLI class label and capacity targets.
 - [`deploy/prometheus/alerts.yaml`](../deploy/prometheus/alerts.yaml) —
   the alert rules this document indexes.

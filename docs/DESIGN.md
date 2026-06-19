@@ -844,7 +844,7 @@ Write tools are gated at two levels; both must be satisfied for `evm_send_raw_tr
 
 **Human confirmation is the client/agent's responsibility.** The server no longer issues an MCP elicitation prompt before broadcasting. The caller-side signature is the security boundary: the server broadcasts exactly the signed bytes it receives and cannot alter them. It is the client's or agent's duty to obtain human confirmation before submitting a signed transaction, and to verify the transaction being signed matches what the user intended.
 
-The server handler (`StreamableHTTPOptions{Stateless: true}`) runs stateless — no per-pod session map, no load-balancer affinity required. See `docs/SESSION_AFFINITY.md` for the full rationale.
+The server handler (`StreamableHTTPOptions{Stateless: true}`) runs stateless — no per-pod session map, no load-balancer affinity required (Option 0; see CHANGELOG [1.0.0-rc8]).
 
 **Fail-loud migration guards** -- if `WRITE_APPROVAL_DEFAULT` is present in the environment, or if a key store entry carries a `write_approval` field, startup fails with `ErrLegacyWriteApproval` / `ErrLegacyKeyWriteApproval` and a pointer to `docs/RUNBOOK.md#write-approval-removal`.
 

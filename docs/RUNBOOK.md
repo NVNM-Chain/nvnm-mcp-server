@@ -338,7 +338,7 @@ The endpoint produces durable side effects (a queue row + an SMTP send on approv
 - Email validation via `net/mail.ParseAddress` rejects malformed addresses, and reviewer judgement during approve catches obviously bogus requests before any email is sent to a real address.
 - `IPFailRateLimiter` (shared with auth-failure tracking) provides a coarser outer ring.
 
-For high-spam threat environments, tighten `NVNM_KEY_REQUEST_RATE_LIMIT` further or front the endpoint with an edge CAPTCHA — the design intentionally does not bake CAPTCHA into the server (per `planning/PHASE_9_DESIGN.md` D3).
+For high-spam threat environments, tighten `NVNM_KEY_REQUEST_RATE_LIMIT` further or front the endpoint with an edge CAPTCHA — the design intentionally does not bake CAPTCHA into the server.
 
 Rejected requests produce a structured warning log line with the origin, remote address, method, and path. Operators can audit recent rejections with their log aggregator's filter on `"rejecting request with disallowed Origin"`.
 
@@ -412,7 +412,7 @@ curl -X POST http://localhost:8081/admin/keys \
 ### Write-approval removal
 
 Server-side write approval was **removed in Option 0** (the stateless
-multi-replica migration; see [`SESSION_AFFINITY.md`](SESSION_AFFINITY.md)).
+multi-replica migration).
 The server previously gated `evm_send_raw_transaction` behind an MCP
 elicitation prompt; that was the only server→client request and the sole
 reason the handler needed sticky sessions. It is gone. Writes now gate on
@@ -698,8 +698,8 @@ Consider custom metrics (e.g. from Prometheus) on `mcp.server.active_requests` o
 
 ### Phase 10 RD1 capacity targets
 
-The Phase 10 OQ walkthrough resolved per-environment capacity targets
-(`docs/planning/PHASE_10_DESIGN.md` § 14 RD1). They are *aspirational ceilings
+The Phase 10 OQ walkthrough resolved per-environment capacity targets.
+They are *aspirational ceilings
 for capacity planning*, not contractual SLOs (the Service is provided
 on a "reasonable efforts" basis per `docs/TERMS.md` § 10).
 
@@ -894,5 +894,5 @@ Then run an MCP client against `http://<host>:8080` for a minimal tool call (e.g
 - Metrics instruments: `internal/telemetry/metrics.go`, `internal/telemetry/middleware.go`, `internal/evm/tracing.go`
 - Resilience: `internal/evm/resilient.go`
 - Kubernetes samples: `deploy/k8s/` (including `networkpolicy.yaml`)
-- Design / roadmap: `docs/DESIGN.md`, `docs/IMPLEMENTATION_PLAN.md`
+- Design / roadmap: `docs/DESIGN.md`
 - Security: `docs/SECURITY_AUDIT.md`

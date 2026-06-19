@@ -61,7 +61,6 @@ This README is the technical entry point. For deeper context, follow the links b
 | [`docs/TERMS.md`](docs/TERMS.md) | Terms of Service for the hosted Service (Apache 2.0 governs the Software) |
 | [`docs/KEY_CUSTODY_THREAT_MODEL.md`](docs/KEY_CUSTODY_THREAT_MODEL.md) | Rationale for the zero-key-custody design — no agent-mediated signing |
 | [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
-| [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Phased roadmap with goal / depends-on / tasks / exit criteria |
 
 ## What this server is not
 
@@ -91,13 +90,13 @@ Cold-reader assumptions to head off up front. The server is deliberately scoped 
 
 ## Status
 
-**Phases 0–11 engineering-side complete as of 2026-06-02; current release is `v1.0.0-rc9`.** Phase 8 closed out on 2026-05-15: foundation types and tool annotations (8.1–8.5), API-key hashing-at-rest migration and constant-time auth (8.6–8.7), five onboarding tools (8.8), the BREAKING env-var hard cut `INVENIAM_*` → `NVNM_*` plus server-identity rename (8.9 — see [`docs/RUNBOOK.md#env-var-migration`](docs/RUNBOOK.md#env-var-migration)), the BREAKING binary + Docker artifact rename (8.13 — `cmd/inveniam-mcp-server/` → `cmd/nvnm-mcp-server/`, image at `ghcr.io/nvnm-chain/nvnm-mcp-server`), the OWASP Top 10 self-audit (8.12), and the security assessment in [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md). Phase 9 (OSS Readiness) shipped through 9.16 across May 18–27: SPDX headers, mainnet cutover playbook, multi-arch Cosign-signed images, secrets scrub, DCO branch protection, the canonical org migration to `NVNM-Chain/nvnm-mcp-server` (9.14), and the keyless-read auth middleware (9.16). Phase 9.15 (public repo flip) is business-gated — engineering work complete, hand-off awaiting the launch moment. Phase 10 (DevOps Foundations) shipped engineering-side on 2026-06-02: HTTP-level error-rate SLI with a `class` label ([`mcp_http_responses_total`](deploy/prometheus/alerts.yaml)), [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) with per-alert playbooks, Cosign-verify recipe in [`docs/RUNBOOK.md`](docs/RUNBOOK.md), and Phase 9.14 carried-over k8s manifest cleanups (BREAKING for existing deployments). Phase 11 (Product Launch) shipped engineering-side on 2026-06-02: self-serve API-key request endpoint at `POST /api/v1/keys/request` with admin pending-review endpoints and SMTP integration, wallet wizard hook (`needs_wallet` → wallet generator URL), and the engineering-side Terms of Service draft at [`docs/TERMS.md`](docs/TERMS.md). The remaining Phase 11 exit criteria (counsel sign-offs on ToS / Privacy Policy, Anthropic / OpenAI directory submissions, beta cohort onboarding, mailbox provisioning) are non-engineering scope — see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) for the live tracking.
+**Current release: `v1.0.0-rc9`.** The server is feature-complete and security-hardened — 21 typed tools (EVM reads, anchor reads, prepare-sign-submit writes, guided onboarding) with provider-agnostic auth (API keys or FusionAuth JWTs), per-tool RBAC, optional keyless reads, pre-auth and per-client rate limiting, DNS-rebinding defense, an OWASP Top-10 self-audit, and SBOM + Cosign-signed multi-arch images. See [`CHANGELOG.md`](CHANGELOG.md) for the full release history and [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) for the security assessment.
 
 HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all **authenticated** audit logs and OTel spans. Under keyless reads (`MCP_KEYLESS_READS=true`, the Inveniam-hosted default) only `evm_send_raw_transaction` authenticates and carries a per-client identifier; the `anchor_prepare_*` tools are auth-exempt and anonymous reads carry no `client_id`. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Write access is gated by RBAC role and `ENABLE_WRITE_TOOLS`; obtaining human confirmation before submitting a signed transaction is the caller/agent's responsibility (stated in the server's `initialize` instructions). The signature remains the security boundary — the server holds no keys and cannot alter a signed transaction. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
 
 Write tools construct complete unsigned transactions with both `raw_tx` (for HSM/CLI signers) and `wallet_tx_request` (for MetaMask / EIP-1193 wallets); private keys never touch the server -- see [Write Architecture](#write-architecture-phase-3). Phase 8.4 made EIP-1559 (type-2) the default transaction format; callers that need legacy type-0 set `prefer_legacy_tx: true` on the prepare-tool input. Every tool response carries a `next_actions` hint array (Phase 8.3) so agents can chain calls from response-embedded affordances rather than server-side orchestration. Every tool carries an MCP `ToolAnnotations` payload (Phase 8.2) so clients can tell read-only tools from state-changing ones without inferring spec defaults. Five Phase 8.8 onboarding tools (`nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`) walk first-time agents through wallet generation, funding, and on-chain state derivation; the wizard's `funded_active` state is explicit that "has sent any transaction" is not the same as "has anchored" because the wizard reads only balance and nonce, never transaction contents. OpenTelemetry instrumentation provides traces, metrics, and health check endpoints -- see [Observability](#observability).
 
-The EVM RPC stack uses `github.com/defiweb/go-eth` (MIT) -- `go-ethereum` was removed in 2026-05-13 to comply with the proprietary commercial license policy in `CLAUDE.md`; see `docs/SECURITY_AUDIT.md` for the migration record. Dependencies are vendored (`vendor/`) and CI builds with `-mod=vendor` for supply-chain safety.
+The EVM RPC stack uses `github.com/defiweb/go-eth` (MIT) -- `go-ethereum` was removed in 2026-05-13 to comply with the project's dependency-license policy; see `docs/LICENSE_EXCEPTIONS.md` and `docs/SECURITY_AUDIT.md` for the migration record. Dependencies are vendored (`vendor/`) and CI builds with `-mod=vendor` for supply-chain safety.
 
 ## Prerequisites
 
@@ -111,7 +110,8 @@ The EVM RPC stack uses `github.com/defiweb/go-eth` (MIT) -- `go-ethereum` was re
 
 ```bash
 # Clone and enter the project
-cd NVNM_mcp_server
+git clone https://github.com/NVNM-Chain/nvnm-mcp-server.git
+cd nvnm-mcp-server
 
 # Install dev tools and pre-commit hooks
 make setup-dev
@@ -512,6 +512,8 @@ The server can run directly on MANTRA validator nodes, connecting to `localhost`
 cmd/
   nvnm-mcp-server/       Entrypoint
   key-mgmt/                  API key management CLI
+  query-anchor/              Anchor query dev CLI
+  seed-test-data/            Test-data seeding dev CLI
 internal/
   auth/                      Client identity context propagation
   config/                    Environment-based configuration
@@ -533,11 +535,9 @@ tests/
   load/                      k6 load test scripts
 docs/
   DESIGN.md                       Architecture and design decisions
-  IMPLEMENTATION_PLAN.md          Phased implementation plan
   SECURITY_AUDIT.md               Security assessment and remediation results
   OWASP_AUDIT.md                  OWASP Top 10 self-audit (Phase 8.12)
   DATA_HANDLING.md                Privacy-by-design technical reference
-  PRIVACY_DISCUSSION.md           Working notes for the privacy policy
   NVNM_MCP_Privacy_Policy_Jun_2026.pdf  Finalized Privacy Policy (legal artifact)
   TERMS.md                        Terms of Service for the hosted Service
   INCIDENT_RUNBOOK.md             Per-alert investigation playbook
@@ -550,16 +550,6 @@ docs/
   TESTING.md                      Test framework, strategy, and results
   TOOL_REFERENCE.md               MCP tool schema reference
   RUNBOOK.md                      Operational runbook
-  SESSION_AFFINITY.md             Multi-replica session continuity: investigation + decision (go stateless)
-  planning/                       Phase design docs + process artifacts (historical; not needed to use the server)
-    PHASE_8_DESIGN.md             Phase 8 design contract (closed out)
-    PHASE_9_DESIGN.md             Phase 9 design contract (OSS Readiness)
-    PHASE_10_DESIGN.md            Phase 10 design contract (DevOps foundations)
-    PHASE_11_DESIGN.md            Phase 11 design contract (Product launch)
-    WALLET_GENERATOR_DESIGN.md    Wallet generator page design contract (sibling repo)
-    SIGNUP_IDENTITY_REQUIREMENTS.md  Identity/signup contract: FusionAuth roles, JWT claims, data boundary (sibling repo)
-    CLAUDE_API_CONNECTOR_INTEGRATION.md  Integrator guide: Claude API mcp_servers connector + FusionAuth JWT
-    FUSIONAUTH_RBAC_TEST_HARNESS.md  Deferred concept note: end-to-end RBAC test harness
 .github/
   workflows/ci.yml           CI pipeline
   dependabot.yml             Automated dependency updates

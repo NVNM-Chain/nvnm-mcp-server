@@ -13,13 +13,12 @@ publicly reachable. Operators who deploy the open-source binary
 themselves are governed by Apache 2.0, not these Terms — they are the
 operator of their own deployment.
 
-**Currency:** reflects the resolved decisions captured in
-[docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 14 as of commit
-`e2de26c` (2026-05-27). Counsel-iteration items appear in bracketed
-provisional form and will be revised editorially against the live
-document, not as prerequisites for publication; see
-[docs/PRIVACY_DISCUSSION.md](PRIVACY_DISCUSSION.md) for the parallel
-pattern adopted for the Privacy Policy.
+**Currency:** reflects the resolved Product Launch decisions as of
+commit `e2de26c` (2026-05-27). Counsel-iteration items appear in
+bracketed provisional form and will be revised editorially against the
+live document, not as prerequisites for publication; the published
+[Privacy Policy](NVNM_MCP_Privacy_Policy_Jun_2026.pdf) is the parallel
+counsel-finalized artifact.
 
 **Effective Date:** [TBD at v1 launch — set at the moment of public
 repository flip and Service availability].
@@ -56,8 +55,7 @@ These Terms do **not** apply to:
   these are public, decentralized networks governed by their own
   operators and on-chain protocol rules;
 - The wallet-generator page at the wallet project's hosting URL — that
-  surface is governed by its own Terms and Privacy Policy
-  ([docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 10, RD8);
+  surface is governed by its own Terms and Privacy Policy;
 - Any third-party tool, agent, or framework you use to call the
   Service.
 
@@ -90,8 +88,7 @@ may be used as Software under Apache 2.0 instead — see § 7.
 The version of these Terms you accept is the version posted at the time
 of acceptance. The Service may record the version identifier and
 timestamp of your acceptance as part of the credential record
-(`tos_version`, `tos_accepted_at`) per
-[docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 6 D-L4-2.
+(`tos_version`, `tos_accepted_at`).
 
 ## 4. Eligibility
 
@@ -115,8 +112,7 @@ You represent and warrant that:
 
 ### 5.1 Credential issuance
 
-Credentials are issued through the processes described in
-[docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) §§ 5–6:
+Credentials are issued through the following processes:
 
 - **Self-serve API key request** — `POST /keys/request` enqueues a
   pending request that an Inveniam reviewer manually approves during
@@ -548,15 +544,13 @@ intellectual-property rights or confidentiality obligations.
 - [docs/DATA_HANDLING.md](DATA_HANDLING.md) — engineering reference
   for what data the Service processes; canonical source for the
   Privacy Policy's technical detail.
-- [docs/PRIVACY_DISCUSSION.md](PRIVACY_DISCUSSION.md) — working notes
-  for the Privacy Policy that consumes DATA_HANDLING.md.
+- [Privacy Policy](NVNM_MCP_Privacy_Policy_Jun_2026.pdf) — the
+  counsel-finalized Privacy Policy that consumes DATA_HANDLING.md.
 - [docs/KEY_CUSTODY_THREAT_MODEL.md](KEY_CUSTODY_THREAT_MODEL.md) —
   rationale for the zero-key-custody posture referenced in §§ 5.2
   and 11.
 - [docs/SECURITY.md](../SECURITY.md) — security disclosure terms
   referenced in §§ 6.5 and 18.
-- [docs/planning/PHASE_11_DESIGN.md](planning/PHASE_11_DESIGN.md) § 14 — the resolved
-  decisions that bake into this draft.
 - [LICENSE](../LICENSE) — Apache 2.0 license governing the Software.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — Developer Certificate of
   Origin requirements for contributions to the open-source

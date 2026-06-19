@@ -1,6 +1,6 @@
 # License exceptions
 
-Per the proprietary commercial licensing policy in `CLAUDE.md`, the
+Per this project's dependency-license policy, the
 default disposition for GPL-3.0 / LGPL-3.0 / AGPL-3.0 dependencies is:
 
 - **GPL-2.0, AGPL-3.0**: hard refusal. Not on the CI allowlist.

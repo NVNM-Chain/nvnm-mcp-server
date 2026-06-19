@@ -189,12 +189,12 @@ state model, and whether security was designed in or bolted on.
   There is no private key on the server to steal — the single highest-leverage
   design decision in the system, and an invariant called out in
   `internal/config` and `docs/DESIGN.md`.
-- **Pre-mortem-driven design.** `docs/planning/PHASE_8_DESIGN.md` §4 enumerates ten
-  failure modes *before* implementation and §5 records the refinements applied
+- **Pre-mortem-driven design.** The Phase 8 design enumerated ten
+  failure modes *before* implementation and recorded the refinements applied
   in response (atomic key-file writes, legacy-tx opt-out, honest wizard states,
   fail-loud env-var migration).
 - **Honest state naming.** The wizard uses `funded_active` rather than the
-  misleading `ready_to_anchor` (`planning/PHASE_8_DESIGN.md` §3.7.1) — a deliberate
+  misleading `ready_to_anchor` — a deliberate
   design choice against a state name that would over-claim what the server can
   actually observe.
 - **Write gating.** Writes require both `ENABLE_WRITE_TOOLS=true` (off by
@@ -229,8 +229,8 @@ migration, and the K8s / Helm deployment manifests.
 ### Controls
 - **Fail-loud on legacy config.** `Config.Load` rejects any `INVENIAM_*`
   chain-config key with `ErrLegacyEnvVars` and a pointer to the runbook
-  migration table — even when the matching `NVNM_*` is also set (Phase 8.9; see
-  `CLAUDE.md` "Migration hygiene principle"). Stale config cannot drift silently.
+  migration table — even when the matching `NVNM_*` is also set (Phase 8.9;
+  the project's migration-hygiene principle). Stale config cannot drift silently.
 - **Secure defaults.** `ENABLE_WRITE_TOOLS=false`, `OTLP_INSECURE=false`,
   `ADMIN_API_ADDR=127.0.0.1:8081`.
 - **No silent fallback.** Config validation refuses to start when the chain
@@ -253,7 +253,7 @@ migration, and the K8s / Helm deployment manifests.
   comment block in `deployment.yaml` documents the substitution; the real fix
   needs the release pipeline to emit a digest-stable image — **Phase 10**
   (DevOps Foundations). (SECURITY_AUDIT.md 2026-05-12 review, item 6.)
-- **CORS middleware** is intentionally not implemented (`planning/PHASE_8_DESIGN.md` §2)
+- **CORS middleware** is intentionally not implemented (by design)
   — only relevant once browser-based MCP clients hit a public deployment.
   **Phase 9.**
 

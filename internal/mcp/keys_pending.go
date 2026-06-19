@@ -49,8 +49,7 @@ var ErrPendingInvalidStatus = errors.New("invalid decision status")
 // PendingKeyRequest is one self-serve API-key request submitted via
 // POST /api/v1/keys/request and awaiting human triage. The customer-
 // supplied fields (Email / Company / IntendedUse) match the Phase 11
-// RD1 PII schema in docs/planning/PHASE_11_DESIGN.md § 14; everything else is
-// server-generated audit metadata.
+// RD1 PII schema; everything else is server-generated audit metadata.
 //
 // JSON field names are snake_case to match the existing KeyEntry shape
 // and the Privacy Policy's data-handling table; the on-disk store is

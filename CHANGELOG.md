@@ -71,10 +71,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tokens are never placed in error text), but closed as defense-in-depth.
 - **Bumped indirect `btcd` to `v0.24.2` (clears Dependabot HIGH `GHSA-27vh-h6mc-q6g8`).** Not a reachable risk: `govulncheck` reports 0 affected and nothing imports the `btcd` root module (`go-eth` uses the separate `btcec/v2`); the bump clears the graph-level alert. `CONTRIBUTING.md` §8 gained a Dependabot-vs-`govulncheck` triage note for vendored deps.
 
-### Documentation
-
-- **Claude API MCP-connector integration guide** (`docs/planning/CLAUDE_API_CONNECTOR_INTEGRATION.md`) and the **signup/identity requirements contract** (`docs/planning/SIGNUP_IDENTITY_REQUIREMENTS.md`): how an integrator connects through the Claude API `mcp_servers` connector with a FusionAuth JWT, cross-referencing the R-2…R-7 token contract. The authenticated-write path (writer JWT clears the role-gated `evm_send_raw_transaction`; anonymous rejected) was verified end-to-end against a live FusionAuth-backed deployment.
-
 ## [1.0.0-rc8] - 2026-06-17
 
 ### Changed
@@ -83,7 +79,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   handler now runs with `StreamableHTTPOptions{Stateless: true}`. The server no
   longer keeps a per-pod session map, so any replica can serve any request and
   no load-balancer session affinity is required — plain round-robin scales
-  throughput. See `docs/SESSION_AFFINITY.md` for the full rationale.
+  throughput.
 - **Write approval is now the client/agent's responsibility, not the server's.**
   The server-side MCP elicitation prompt before `evm_send_raw_transaction` was
   the only server→client request and the sole reason sessions had to be sticky;

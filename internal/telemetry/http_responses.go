@@ -3,7 +3,7 @@
 
 package telemetry
 
-// Phase 10 RD3/RD4 (docs/planning/PHASE_10_DESIGN.md § 14): HTTP response counter with a
+// Phase 10 RD3/RD4: HTTP response counter with a
 // `class` label so operators can alert on the SLI ratio at rule-evaluation
 // time without recomputing. The four classes intentionally collapse the full
 // status-code space into the categories operators actually page on:
@@ -44,7 +44,7 @@ const (
 // cannot categorize is more likely an internal bug than a routine response —
 // fail loud, surface it on the error SLI rather than silently bucketing it as
 // success. This matches the project preference for fail-fast over silent
-// defensive defaults (see ~/.claude/CLAUDE.md).
+// defensive defaults.
 func ClassifyStatus(status int) string {
 	switch {
 	case status >= 500 && status < 600:

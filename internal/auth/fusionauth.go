@@ -146,7 +146,7 @@ func (v *FusionAuthValidator) Validate(tokenString string) (*Claims, error) {
 
 	// The raw sub is never logged (privacy: it is email-reversible). It
 	// flows only into request-scope memory and into client_id as a keyed
-	// HMAC. See docs/PRIVACY_DISCUSSION.md § 2.1 D4/D9.
+	// HMAC, for privacy rationale.
 	return &Claims{
 		ClientID: hmacClientID(sub, v.config.ClientIDHMACKey),
 		Roles:    roles,

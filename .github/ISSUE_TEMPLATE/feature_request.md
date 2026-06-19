@@ -27,7 +27,7 @@ guidance, never user data it wasn't given.
 
 ## Is this already on the roadmap?
 
-- [ ] I checked `docs/IMPLEMENTATION_PLAN.md` and `docs/ROADMAP.md` (if present) and this isn't already planned
+- [ ] I checked the project roadmap (if present) and this isn't already planned
 - [ ] I checked open issues and Discussions for an existing request
 
 ## Alternatives considered

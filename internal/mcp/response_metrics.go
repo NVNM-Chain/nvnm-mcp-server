@@ -56,7 +56,7 @@ func (sr *statusRecorder) Flush() {
 // mcp_http_responses_total per HTTP request that reaches it, labeled with
 // the SLI class computed from the response status (see
 // telemetry.ClassifyStatus). The counter is the numerator-and-denominator
-// source for the Phase 10 error-rate SLI (docs/planning/PHASE_10_DESIGN.md § 14 RD3).
+// source for the Phase 10 error-rate SLI (RD3).
 //
 // Placement: outermost real-request layer, inside CORS so OPTIONS preflight
 // responses do not pollute the SLI denominator. CORS rejections do not reach

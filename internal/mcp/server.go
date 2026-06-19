@@ -188,7 +188,7 @@ func (s *Server) RunHTTP(
 
 	// Stateless: true means the SDK mints no per-session id and keeps no
 	// in-memory session map, so any replica can serve any request -- no
-	// load-balancer affinity is required (Option 0, docs/SESSION_AFFINITY.md).
+	// load-balancer affinity is required (Option 0).
 	// This is safe only because the server makes no server->client requests:
 	// the write-approval elicitation was removed (the lone such request), and
 	// nothing depends on delivering logging notifications.

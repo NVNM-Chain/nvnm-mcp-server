@@ -634,11 +634,11 @@ The following items from the "Longer-Term Hardening" tier have been triaged with
 
 | Item | Disposition | Notes |
 |---|---|---|
-| Human-in-the-loop approval for write ops | **Completed** | Implemented via MCP elicitation in `internal/mcp/approval.go`. Configurable per-client (`write_approval` in key store) and globally (`WRITE_APPROVAL_DEFAULT`). E2E tested in `server_e2e_test.go`. |
+| Human-in-the-loop approval for write ops | **No longer a server-side control** | Removed in the Option 0 stateless migration. The former MCP-elicitation approval (`internal/mcp/approval.go`) and its `WRITE_APPROVAL_DEFAULT` / per-key `write_approval` knobs no longer exist. Writes gate on RBAC role (`writer`/`admin`/`automation`) plus `ENABLE_WRITE_TOOLS`; obtaining human confirmation before submitting a signed transaction is the client/agent's responsibility (stated in the server's `initialize` instructions). The caller-side signature remains the security boundary. |
 | Reverse proxy requirements | **Done** | Operational guide with nginx example added to `docs/DESIGN.md` section 10. |
 | SBOM generation in CI | **Completed (`c357898`)** | `anchore/sbom-action` emits CycloneDX JSON artifact on every push to `main`. |
 | MCP-level rate limiting per client | **Completed (`568ae50`)** | Token-bucket per-client limiter via `MCP_RATE_LIMIT` (default 60 req/s) and `MCP_RATE_BURST` (default 10). Returns HTTP `429` when exceeded. Implementation in `internal/mcp/ratelimit.go`. |
-| Image signing with Cosign/Sigstore | **Completed (`c357898`)** | Cosign keyless signing of compiled binary on `main` push via Sigstore OIDC. Image-digest signing requires registry decision (still pending; see `docs/IMPLEMENTATION_PLAN.md` backlog). |
+| Image signing with Cosign/Sigstore | **Completed (`c357898`)** | Cosign keyless signing of compiled binary on `main` push via Sigstore OIDC. Image-digest signing requires registry decision (still pending; tracked in the project backlog). |
 | License scanning for dependency compliance | **Completed (`c357898`)** | `go-licenses` check on every push/PR with explicit allowed-licenses list. |
 | Per-tool authorization (RBAC) | **Completed (`568ae50`)** | Roles on API keys (`reader`, `writer`, `admin`, `automation`); FusionAuth maps via `roles` claim. All 16 tools gated; `ErrPermissionDenied` is client-safe. |
 | CORS middleware | **Backlog (Low)** | Low priority since auth is enforced; only relevant if browser-based MCP clients are used. |
@@ -653,7 +653,7 @@ The following items from the "Longer-Term Hardening" tier have been triaged with
 | Longer-Term | 8 | 7 | 0 | 1 |
 | **Total** | **18** | **17** | **0** | **1** |
 
-All findings rated High or Critical have been remediated. Of the original 8 Longer-Term items, 7 have shipped (5 since the original assessment in commits `c357898` and `568ae50`); only **CORS middleware** remains in the backlog and is rated Low priority. Remaining open items are tracked in `docs/IMPLEMENTATION_PLAN.md`.
+All findings rated High or Critical have been remediated. Of the original 8 Longer-Term items, 7 have shipped (5 since the original assessment in commits `c357898` and `568ae50`); only **CORS middleware** remains in the backlog and is rated Low priority. Remaining open items are tracked in the project backlog.
 
 ---
 
@@ -728,7 +728,7 @@ record what was fixed in the codebase.
 | 4 | API-key store written non-atomically | **Remediated** -- `SaveKeysFile` now writes to a sibling `.tmp-*` file (`0o600`, fsync'd) and renames over the target. Test asserts the previous file is preserved when the rename fails. |
 | 5 | Admin REST `:8081` lacked defense-in-depth | **Remediated** -- default bind moved to `127.0.0.1:8081` (BREAKING for deploys that exposed it cluster-wide). Admin auth now compares SHA-256 hashes (fixed length) so `subtle.ConstantTimeCompare`'s "fast on length mismatch" shortcut cannot probe the admin-key length. NetworkPolicy template includes an example for in-cluster admin access. |
 | 6 | K8s `Deployment` pulled `:latest` | **Documented** -- `deployment.yaml` carries an explicit TODO + comment block describing how to substitute `@sha256:<digest>` once the release pipeline emits a digest-stable image; the existing Dockerfile already digest-pins both base images. (Real fix requires a release-pipeline change outside this commit set.) |
-| 7 | CI license allowlist permitted GPL-3.0 / LGPL-3.0 | **Remediated** -- allowlist narrowed to MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/Unlicense/CC0-1.0/0BSD/Zlib/EPL-2.0/CDDL-1.0. Matches the proprietary-commercial policy in CLAUDE.md. CI is the safety net; if a transitive GPL-3 dep exists today it will surface on the next run. |
+| 7 | CI license allowlist permitted GPL-3.0 / LGPL-3.0 | **Remediated** -- allowlist narrowed to MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/Unlicense/CC0-1.0/0BSD/Zlib/EPL-2.0/CDDL-1.0. Matches the project's dependency-license policy. CI is the safety net; if a transitive GPL-3 dep exists today it will surface on the next run. |
 | 8 | ConfigMap shape encouraged secret-in-ConfigMap | **Remediated** -- new `deploy/k8s/secret.yaml.example` documents the Secret pattern; `deployment.yaml` wires both `configMapRef` (non-sensitive) and `secretRef` (credentials), plus a volume mount for `MCP_API_KEYS_FILE` from a separate Secret. `configmap.yaml` cleaned of credential-shaped fields and `INVENIAM_EVM_RPC_URL` removed. `.gitignore` now excludes `deploy/k8s/secret.yaml`. |
 | 9 | `OTLP_INSECURE` default was `true` | **Remediated** -- default flipped to `false` (BREAKING for sidecar/localhost-collector deploys that did not explicitly set the var). Comment on the new default explains the rationale and the opt-in path. |
 | 10 | Approval prompt opaque on method + signer | **Remediated** -- `DecodeTxSummary` now extracts the first 4 bytes of calldata as a `method_selector` field, recovers the signer address from the signature, and threads the chain environment ("testnet"/"mainnet") through `NewServer` so the prompt renders chain ID with a human label. `formatApprovalMessage` shows `Signer (recovered)`, `Method selector`, and a `wei (≈ X ETH)` value formatted with thousand separators. |
@@ -791,8 +791,8 @@ gate) remain on the Phase 8 roadmap as originally scoped.
 The license-allowlist tightening committed on 2026-05-12 (commit
 `6580ddc`) failed CI because `github.com/ethereum/go-ethereum` is
 classified GPL-3.0 by go-licenses and the consumed library packages
-ship under LGPL-3.0 (which the proprietary commercial license policy
-in CLAUDE.md hard-refuses or case-by-cases). The temporary fix at
+ship under LGPL-3.0 (which the project's dependency-license policy
+hard-refuses or case-by-cases). The temporary fix at
 `c06da61` restored the allowlist; this entry records the permanent
 remediation.
 
@@ -830,10 +830,9 @@ will surface via the existing integration tests against testnet.
 
 `vendor/` is now committed (≈32 MB). Build/test/CI use `-mod=vendor` so
 a compromised upstream module cannot affect a build that succeeded
-locally. To refresh: `go mod tidy && go mod vendor`. Rationale aligns
-with `CLAUDE.md`'s "Consider vendoring if supply-chain risk warrants
-it"; the trade-off (repo size) is small relative to the proprietary
-licensing exposure that vendoring closes off.
+locally. To refresh: `go mod tidy && go mod vendor`. Vendoring is
+warranted by supply-chain risk; the trade-off (repo size) is small
+relative to the licensing exposure that vendoring closes off.
 
 ### CI / docs follow-up
 
@@ -1140,7 +1139,7 @@ human confirmation before submitting a signed transaction is the client/agent's
 responsibility (stated in the server's `initialize` instructions). The
 caller-side signature remains the security boundary — the server was never the
 write security boundary and holds no key material. The tradeoff (enforced →
-advisory) is recorded in `docs/SESSION_AFFINITY.md` §3.
+advisory) was recorded as part of the Option 0 stateless migration.
 
 Migration is fail-loud, consistent with the `INVENIAM_* → NVNM_*` hard cut:
 startup aborts with `ErrLegacyWriteApproval` if `WRITE_APPROVAL_DEFAULT` is set,

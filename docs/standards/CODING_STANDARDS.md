@@ -68,7 +68,7 @@ func NewClientBad(rpcURL string) *Client {
 #### 3. Verification Before Coding
 
 - Check method names and signatures before writing code — do not guess
-- Consult `docs/DESIGN.md` and `docs/IMPLEMENTATION_PLAN.md`; do not assume interfaces
+- Consult `docs/DESIGN.md` and the project roadmap / open issues; do not assume interfaces
 - Read the ABI (`abi/anchoring.json`) before writing contract call code
 - Slow down; verify first
 
@@ -362,7 +362,7 @@ slog.Info("anchor stored",
 
 ## Security Guidelines
 
-See `.cursor/rules/security.mdc` for the full security rule set. Key points:
+The project's security guidelines are summarized below. Key points:
 
 - Never commit secrets, private keys, or RPC credentials
 - `detect-secrets` runs in pre-commit; fix findings before committing
@@ -442,7 +442,7 @@ Hooks include: `gofmt`, `goimports`, `go vet`, `golangci-lint`, `detect-secrets`
 **IMPORTANT:**
 - [ ] Incremental: working in small, testable steps?
 - [ ] Design Reviewed: read `docs/DESIGN.md` for the affected package?
-- [ ] Phase Alignment: change is within the current phase in `docs/IMPLEMENTATION_PLAN.md`?
+- [ ] Phase Alignment: change is within the scope of the project roadmap / open issues?
 
 ---
 

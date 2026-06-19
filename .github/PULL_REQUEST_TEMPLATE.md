@@ -13,7 +13,7 @@ A short description of the change and the behavior it affects.
 <!-- A PR should trace to a tracked decision. Link at least one. -->
 
 - Closes #
-- Or design reference: `docs/...` (PHASE_N_DESIGN.md, IMPLEMENTATION_PLAN.md §N, ADR, etc.)
+- Or design reference: a tracked issue, roadmap item, or design doc under `docs/`
 
 ## Type of change
 

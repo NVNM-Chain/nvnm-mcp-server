@@ -139,7 +139,7 @@ signatures without contacting FusionAuth on every request.
 Per request: `jwt.Parse` with `WithLeeway(ClockSkew)` enforces the
 standard validity claims; if those pass, the validator manually checks
 `iss` and `aud`, then extracts `sub` and the configured roles claim.
-Roles are extracted from the token and used for RBAC gating; no write-approval policy is derived from the `automation` role (server-side write approval was removed in Option 0 — see `docs/SESSION_AFFINITY.md`).
+Roles are extracted from the token and used for RBAC gating; no write-approval policy is derived from the `automation` role (server-side write approval was removed in the Option 0 stateless migration).
 
 | Claim                | Source            | Action                                           | Persists                                                                                                          |
 |----------------------|-------------------|--------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
@@ -158,8 +158,7 @@ removed, and the `sub` reaches logs and traces only as a keyed HMAC
 (`client_id`), which is stable for audit correlation but not reversible
 to a real-world identity without the server-held `MCP_CLIENT_ID_HMAC_KEY`.
 The key is mandatory under `AUTH_PROVIDER=fusionauth` — startup fails
-loud (`ErrMissingClientIDHMACKey`) if it is unset. See
-[`docs/PRIVACY_DISCUSSION.md`](PRIVACY_DISCUSSION.md) § 2.1 D4/D9.
+loud (`ErrMissingClientIDHMACKey`) if it is unset.
 
 ## 3. Request inputs forwarded to upstream
 
@@ -242,9 +241,8 @@ INFO `tool call` log line has the `client_id` field **absent**
 write traffic continues to emit `client_id`. The anonymous per-IP
 rate limiter logs `remote_addr` on 429 (and only on 429); successful
 anonymous reads are otherwise indistinguishable from authed reads in
-the log stream beyond the absent `client_id`. See the Phase 9.16
-design doc `docs/superpowers/specs/2026-05-21-keyless-read-auth-middleware-design.md`
-§6 for the full data-flow rationale.
+the log stream beyond the absent `client_id`. This follows from the
+keyless-read auth-middleware design (Phase 9.16).
 
 ## 7. Telemetry
 
@@ -369,6 +367,3 @@ For privacy-policy and regulatory framing (GDPR, CCPA, equivalents):
   hold the key" proposal.
 - [CHANGELOG.md](../CHANGELOG.md) — releases that change any of the
   surfaces above.
-- [docs/PRIVACY_DISCUSSION.md](PRIVACY_DISCUSSION.md) — working notes
-  for the privacy policy and operator privacy statement that consume
-  this reference.

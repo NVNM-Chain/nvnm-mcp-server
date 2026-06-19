@@ -104,8 +104,8 @@ type Config struct {
 	MCPRateBurst int     // MCP_RATE_BURST: burst capacity per client (default 10)
 
 	// Keyless reads (HTTP only). When true, read tools may be called
-	// without authentication; write tools keep the auth chain. See
-	// docs/superpowers/specs/2026-05-21-keyless-read-auth-middleware-design.md.
+	// without authentication; write tools keep the auth chain. See the
+	// keyless-read auth-middleware design (Phase 9.16).
 	KeylessReads bool // MCP_KEYLESS_READS: allow unauthenticated read tools (default false)
 
 	// Per-IP rate limit for anonymous reads. Must be tighter than the

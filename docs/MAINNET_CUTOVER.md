@@ -12,7 +12,6 @@ cluster first and then in production.
 
 Cross-references:
 
-- [`docs/planning/PHASE_9_DESIGN.md` § 3.11](planning/PHASE_9_DESIGN.md) — the spec this doc satisfies.
 - [`docs/RUNBOOK.md` § Env var migration](RUNBOOK.md#env-var-migration) — the
   Phase 8.9 hard cut that this cutover assumes is already in place.
 - [`docs/DESIGN.md` § Target Chain](DESIGN.md) — canonical testnet/mainnet
