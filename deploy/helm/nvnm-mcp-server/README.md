@@ -1,6 +1,6 @@
 # NVNM Chain MCP Server — Helm chart
 
-Deploys the [NVNM Chain MCP Server](https://github.com/NVNM-Chain/nvnm-mcp-server) on Kubernetes. Hand-curated; matches `Chart.yaml` version `0.2.5` (appVersion `1.0.0-rc7`).
+Deploys the [NVNM Chain MCP Server](https://github.com/NVNM-Chain/nvnm-mcp-server) on Kubernetes. Hand-curated; matches `Chart.yaml` version `0.2.6` (appVersion `1.0.0-rc9`).
 
 ## What this chart deploys
 

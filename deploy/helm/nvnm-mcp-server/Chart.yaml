@@ -2,13 +2,13 @@ apiVersion: v2
 name: nvnm-mcp-server
 description: Helm chart for the NVNM Chain MCP Server
 type: application
-# Chart version. Bumped to 0.2.5 alongside appVersion 1.0.0-rc7: the
+# Chart version. Bumped to 0.2.6 alongside appVersion 1.0.0-rc9: the
 # default image tag the chart pulls (appVersion) changes, which counts
 # as a rendered-output change. Bump independently of appVersion when
 # chart templates / values change in a way that affects rendered output.
-version: 0.2.5
+version: 0.2.6
 # App version (image tag the chart pulls by default). Tracks
 # internal/version/version.go (the canonical app version) and is
 # bumped on each release alongside it. Pulls a Cosign-signed manifest
 # from ghcr.io/nvnm-chain/nvnm-mcp-server.
-appVersion: "1.0.0-rc7"
+appVersion: "1.0.0-rc9"

@@ -31,8 +31,8 @@ name: Image
 #
 # Backfill (one-time, manual) -- copy an existing tag to Docker Hub:
 #   docker buildx imagetools create \
-#     -t docker.io/<org>/nvnm-mcp-server:1.0.0-rc7 \
-#     ghcr.io/nvnm-chain/nvnm-mcp-server:1.0.0-rc7
+#     -t docker.io/<org>/nvnm-mcp-server:1.0.0-rc9 \
+#     ghcr.io/nvnm-chain/nvnm-mcp-server:1.0.0-rc9
 #
 # Phase 9.7. Companion to the existing release.yml which signs binaries.
 
