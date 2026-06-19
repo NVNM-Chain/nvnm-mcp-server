@@ -67,3 +67,20 @@ graphify-out/
 # Per-developer Claude Code settings (the project-level .claude/settings.json
 # is committed; settings.local.json is personal config and stays out of git)
 .claude/settings.local.json
+
+# Internal-only docs & editor config — excluded from the public repo and
+# expunged from history during the pre-public sanitization (2026-06-19).
+# They may legitimately exist locally for development (e.g. CLAUDE.md for
+# agent context, .cursor/ for the IDE), but MUST NOT be committed — ignoring
+# them here prevents accidentally re-introducing the sanitized content.
+CLAUDE.md
+.cursor/
+.cursorrules
+marketing/
+docs/PRIVACY_DISCUSSION.md
+docs/IMPLEMENTATION_PLAN.md
+docs/SESSION_AFFINITY.md
+docs/planning/
+docs/superpowers/
+docs/ARCHIVE/
+docs/standards/CODE_REVIEW_AUDIT_2026_04_28.md
