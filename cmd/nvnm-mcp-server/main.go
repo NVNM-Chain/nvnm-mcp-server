@@ -404,8 +404,9 @@ func loadAPIKeys(
 		)
 		managedKeys = mks
 	case cfg.APIKey != "":
-		logger.Info("using single API key from MCP_API_KEY")
-		entry := mcpserver.NewKeyEntry("static-key", cfg.APIKey, nil)
+		logger.Info("using single API key from MCP_API_KEY",
+			slog.Any("roles", cfg.APIKeyRoles))
+		entry := mcpserver.NewKeyEntry("static-key", cfg.APIKey, cfg.APIKeyRoles)
 		managedKeys = mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry})
 	default:
 		if cfg.Transport == "http" {

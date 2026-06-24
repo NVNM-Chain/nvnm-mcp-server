@@ -12,16 +12,19 @@ import (
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
-// requireRole returns nil if the caller holds at least one of the given roles,
-// or if no role enforcement is active (no claims, or claims with an empty
-// Roles slice -- e.g. stdio transport, unauthenticated HTTP, API key without
-// assigned roles).
+// requireRole returns nil when the caller may proceed, or ErrPermissionDenied
+// otherwise. It distinguishes two principals that both present zero roles:
 //
-// When roles are present and none match, it returns ErrPermissionDenied so the
-// caller can surface a clear, safe error to the MCP client.
+//   - No identity at all (c == nil): stdio (local-trusted) transport, or an
+//     anonymous keyless-read request that the authentication allowlist
+//     (authpolicy.go) has already restricted to exempt read/prepare tools.
+//     Allowed -- the security decision was made upstream.
+//   - An authenticated identity holding none of the required roles, INCLUDING
+//     a key with zero roles assigned. Denied (default-deny): a roleless
+//     authenticated key authorizes nothing until a role is granted.
 func requireRole(ctx context.Context, roles ...string) error {
 	c := auth.ClaimsFromContext(ctx)
-	if c == nil || len(c.Roles) == 0 {
+	if c == nil {
 		return nil
 	}
 	if c.HasAnyRole(roles...) {

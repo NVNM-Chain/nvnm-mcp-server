@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 // Sentinel validation errors.
@@ -58,6 +60,10 @@ var (
 	ErrMissingClientIDHMACKey  = errors.New("MCP_CLIENT_ID_HMAC_KEY is required when AUTH_PROVIDER is \"fusionauth\"")
 	ErrInvalidFusionAuthURL    = errors.New("FUSIONAUTH_URL must start with http:// or https://")
 	ErrInvalidChainEnvironment = errors.New(`NVNM_CHAIN_ENVIRONMENT must be "testnet" or "mainnet" when set`)
+	ErrStaticKeyRolesRequired  = errors.New(
+		"MCP_API_KEY_ROLES is required when MCP_API_KEY is set (set it to a comma list of reader, writer, admin, automation)")
+	ErrInvalidRole = errors.New(
+		"MCP_API_KEY_ROLES contains an unknown role; valid roles are reader, writer, admin, automation")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -75,6 +81,7 @@ type Config struct {
 	Transport        string
 	HTTPAddr         string
 	APIKey           string
+	APIKeyRoles      []string
 	APIKeysFile      string
 	AdminAPIKey      string
 	AdminAPIAddr     string
@@ -272,6 +279,7 @@ func Load() (*Config, error) {
 		return nil, loadErr
 	}
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
+	cfg.APIKeyRoles = parseRoleList(os.Getenv("MCP_API_KEY_ROLES"))
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
 	// Default to loopback-only. The admin key is the master key (creates
@@ -448,6 +456,16 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateAuth() error {
+	if c.APIKey != "" {
+		if len(c.APIKeyRoles) == 0 {
+			return ErrStaticKeyRolesRequired
+		}
+		for _, r := range c.APIKeyRoles {
+			if !auth.IsValidRole(r) {
+				return fmt.Errorf("%w: got %q", ErrInvalidRole, r)
+			}
+		}
+	}
 	if c.AuthProvider != "apikey" && c.AuthProvider != "fusionauth" {
 		return fmt.Errorf("%w: got %q", ErrInvalidAuthProvider, c.AuthProvider)
 	}
@@ -675,6 +693,19 @@ func (c *Config) loadFeatureFlags() error {
 		*f.dst = v
 	}
 	return nil
+}
+
+// parseRoleList splits a comma-separated role list, trimming whitespace and
+// dropping empty entries. Returns nil for an empty/whitespace input so the
+// "no roles configured" case is a clean nil.
+func parseRoleList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func envOrDefault(key, fallback string) string {

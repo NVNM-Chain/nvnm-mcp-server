@@ -640,7 +640,7 @@ The following items from the "Longer-Term Hardening" tier have been triaged with
 | MCP-level rate limiting per client | **Completed (`568ae50`)** | Token-bucket per-client limiter via `MCP_RATE_LIMIT` (default 60 req/s) and `MCP_RATE_BURST` (default 10). Returns HTTP `429` when exceeded. Implementation in `internal/mcp/ratelimit.go`. |
 | Image signing with Cosign/Sigstore | **Completed (`c357898`)** | Cosign keyless signing of compiled binary on `main` push via Sigstore OIDC. Image-digest signing requires registry decision (still pending; tracked in the project backlog). |
 | License scanning for dependency compliance | **Completed (`c357898`)** | `go-licenses` check on every push/PR with explicit allowed-licenses list. |
-| Per-tool authorization (RBAC) | **Completed (`568ae50`)** | Roles on API keys (`reader`, `writer`, `admin`, `automation`); FusionAuth maps via `roles` claim. All 16 tools gated; `ErrPermissionDenied` is client-safe. |
+| Per-tool authorization (RBAC) | **Completed (`568ae50`); default-deny hardened (branch `feat/rbac-default-deny`)** | Roles on API keys (`reader`, `writer`, `admin`, `automation`); FusionAuth maps via `roles` claim. All 21 tools gated; `ErrPermissionDenied` is client-safe. Authorization is default-deny: an authenticated key authorizes only the tools its assigned roles permit; a key with no roles authorizes nothing. `MCP_API_KEY_ROLES` is required when `MCP_API_KEY` is set — the server refuses to boot without it. |
 | CORS middleware | **Backlog (Low)** | Low priority since auth is enforced; only relevant if browser-based MCP clients are used. |
 | Self-serve key request workflow | **Backlog (Medium)** | Allow clients to request an API key via an endpoint; a human or agent reviews and approves. Builds on the admin key management API. |
 
@@ -1146,3 +1146,22 @@ startup aborts with `ErrLegacyWriteApproval` if `WRITE_APPROVAL_DEFAULT` is set,
 or `ErrLegacyKeyWriteApproval` (naming the offending key IDs) if any key-store
 entry still carries `write_approval`. Operator steps:
 `docs/RUNBOOK.md#write-approval-removal`.
+
+## Update 2026-06-23: Default-deny RBAC hardening (feat/rbac-default-deny)
+
+The RBAC implementation completed in `568ae50` has been hardened to
+default-deny:
+
+- **Authorization is default-deny.** An authenticated key authorizes only the
+  tools its assigned roles permit. A key with no roles authorizes nothing — the
+  previous behavior (no-role key was unrestricted) is gone.
+- **`MCP_API_KEY_ROLES` is now required** when `MCP_API_KEY` is set. The server
+  refuses to boot without it (`ErrMissingAPIKeyRoles`). This closes the gap
+  where a single-key dev deployment could accidentally run without any role
+  assignment.
+- **No-identity callers are not affected.** stdio transport and anonymous
+  keyless reads gated by the upstream authentication allowlist are allowed by
+  that allowlist, not by RBAC; they are unaffected by this change.
+
+The "Per-tool authorization (RBAC)" row in the longer-term-hardening triage
+above has been updated to reflect these changes.

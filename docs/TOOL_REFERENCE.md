@@ -15,14 +15,18 @@ Complete schema reference for all 21 tools exposed by the NVNM Chain MCP Server.
 > with all write operations for audit purposes. See `README.md` for key
 > management commands and FusionAuth configuration.
 >
-> **Per-tool authorization (RBAC):** When roles are present on the API key or
-> in the JWT, tools are gated by role. Reads require `reader`, `writer`,
-> `admin`, or `automation`. Writes require `writer`, `admin`, or `automation`.
-> `anchor_prepare_grant_role` requires `admin`. Calls without sufficient role
-> return `permission denied`. Under keyless reads (`MCP_KEYLESS_READS=true`, the
-> Inveniam-hosted default) only `evm_send_raw_transaction` authenticates and
-> carries a per-client identifier; the `anchor_prepare_*` tools are auth-exempt
-> and anonymous reads carry no `client_id`.
+> **Per-tool authorization (RBAC) — default-deny:** Authorization is
+> default-deny: an authenticated key authorizes only the tools its assigned
+> roles permit; a key with no roles authorizes nothing. Reads require `reader`,
+> `writer`, `admin`, or `automation`. Writes require `writer`, `admin`, or
+> `automation`. `anchor_prepare_grant_role` requires `admin`. Calls without
+> sufficient role return `permission denied`. No-identity callers (stdio, or
+> anonymous keyless reads gated upstream by the authentication allowlist) are
+> allowed by the upstream authentication allowlist, not by RBAC. Under keyless
+> reads (`MCP_KEYLESS_READS=true`, the Inveniam-hosted default) only
+> `evm_send_raw_transaction` authenticates and carries a per-client identifier;
+> the `anchor_prepare_*` tools are auth-exempt and anonymous reads carry no
+> `client_id`.
 >
 > **Per-client rate limiting:** When configured (`MCP_RATE_LIMIT`,
 > `MCP_RATE_BURST`), requests beyond the per-client token budget receive

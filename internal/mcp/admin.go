@@ -14,22 +14,21 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 const (
 	adminMaxRequestBody = 1 * 1024 * 1024 // 1 MB
 )
 
-var validRoleValues = map[string]bool{
-	"reader":     true,
-	"writer":     true,
-	"admin":      true,
-	"automation": true,
-}
-
+// validateRoles reports whether every role in the slice is a recognized RBAC
+// role. Vacuously true for an empty slice; emptiness is enforced separately at
+// the handler layer. Delegates to auth.IsValidRole so the canonical role set
+// lives in exactly one place.
 func validateRoles(roles []string) bool {
 	for _, r := range roles {
-		if !validRoleValues[r] {
+		if !auth.IsValidRole(r) {
 			return false
 		}
 	}
@@ -122,6 +121,12 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Roles) == 0 {
+		a.writeError(w, http.StatusBadRequest,
+			"at least one role is required; a key with no roles authorizes nothing")
+		return
+	}
+
 	if !validateRoles(req.Roles) {
 		a.writeError(w, http.StatusBadRequest,
 			"roles must be one or more of: reader, writer, admin, automation")
@@ -184,10 +189,17 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Roles != nil && !validateRoles(*req.Roles) {
-		a.writeError(w, http.StatusBadRequest,
-			"roles must be one or more of: reader, writer, admin, automation")
-		return
+	if req.Roles != nil {
+		if len(*req.Roles) == 0 {
+			a.writeError(w, http.StatusBadRequest,
+				"roles cannot be cleared; use enabled:false to deactivate a key")
+			return
+		}
+		if !validateRoles(*req.Roles) {
+			a.writeError(w, http.StatusBadRequest,
+				"roles must be one or more of: reader, writer, admin, automation")
+			return
+		}
 	}
 
 	summary, err := a.keys.Update(clientID, KeyUpdate(req))

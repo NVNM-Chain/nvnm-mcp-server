@@ -29,3 +29,19 @@ func (c *Claims) HasAnyRole(roles ...string) bool {
 	}
 	return false
 }
+
+// validRoles is the set of RBAC roles recognized by IsValidRole, used by
+// config validation. (Key issuance in internal/mcp/admin.go currently keeps
+// its own equivalent set; unifying them on IsValidRole is future work.)
+var validRoles = map[string]struct{}{
+	"reader":     {},
+	"writer":     {},
+	"admin":      {},
+	"automation": {},
+}
+
+// IsValidRole reports whether role is one of the recognized RBAC roles.
+func IsValidRole(role string) bool {
+	_, ok := validRoles[role]
+	return ok
+}

@@ -1005,3 +1005,54 @@ func TestLoad_KeyRequestEnabledLoadsFields(t *testing.T) {
 		t.Errorf("KeyRequestMaxBodyBytes = %d, want 8192", cfg.KeyRequestMaxBodyBytes)
 	}
 }
+
+func TestValidateAuth_StaticKeyRoles(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			EVMRPCURL: "https://rpc.example", ChainID: 1, RequestTimeout: time.Second,
+			Transport: "http", AuthProvider: "apikey",
+		}
+	}
+	t.Run("MCP_API_KEY without roles fails loud", func(t *testing.T) {
+		c := base()
+		c.APIKey = "static-test-key" //pragma: allowlist secret
+		c.APIKeyRoles = nil          //pragma: allowlist secret
+		if err := c.validateAuth(); !errors.Is(err, ErrStaticKeyRolesRequired) {
+			t.Fatalf("want ErrStaticKeyRolesRequired, got %v", err)
+		}
+	})
+	t.Run("MCP_API_KEY with an unknown role fails loud", func(t *testing.T) {
+		c := base()
+		c.APIKey = "static-test-key" //pragma: allowlist secret
+		c.APIKeyRoles = []string{"writer", "superuser"}
+		if err := c.validateAuth(); !errors.Is(err, ErrInvalidRole) {
+			t.Fatalf("want ErrInvalidRole, got %v", err)
+		}
+	})
+	t.Run("MCP_API_KEY with valid roles passes", func(t *testing.T) {
+		c := base()
+		c.APIKey = "static-test-key" //pragma: allowlist secret
+		c.APIKeyRoles = []string{"reader", "writer"}
+		if err := c.validateAuth(); err != nil {
+			t.Fatalf("want nil, got %v", err)
+		}
+	})
+	t.Run("no static key: roles not required", func(t *testing.T) {
+		c := base()
+		c.APIKeysFile = "/some/keys.json"
+		if err := c.validateAuth(); err != nil {
+			t.Fatalf("want nil, got %v", err)
+		}
+	})
+}
+
+func TestParseRoleList(t *testing.T) {
+	got := parseRoleList(" reader , writer ,,")
+	want := []string{"reader", "writer"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("parseRoleList = %v, want %v", got, want)
+	}
+	if parseRoleList("") != nil {
+		t.Fatalf("empty string must yield nil")
+	}
+}

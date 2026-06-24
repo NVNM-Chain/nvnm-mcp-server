@@ -170,6 +170,14 @@ These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock 
 | `TestE2E_Auth_DisabledKey_ConnectionFails` | Disabled key rejected (while active keys exist) |
 | `TestE2E_Auth_NoKeysConfigured_NoAuthRequired` | No keys configured = auth bypassed |
 
+**RBAC / default-deny E2E** (`server_e2e_test.go`):
+
+| Test | What's verified |
+|------|-----------------|
+| `TestE2E_RBAC_ReaderCannotCallWriteTool` | Key with `reader` role is denied on a write tool (`evm_send_raw_transaction`) |
+| `TestE2E_RBAC_NoRolesDeniedAll` | Authenticated key with no roles is denied all tools (default-deny: no roles = no access) |
+| `TestE2E_RBAC_GrantRoleRequiresAdmin` | Key with `writer` role is denied `anchor_prepare_grant_role` (requires `admin`) |
+
 **Stateless handler E2E** (`server_e2e_test.go`):
 
 | Test | What's verified |

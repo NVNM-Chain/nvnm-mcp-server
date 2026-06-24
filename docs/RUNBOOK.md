@@ -363,7 +363,8 @@ No configuration beyond `NVNM_ALLOWED_ORIGINS` is required; the same production 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MCP_API_KEYS_FILE` | _(empty)_ | Path to JSON key store file (preferred). Contains multiple keys with client IDs. |
-| `MCP_API_KEY` | _(empty)_ | Single API key (dev/test fallback). No client identity tracking. |
+| `MCP_API_KEY` | _(empty)_ | Single API key (dev/test fallback). No client identity tracking. **Requires `MCP_API_KEY_ROLES`** (see below); server refuses to boot if this is set without it. |
+| `MCP_API_KEY_ROLES` | _(empty)_ | Comma-separated roles for `MCP_API_KEY`. Required when `MCP_API_KEY` is set. Valid roles: `reader`, `writer`, `admin`, `automation`. Authorization is default-deny: an authenticated key authorizes only the tools its assigned roles permit; a key with no roles authorizes nothing. |
 | `OTLP_INSECURE` | `true` | Use plaintext connection to OTLP endpoint. Set `false` for TLS. |
 
 When either key variable is set, all HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.

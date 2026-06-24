@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 	mcpkeys "github.com/NVNM-Chain/nvnm-mcp-server/internal/mcp"
 )
 
@@ -20,14 +21,13 @@ var (
 	errClientExists  = errors.New("client already exists")
 	errClientMissing = errors.New("client not found")
 	errInvalidRole   = errors.New("invalid role; must be one of: reader, writer, admin, automation")
+	// errNoRoles is returned by runCreate when the caller omits --roles.
+	// Default-deny makes a roleless key inert, so issuance must assign a role.
+	errNoRoles = errors.New(
+		"at least one role is required (--roles reader,writer,...); " +
+			"a key with no roles authorizes nothing",
+	)
 )
-
-var validRoles = map[string]bool{
-	"reader":     true,
-	"writer":     true,
-	"admin":      true,
-	"automation": true,
-}
 
 var errUsage = errors.New("see usage")
 
@@ -78,6 +78,9 @@ func runCreate(keysFile string, args []string) error {
 	roles, err := parseRoles(rolesStr)
 	if err != nil {
 		return err
+	}
+	if len(roles) == 0 {
+		return errNoRoles
 	}
 	return createKey(keysFile, args[0], roles)
 }
@@ -153,7 +156,7 @@ func parseRoles(rolesStr string) ([]string, error) {
 		if r == "" {
 			continue
 		}
-		if !validRoles[r] {
+		if !auth.IsValidRole(r) {
 			return nil, fmt.Errorf("%q: %w", r, errInvalidRole)
 		}
 		roles = append(roles, r)

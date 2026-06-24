@@ -77,3 +77,25 @@ func TestLoadAPIKeys_SingleKeyHappyPath(t *testing.T) {
 		t.Error("managed key store should be set even for single-key mode")
 	}
 }
+
+func TestLoadAPIKeys_StaticKeyCarriesRoles(t *testing.T) {
+	cfg := &config.Config{
+		Transport:    "http",
+		AuthProvider: "apikey",
+		APIKey:       "static-secret",
+		APIKeyRoles:  []string{"reader", "writer"},
+	}
+	logger := slog.New(slog.DiscardHandler)
+	_, managed, _, err := loadAPIKeys(cfg, logger)
+	if err != nil {
+		t.Fatalf("loadAPIKeys: %v", err)
+	}
+	summaries := managed.List()
+	if len(summaries) != 1 {
+		t.Fatalf("want 1 key, got %d", len(summaries))
+	}
+	got := summaries[0].Roles
+	if len(got) != 2 || got[0] != "reader" || got[1] != "writer" {
+		t.Fatalf("static key roles = %v, want [reader writer]", got)
+	}
+}

@@ -106,7 +106,7 @@ func TestAdmin_Auth_ValidToken(t *testing.T) {
 func TestAdmin_Create_Success(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
 
-	body := map[string]string{"client_id": "new-client"}
+	body := map[string]interface{}{"client_id": "new-client", "roles": []string{"reader"}}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
 	if resp.StatusCode != http.StatusCreated {
 		defer resp.Body.Close()
@@ -131,7 +131,7 @@ func TestAdmin_Create_Success(t *testing.T) {
 func TestAdmin_Create_Duplicate(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
 
-	body := map[string]string{"client_id": "dup-client"}
+	body := map[string]interface{}{"client_id": "dup-client", "roles": []string{"reader"}}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
@@ -297,7 +297,7 @@ func TestAdmin_Delete_NotFound(t *testing.T) {
 func TestAdmin_FullLifecycle(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	createBody := map[string]string{"client_id": "lifecycle-client"}
+	createBody := map[string]interface{}{"client_id": "lifecycle-client", "roles": []string{"reader"}}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, createBody)
 	if resp.StatusCode != http.StatusCreated {
 		defer resp.Body.Close()
@@ -358,7 +358,7 @@ func TestAdmin_FullLifecycle(t *testing.T) {
 func TestAdmin_HotReload_CreatedKeyImmediatelyUsable(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	createBody := map[string]string{"client_id": "hot-client"}
+	createBody := map[string]interface{}{"client_id": "hot-client", "roles": []string{"reader"}}
 	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, createBody)
 	if resp.StatusCode != http.StatusCreated {
 		resp.Body.Close()
@@ -487,5 +487,114 @@ func TestAdmin_Update_NothingProvided(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty update should return 400, got %d", resp.StatusCode)
+	}
+}
+
+// --- Role enforcement: issuance must assign >=1 role (Spec §4) ---
+
+func TestAdmin_Create_EmptyRoles_Rejected(t *testing.T) {
+	ts, _ := startAdminTestServer(t)
+
+	body := map[string]interface{}{
+		"client_id": "roleless-client",
+		"roles":     []string{},
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("empty roles should return 400, got %d; body: %s", resp.StatusCode, b)
+	}
+}
+
+func TestAdmin_Create_NoRolesField_Rejected(t *testing.T) {
+	ts, _ := startAdminTestServer(t)
+
+	// Omitting roles entirely (nil slice after decode) must also be rejected.
+	body := map[string]interface{}{
+		"client_id": "roleless-client2",
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("missing roles field should return 400, got %d; body: %s", resp.StatusCode, b)
+	}
+}
+
+func TestAdmin_Create_UnknownRole_Rejected(t *testing.T) {
+	ts, _ := startAdminTestServer(t)
+
+	body := map[string]interface{}{
+		"client_id": "bad-role-client",
+		"roles":     []string{"superuser"},
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unknown role should return 400, got %d; body: %s", resp.StatusCode, b)
+	}
+}
+
+func TestAdmin_Create_ValidRoles_Created(t *testing.T) {
+	ts, _ := startAdminTestServer(t)
+
+	body := map[string]interface{}{
+		"client_id": "reader-client",
+		"roles":     []string{"reader"},
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	if resp.StatusCode != http.StatusCreated {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("valid role should return 201, got %d; body: %s", resp.StatusCode, b)
+	}
+	var result KeyCreateResult
+	decodeJSON(t, resp, &result)
+	if len(result.Roles) != 1 || result.Roles[0] != "reader" {
+		t.Errorf("expected [reader] roles, got %v", result.Roles)
+	}
+}
+
+func TestAdmin_Update_ClearRoles_Rejected(t *testing.T) {
+	ts, mks := startAdminTestServer(t)
+
+	if _, err := mks.Create("role-client", []string{"reader"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// PATCH with roles:[] must be rejected — use enabled:false to deactivate.
+	updateBody := map[string]interface{}{
+		"roles": []string{},
+	}
+	resp := adminRequest(t, ts, "PATCH", "/admin/keys/role-client", testAdminKey, updateBody)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("clearing roles should return 400, got %d; body: %s", resp.StatusCode, b)
+	}
+}
+
+func TestAdmin_Update_ValidRoles_Accepted(t *testing.T) {
+	ts, mks := startAdminTestServer(t)
+
+	if _, err := mks.Create("role-client2", []string{"reader"}); err != nil {
+		t.Fatal(err)
+	}
+
+	updateBody := map[string]interface{}{
+		"roles": []string{"writer", "admin"},
+	}
+	resp := adminRequest(t, ts, "PATCH", "/admin/keys/role-client2", testAdminKey, updateBody)
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("valid role update should return 200, got %d; body: %s", resp.StatusCode, b)
+	}
+	var summary KeySummary
+	decodeJSON(t, resp, &summary)
+	if len(summary.Roles) != 2 {
+		t.Errorf("expected 2 roles after update, got %v", summary.Roles)
 	}
 }

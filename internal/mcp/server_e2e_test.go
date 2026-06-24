@@ -363,7 +363,7 @@ func TestE2E_StatelessHandler_ServesUnknownSession(t *testing.T) {
 }
 
 func TestE2E_Auth_ValidKey_ToolCallSucceeds(t *testing.T) {
-	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", nil)}
+	keys := []KeyEntry{NewKeyEntry("test-client", "valid-key-123", []string{"reader"})}
 	session, err := startAuthTestServer(t, authE2EConfig{keys: keys}, "valid-key-123")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -448,8 +448,10 @@ func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
 	}
 }
 
-func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
-	// API key with no roles should have no RBAC enforcement.
+func TestE2E_RBAC_NoRolesDeniedAll(t *testing.T) {
+	// Default-deny: an authenticated key with no roles authorizes nothing,
+	// even an auth-exempt read tool -- the key is authenticated, so RBAC
+	// applies (unlike a truly anonymous keyless-read request).
 	keys := []KeyEntry{NewKeyEntry("no-role-client", "no-role-key", nil)}
 	session, err := startAuthTestServer(t, authE2EConfig{
 		keys: keys,
@@ -458,7 +460,6 @@ func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 
-	// Both read and write tools should work without role enforcement
 	readResult, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "evm_get_chain_id",
 		Arguments: map[string]any{},
@@ -466,8 +467,8 @@ func TestE2E_RBAC_NoRolesNoEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool read: %v", err)
 	}
-	if readResult.IsError {
-		t.Fatalf("no-role key should pass read tools: %v", readResult.Content)
+	if !readResult.IsError {
+		t.Fatal("no-role key should be denied under default-deny")
 	}
 }
 
@@ -520,7 +521,7 @@ func TestE2E_Auth_NoKeysConfigured_NoAuthRequired(t *testing.T) {
 func TestE2E_Auth_ValidKey_SendTx_Succeeds(t *testing.T) {
 	signedTx := buildSignedTxHex(t)
 
-	keys := []KeyEntry{NewKeyEntry("write-client", "write-key-789", nil)}
+	keys := []KeyEntry{NewKeyEntry("write-client", "write-key-789", []string{"writer"})}
 
 	session, err := startAuthTestServer(t, authE2EConfig{
 		keys: keys,
