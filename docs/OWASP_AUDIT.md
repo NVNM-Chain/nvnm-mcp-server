@@ -39,7 +39,7 @@ boundary (operator, reverse proxy, consuming agent).
 | # | Category | Disposition | One-line |
 |---|---|---|---|
 | A01 | Broken Access Control | **PARTIAL** | MCP transport authenticated + RBAC-gated (under `MCP_KEYLESS_READS=true` the read surface is intentionally anonymous; only `evm_send_raw_transaction` is gated); health/metrics endpoints rely on network isolation; RBAC enforcement is conditional on roles being assigned. |
-| A02 | Cryptographic Failures | **PARTIAL** | API keys + admin key sha256-hashed at rest with constant-time compare; OTLP TLS default-on; MCP HTTP transport TLS is a reverse-proxy responsibility. |
+| A02 | Cryptographic Failures | **PARTIAL** | API keys stored as versioned hash digest at rest (v0 = plain SHA-256; v1 = HMAC-SHA256 under `KEY_HMAC_PEPPER`, opt-in) with constant-time compare; admin key sha256-hashed; OTLP TLS default-on; MCP HTTP transport TLS is a reverse-proxy responsibility. |
 | A03 | Injection | **COVERED** | No SQL/shell/template surface; calldata is typed ABI-encoded, never concatenated. Indirect prompt injection via on-chain data is documented as a consumer-side concern. |
 | A04 | Insecure Design | **COVERED** | Prepare-sign-submit keeps zero keys server-side; pre-mortem-driven design; honest wizard state names; writes gated by RBAC + `ENABLE_WRITE_TOOLS`; caller-side signature is the security boundary. |
 | A05 | Security Misconfiguration | **PARTIAL** | Secure defaults + fail-loud config validation; K8s/Helm hardened and aligned; K8s `:latest` image tag pinning deferred to the Phase 10 release pipeline. |
@@ -104,19 +104,28 @@ API keys and the admin key at rest; signed transactions and tool traffic in
 transit; OTLP telemetry; the signature-verification helper.
 
 ### Controls
-- **API keys hashed at rest.** `HashKey` in `internal/auth/keyhash.go`
-  (sha256 → hex). `KeyEntry` on disk holds `key_hash` + `key_prefix`, never the
-  raw token (Phase 8.6 — SECURITY_AUDIT.md update 2026-05-13). The keys file is
-  written `0o600` via atomic tmp+fsync+rename under an advisory `flock`.
+- **API keys stored as versioned hash digest at rest.** `HashKey` in
+  `internal/auth/keyhash.go` produces a `hash_version`-tagged digest: `v0` =
+  plain SHA-256 (legacy default when `KEY_HMAC_PEPPER` is unset); `v1` =
+  HMAC-SHA256 under a server-held pepper (`KEY_HMAC_PEPPER`, optional). The
+  pepper is a server-side secret that makes a key-store dump non-reversible
+  offline; it is opt-in and wired via env. `KeyEntry` on disk holds `key_hash` +
+  `key_prefix`, never the raw token (Phase 8.6 — SECURITY_AUDIT.md update
+  2026-05-13). The keys file is written `0o600` via atomic tmp+fsync+rename
+  under an advisory `flock`. Legacy `v0` keys continue to authenticate via
+  versioned candidate lookup; persisted re-hashing to `v1` lands with the
+  Postgres backend (Phase 3). See `.env.example` for the `KEY_HMAC_PEPPER` /
+  `KEY_HMAC_PEPPER_PREVIOUS` env-var reference.
 - **Constant-time validation.** `internal/auth/apikey_validator.go` compares
-  fixed-length sha256 digests under `subtle.ConstantTimeCompare`; the miss path
+  fixed-length hash digests under `subtle.ConstantTimeCompare`; the miss path
   burns `missPathPlaceholder` to flatten hit/miss timing (Phase 8.7).
 - **Admin key.** Hashed + constant-time compared in `adminAuth`
   (`internal/mcp/admin.go`).
 - **Key generation.** `GenerateKey` in `internal/mcp/keys.go` draws 32 bytes
   (256 bits) from `crypto/rand`. Because the secret is full-entropy random — not
-  a user-chosen password — a fast hash (sha256) is the correct primitive; a slow
-  KDF would add cost without adding meaningful brute-force resistance.
+  a user-chosen password — a fast hash (SHA-256 / HMAC-SHA256) is the correct
+  primitive; a slow KDF would add cost without adding meaningful brute-force
+  resistance.
 - **OTLP transport.** `OTLP_INSECURE` defaults to `false` — gRPC exporters
   connect with TLS unless an operator explicitly opts into the localhost-sidecar
   insecure mode (SECURITY_AUDIT.md 2026-05-12 review, item 9).
@@ -304,7 +313,7 @@ The authentication providers, credential strength, brute-force / credential-
 stuffing resistance, and session handling.
 
 ### Controls
-- **Two providers.** `apikey` — file-backed, sha256-hashed, hot-reloadable
+- **Two providers.** `apikey` — file-backed, versioned-hash-at-rest (v0 = plain SHA-256; v1 = HMAC-SHA256 under `KEY_HMAC_PEPPER`, opt-in), hot-reloadable
   bearer keys with an admin REST API. `fusionauth` — JWT validation against
   JWKS with issuer / audience / clock-skew checks (`internal/auth/fusionauth.go`).
   Selected via `AUTH_PROVIDER`.
@@ -316,7 +325,8 @@ stuffing resistance, and session handling.
   `AuthMiddleware` calls `Penalize` on every 401 (SECURITY_AUDIT.md 2026-05-12
   review, item 1).
 - **Timing-safe comparison.** Both the apikey and admin paths compare
-  fixed-length sha256 digests under `subtle.ConstantTimeCompare`, with a
+  fixed-length hash digests under `subtle.ConstantTimeCompare` (apikey: versioned
+  SHA-256 or HMAC-SHA256 per `hash_version`; admin: plain SHA-256), with a
   miss-path placeholder to flatten hit/miss timing.
 - **Correct failure semantics.** Bearer failures return `401` per RFC 7235 with
   a plain `WWW-Authenticate: Bearer` challenge (RFC 6750), and do not disclose

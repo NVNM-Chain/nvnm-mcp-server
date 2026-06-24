@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	mcpkeys "github.com/NVNM-Chain/nvnm-mcp-server/internal/mcp"
 )
 
@@ -179,12 +180,20 @@ func createKey(path, clientID string, roles []string) error {
 		}
 	}
 
+	active := os.Getenv("KEY_HMAC_PEPPER")
+	prev := os.Getenv("KEY_HMAC_PEPPER_PREVIOUS")
+	if prev != "" && active == "" {
+		return config.ErrPepperPreviousWithoutActive
+	}
+	fmt.Fprintf(os.Stderr, "key hashing: peppered=%t rotation_window=%t\n", active != "", prev != "")
+
 	key, err := mcpkeys.GenerateKey()
 	if err != nil {
 		return err
 	}
 
-	entries = append(entries, mcpkeys.NewKeyEntry(clientID, key, roles))
+	hasher := auth.NewKeyHasher([]byte(active), []byte(prev))
+	entries = append(entries, mcpkeys.NewKeyEntryWithHasher(clientID, key, roles, hasher))
 
 	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
 		return err

@@ -17,7 +17,7 @@ var ErrInvalidAPIKey = errors.New("invalid API key")
 // initial token argument; storage indexes by KeyHash.
 type KeyResult struct {
 	ID      string
-	KeyHash string // sha256 hex of the raw bearer token
+	KeyHash string // stored key digest: sha256 hex (v0) or HMAC-SHA256 hex under the active pepper (v1)
 	// Roles are the RBAC roles assigned to this key. Empty means no enforcement.
 	Roles []string
 }
@@ -34,18 +34,26 @@ type KeyLookup interface {
 
 // APIKeyValidator implements TokenValidator by looking up API keys
 // in a KeyLookup store and performing constant-time comparison of
-// the hash bytes.
+// the hash bytes against the hasher's candidate digests.
 type APIKeyValidator struct {
-	keys KeyLookup
+	keys   KeyLookup
+	hasher *KeyHasher
 }
 
-// NewAPIKeyValidator creates a TokenValidator backed by API key lookup.
-// Returns nil if keys is nil or empty (no authentication enforced).
+// NewAPIKeyValidator creates a version-0 (no-pepper) validator. Legacy
+// entry point; production should use NewAPIKeyValidatorWithHasher.
 func NewAPIKeyValidator(keys KeyLookup) *APIKeyValidator {
+	return NewAPIKeyValidatorWithHasher(keys, nil)
+}
+
+// NewAPIKeyValidatorWithHasher creates a TokenValidator that re-verifies
+// matched keys against hasher's candidate digests (nil = version-0 only).
+// Returns nil if keys is nil or empty (no authentication enforced).
+func NewAPIKeyValidatorWithHasher(keys KeyLookup, hasher *KeyHasher) *APIKeyValidator {
 	if keys == nil || keys.Empty() {
 		return nil
 	}
-	return &APIKeyValidator{keys: keys}
+	return &APIKeyValidator{keys: keys, hasher: hasher}
 }
 
 // missPathPlaceholder is the byte string the miss-path burns through
@@ -75,14 +83,22 @@ func (v *APIKeyValidator) Validate(token string) (*Claims, error) {
 		return nil, ErrInvalidAPIKey
 	}
 
-	// Defense-in-depth: the map probe in Lookup already established
-	// exact hash equality, but we re-verify under constant time to
-	// defend against any future hashmap-side-channel surprise. The
-	// inputs are fixed-length sha256 hex digests so the
-	// length-mismatch shortcut in ConstantTimeCompare cannot leak
-	// information about the digest.
-	expected := HashKey(token)
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(entry.KeyHash)) != 1 {
+	// Defense-in-depth: Lookup already established exact hash equality,
+	// but we re-derive the digest from the token under constant time to
+	// guard against any future hashmap side-channel. With versioned
+	// hashing the stored digest may be a peppered HMAC, so we compare
+	// against every candidate (v0 + active/previous pepper) and
+	// OR-accumulate without an early return to keep the path
+	// data-independent. All candidates are 64-char SHA-256 hex, matching
+	// entry.KeyHash's length, so ConstantTimeCompare's length shortcut
+	// cannot leak the digest. The equal-length (64-hex) invariant is
+	// guaranteed upstream by the hasher (both v0 and v1 emit 64-char hex);
+	// it is not re-enforced here.
+	var match int
+	for _, c := range v.hasher.Candidates(token) {
+		match |= subtle.ConstantTimeCompare([]byte(c.Hash), []byte(entry.KeyHash))
+	}
+	if match != 1 {
 		return nil, ErrInvalidAPIKey
 	}
 

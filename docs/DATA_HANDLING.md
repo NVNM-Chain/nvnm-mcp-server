@@ -84,7 +84,7 @@ MCP server binary), not from the caller's machine:
 
 A **Bearer token** in this context is a hex string the caller puts in
 the `Authorization: Bearer <token>` HTTP header. The server compares
-its SHA-256 hash against the on-disk store (or the single
+its versioned hash digest against the on-disk store (or the single
 `MCP_API_KEY` value) and accepts or rejects. The token is the
 caller's only credential — there is no password, no challenge, no
 multi-factor step.
@@ -93,17 +93,26 @@ The multi-key store (`MCP_API_KEYS_FILE`) is the primary path. Each
 entry contains:
 
 - internal `id` (stable);
-- **SHA-256 hash** of the key — raw key never written to disk (Phase
-  8.6); the `KeyEntry` struct can transiently hold a raw key in
-  process memory during creation or one-time migration, but
-  `NewKeyEntry` (the only production constructor) hashes immediately
-  and never retains the raw value;
+- **versioned hash digest** of the key — raw key never written to disk
+  (Phase 8.6); `hash_version 0` = plain SHA-256 (legacy, default when
+  `KEY_HMAC_PEPPER` is unset); `hash_version 1` = HMAC-SHA256 under a
+  server-held pepper (`KEY_HMAC_PEPPER`, optional). The pepper is a
+  server-side secret that makes a database-only key-store dump
+  non-reversible offline; it is opt-in and supplied via env. The
+  `KeyEntry` struct can transiently hold a raw key in process memory
+  during creation or one-time migration, but `NewKeyEntry` (the only
+  production constructor) hashes immediately and never retains the raw
+  value. Persisted re-hashing of legacy `v0` keys to `v1` lands with
+  the Postgres backend (Phase 3); until then, `v0` keys continue to
+  authenticate unchanged via versioned candidate lookup;
 - `key_prefix` (first 8 characters) for operator identification;
 - `enabled` flag, `created_at` (UTC), `roles` slice.
 
 Validation: constant-time hash comparison, with a placeholder compare
 on the miss path so unknown-key and known-key request timings match
-(Phase 8.7).
+(Phase 8.7). See `.env.example` and `docs/RUNBOOK.md §Authentication`
+for the canonical `KEY_HMAC_PEPPER` / `KEY_HMAC_PEPPER_PREVIOUS`
+env-var reference.
 
 Persistence semantics: atomic temp + fsync + rename via `SaveKeysFile`
 at [internal/mcp/keys.go:188](../internal/mcp/keys.go#L188); advisory
@@ -324,11 +333,13 @@ layer than this binary. The Helm chart in `deploy/helm/` shows the
 Kubernetes ingress pattern; operators running outside Kubernetes
 should terminate at nginx, Caddy, an AWS ALB, or equivalent.
 
-Data at rest is covered above: API-key entries are SHA-256-hashed
-(§2.1); logs and metrics are operator-routed to operator-chosen
-sinks (§6, §7); no other runtime data is written to local storage.
-The server itself does not encrypt files it writes — the only file
-it writes is the API-key store, whose entries are already hashed.
+Data at rest is covered above: API-key entries are stored as a
+versioned hash digest (§2.1 — `v0` = plain SHA-256, `v1` = HMAC-SHA256
+under `KEY_HMAC_PEPPER` when set); logs and metrics are
+operator-routed to operator-chosen sinks (§6, §7); no other runtime
+data is written to local storage. The server itself does not encrypt
+files it writes — the only file it writes is the API-key store, whose
+entries are already hashed.
 
 ## 12. Data subject perspective
 

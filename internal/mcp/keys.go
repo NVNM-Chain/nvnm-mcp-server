@@ -46,31 +46,45 @@ const keyPrefixLen = 8
 //     cleared and never written back. New code (in production, not
 //     tests-of-migration) must not set this field; use NewKeyEntry.
 type KeyEntry struct {
-	ID            string    `json:"id"`
-	Key           string    `json:"key,omitempty"`
-	KeyHash       string    `json:"key_hash,omitempty"`
-	KeyPrefix     string    `json:"key_prefix,omitempty"`
-	Enabled       bool      `json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	WriteApproval string    `json:"write_approval,omitempty"`
+	ID        string    `json:"id"`
+	Key       string    `json:"key,omitempty"`
+	KeyHash   string    `json:"key_hash,omitempty"`
+	KeyPrefix string    `json:"key_prefix,omitempty"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	// HashVersion identifies the digest scheme in KeyHash: 0 = legacy
+	// plain SHA-256; 1 = HMAC-SHA-256 under a configured pepper. Written
+	// at creation; omitempty keeps v0 entries byte-identical on disk.
+	HashVersion   int    `json:"hash_version,omitempty"`
+	WriteApproval string `json:"write_approval,omitempty"`
 	// Roles controls per-tool RBAC. Valid values: reader, writer, admin, automation.
 	// Empty (omitted) means no role enforcement for this key.
 	Roles []string `json:"roles,omitempty"`
 }
 
-// NewKeyEntry is the only constructor for KeyEntry in production code.
-// It computes the hash and prefix once and never retains the raw key.
+// NewKeyEntry is the legacy constructor: it produces a version-0
+// (plain SHA-256) entry, preserving pre-pepper behavior. Production
+// callers that have a hasher should use NewKeyEntryWithHasher.
 // Direct KeyEntry literals with Key: set are reserved for the migration
 // helper in this file and the migration regression tests;
 // TestNoRawKeyLiteralsOutsideMigrationTests grep-enforces that constraint.
 func NewKeyEntry(id, rawKey string, roles []string) KeyEntry {
+	return NewKeyEntryWithHasher(id, rawKey, roles, nil)
+}
+
+// NewKeyEntryWithHasher computes the key's digest and version via hasher
+// (a nil hasher means version-0 plain SHA-256). The hash and prefix are
+// computed once and the raw key is never retained.
+func NewKeyEntryWithHasher(id, rawKey string, roles []string, hasher *auth.KeyHasher) KeyEntry {
+	hash, version := hasher.HashForStore(rawKey)
 	return KeyEntry{
-		ID:        id,
-		KeyHash:   auth.HashKey(rawKey),
-		KeyPrefix: keyPrefixOf(rawKey),
-		Enabled:   true,
-		CreatedAt: time.Now().UTC(),
-		Roles:     roles,
+		ID:          id,
+		KeyHash:     hash,
+		HashVersion: version,
+		KeyPrefix:   keyPrefixOf(rawKey),
+		Enabled:     true,
+		CreatedAt:   time.Now().UTC(),
+		Roles:       roles,
 	}
 }
 
@@ -81,22 +95,31 @@ func keyPrefixOf(rawKey string) string {
 	return rawKey[:keyPrefixLen] + "..."
 }
 
-// KeyStore indexes enabled keys by their sha256-hex hash for O(1)
-// lookup. Lookup callers pass the raw token; the store hashes it
-// internally before probing the map. Raw key bytes are not retained.
+// KeyStore indexes enabled keys by their stored digest for O(1) lookup.
+// Lookup callers pass the raw token; the store derives the candidate
+// digests via its KeyHasher and probes the index with each. Raw key
+// bytes are not retained.
 type KeyStore struct {
 	byHash map[string]*KeyEntry
+	hasher *auth.KeyHasher
 }
 
-// NewKeyStore builds a KeyStore from a slice of key entries. Entries
-// with a raw Key field but no KeyHash (the pre-8.6 on-disk shape) are
-// normalized in place via migrateLegacyEntries before indexing; the
-// returned KeyStore is always hash-indexed.
-//
-// Only enabled entries are indexed.
+// NewKeyStore builds a version-0 (no-pepper) KeyStore. Legacy entry
+// point; production callers with a hasher should use NewKeyStoreWithHasher.
 func NewKeyStore(entries []KeyEntry) *KeyStore {
+	return NewKeyStoreWithHasher(entries, nil)
+}
+
+// NewKeyStoreWithHasher builds a KeyStore that derives lookup candidates
+// via hasher (nil = version-0 only). Pre-8.6 entries are normalized in
+// place via migrateLegacyEntries before indexing; only enabled entries
+// with a non-empty KeyHash are indexed.
+func NewKeyStoreWithHasher(entries []KeyEntry, hasher *auth.KeyHasher) *KeyStore {
 	_, _ = migrateLegacyEntries(entries) // normalizes in place
-	ks := &KeyStore{byHash: make(map[string]*KeyEntry, len(entries))}
+	ks := &KeyStore{
+		byHash: make(map[string]*KeyEntry, len(entries)),
+		hasher: hasher,
+	}
 	for i := range entries {
 		if entries[i].Enabled && entries[i].KeyHash != "" {
 			ks.byHash[entries[i].KeyHash] = &entries[i]
@@ -135,11 +158,18 @@ func migrateLegacyEntries(entries []KeyEntry) (changed bool, count int) {
 	return changed, count
 }
 
-// Lookup returns the KeyEntry whose KeyHash matches sha256(rawKey),
-// or nil if no enabled entry matches. The raw key is hashed once per
-// call; the input string is otherwise not retained.
+// Lookup returns the enabled KeyEntry whose stored KeyHash matches any
+// candidate digest for rawKey (version-0 plain SHA-256, plus the active
+// and previous pepper HMAC digests when configured), or nil if none
+// match. The first hit wins. The raw key is hashed per candidate; the
+// input string is otherwise not retained.
 func (ks *KeyStore) Lookup(rawKey string) *KeyEntry {
-	return ks.byHash[auth.HashKey(rawKey)]
+	for _, c := range ks.hasher.Candidates(rawKey) {
+		if e := ks.byHash[c.Hash]; e != nil {
+			return e
+		}
+	}
+	return nil
 }
 
 // Empty returns true if the store has no active keys.

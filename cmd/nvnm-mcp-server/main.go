@@ -385,11 +385,16 @@ func loadAPIKeys(
 	cfg *config.Config,
 	logger *slog.Logger,
 ) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+	hasher := auth.NewKeyHasher([]byte(cfg.KeyHMACPepper), []byte(cfg.KeyHMACPepperPrevious))
+	logger.Info("api-key hashing",
+		slog.Bool("peppered", cfg.KeyHMACPepper != ""),
+		slog.Bool("rotation_window", cfg.KeyHMACPepperPrevious != ""))
+
 	var managedKeys *mcpserver.ManagedKeyStore
 
 	switch {
 	case cfg.APIKeysFile != "":
-		mks, err := mcpserver.NewManagedKeyStore(cfg.APIKeysFile, logger)
+		mks, err := mcpserver.NewManagedKeyStoreWithHasher(cfg.APIKeysFile, hasher, logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("load API keys file: %w", err)
 		}
@@ -406,8 +411,8 @@ func loadAPIKeys(
 	case cfg.APIKey != "":
 		logger.Info("using single API key from MCP_API_KEY",
 			slog.Any("roles", cfg.APIKeyRoles))
-		entry := mcpserver.NewKeyEntry("static-key", cfg.APIKey, cfg.APIKeyRoles)
-		managedKeys = mcpserver.NewManagedKeyStoreFromEntries("", []mcpserver.KeyEntry{entry})
+		entry := mcpserver.NewKeyEntryWithHasher("static-key", cfg.APIKey, cfg.APIKeyRoles, hasher)
+		managedKeys = mcpserver.NewManagedKeyStoreFromEntriesWithHasher("", []mcpserver.KeyEntry{entry}, hasher)
 	default:
 		if cfg.Transport == "http" {
 			return nil, nil, nil, config.ErrHTTPAuthRequired
@@ -418,7 +423,7 @@ func loadAPIKeys(
 	}
 
 	adapter := mcpserver.NewKeyLookupAdapter(managedKeys)
-	validator := auth.NewAPIKeyValidator(adapter)
+	validator := auth.NewAPIKeyValidatorWithHasher(adapter, hasher)
 
 	var v auth.TokenValidator
 	if validator != nil {

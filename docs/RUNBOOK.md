@@ -291,7 +291,7 @@ This mints a credential with the `reader` role only (consistent with the project
   "email_delivered": true }
 ```
 
-`api_key` is included so reviewers using the API directly (no SMTP) can deliver the key to the customer manually. The key is also returned in plaintext in the response *exactly once*; the on-disk store keeps only the SHA-256 hash (Phase 8.6 invariant unchanged). If SMTP delivery fails the rest of the operation still commits and `email_delivered: false` is returned — the reviewer knows to deliver out-of-band.
+`api_key` is included so reviewers using the API directly (no SMTP) can deliver the key to the customer manually. The key is also returned in plaintext in the response *exactly once*; the on-disk store keeps only the versioned hash digest (`hash_version 0` = plain SHA-256, `hash_version 1` = HMAC-SHA256 under `KEY_HMAC_PEPPER` when set). If SMTP delivery fails the rest of the operation still commits and `email_delivered: false` is returned — the reviewer knows to deliver out-of-band.
 
 **Reject:**
 
@@ -365,6 +365,8 @@ No configuration beyond `NVNM_ALLOWED_ORIGINS` is required; the same production 
 | `MCP_API_KEYS_FILE` | _(empty)_ | Path to JSON key store file (preferred). Contains multiple keys with client IDs. |
 | `MCP_API_KEY` | _(empty)_ | Single API key (dev/test fallback). No client identity tracking. **Requires `MCP_API_KEY_ROLES`** (see below); server refuses to boot if this is set without it. |
 | `MCP_API_KEY_ROLES` | _(empty)_ | Comma-separated roles for `MCP_API_KEY`. Required when `MCP_API_KEY` is set. Valid roles: `reader`, `writer`, `admin`, `automation`. Authorization is default-deny: an authenticated key authorizes only the tools its assigned roles permit; a key with no roles authorizes nothing. |
+| `KEY_HMAC_PEPPER` | _(empty)_ | Optional. Server-side secret that makes a key-store dump non-reversible offline. When set, newly issued keys are stored as HMAC-SHA256 under this pepper (`hash_version 1`). Legacy `v0` keys (plain SHA-256) continue to authenticate via versioned candidate lookup. Wire from Vault / k8s Secret / AWS SM — never hardcode. See `.env.example` for details. |
+| `KEY_HMAC_PEPPER_PREVIOUS` | _(empty)_ | Optional. Previous pepper for one rotation window. Requires `KEY_HMAC_PEPPER`; boot fails with `ErrPepperPreviousWithoutActive` if set without it. |
 | `OTLP_INSECURE` | `true` | Use plaintext connection to OTLP endpoint. Set `false` for TLS. |
 
 When either key variable is set, all HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.
@@ -773,7 +775,7 @@ Set `OTEL_TRACE_SAMPLE_RATIO=0.1` to sample 10% of root traces, or use collector
 ## 9. Upgrading across the Phase 8.6 API-key migration
 
 The 2026-05-13 release migrates the API-keys file from raw bearer
-tokens to sha256-hashed-at-rest entries. The migration is automatic
+tokens to versioned-hash-at-rest entries (the migration writes `v0` plain-SHA-256 hashes; `v1` HMAC-SHA256 peppering is opt-in and applies only to newly issued keys when `KEY_HMAC_PEPPER` is set — existing `v0` keys are not auto-upgraded; see §Authentication). The migration is automatic
 on first restart of the new binary against an existing legacy file
 and is **irreversible** in the sense that the new binary no longer
 reads the raw `key` field as authoritative.

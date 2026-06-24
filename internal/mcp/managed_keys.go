@@ -11,6 +11,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 var (
@@ -49,10 +51,19 @@ type ManagedKeyStore struct {
 	store   *KeyStore
 	entries []KeyEntry
 	path    string
+	hasher  *auth.KeyHasher
 }
 
-// NewManagedKeyStore loads keys from path (creating an empty store if
-// the file does not exist) and returns a thread-safe managed store.
+// NewManagedKeyStore loads keys with no pepper (version-0). Legacy entry
+// point; production should use NewManagedKeyStoreWithHasher.
+func NewManagedKeyStore(path string, logger *slog.Logger) (*ManagedKeyStore, error) {
+	return NewManagedKeyStoreWithHasher(path, nil, logger)
+}
+
+// NewManagedKeyStoreWithHasher loads keys from path (creating an empty
+// store if the file does not exist) and returns a thread-safe managed
+// store whose lookups and new-key digests use hasher (nil = version-0).
+// The one-shot pre-8.6 migration is unchanged: see the package docs.
 //
 // If the on-disk file contains pre-8.6 entries (raw Key set,
 // KeyHash empty), the store performs a one-shot migration:
@@ -72,7 +83,7 @@ type ManagedKeyStore struct {
 // The logger argument may be nil; nil-safe via slog's discard
 // handler. Production callers should pass a real logger so the
 // migration INFO/WARN lines reach the operator.
-func NewManagedKeyStore(path string, logger *slog.Logger) (*ManagedKeyStore, error) {
+func NewManagedKeyStoreWithHasher(path string, hasher *auth.KeyHasher, logger *slog.Logger) (*ManagedKeyStore, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -120,9 +131,10 @@ func NewManagedKeyStore(path string, logger *slog.Logger) (*ManagedKeyStore, err
 	}
 
 	return &ManagedKeyStore{
-		store:   NewKeyStore(entries),
+		store:   NewKeyStoreWithHasher(entries, hasher),
 		entries: entries,
 		path:    path,
+		hasher:  hasher,
 	}, nil
 }
 
@@ -148,13 +160,20 @@ func writePreMigrationBackup(path string) error {
 	return nil
 }
 
-// NewManagedKeyStoreFromEntries builds a ManagedKeyStore from pre-loaded entries.
-// Useful when entries were loaded externally (e.g. by main.go) or for testing.
+// NewManagedKeyStoreFromEntries builds a version-0 store from pre-loaded
+// entries. Legacy/testing entry point.
 func NewManagedKeyStoreFromEntries(path string, entries []KeyEntry) *ManagedKeyStore {
+	return NewManagedKeyStoreFromEntriesWithHasher(path, entries, nil)
+}
+
+// NewManagedKeyStoreFromEntriesWithHasher builds a ManagedKeyStore from
+// pre-loaded entries whose lookups and new-key digests use hasher.
+func NewManagedKeyStoreFromEntriesWithHasher(path string, entries []KeyEntry, hasher *auth.KeyHasher) *ManagedKeyStore {
 	return &ManagedKeyStore{
-		store:   NewKeyStore(entries),
+		store:   NewKeyStoreWithHasher(entries, hasher),
 		entries: copyEntries(entries),
 		path:    path,
+		hasher:  hasher,
 	}
 }
 
@@ -201,8 +220,8 @@ func (m *ManagedKeyStore) Create(clientID string, roles []string) (*KeyCreateRes
 		return nil, err
 	}
 
-	entry := NewKeyEntry(clientID, rawKey, roles)
-	// NewKeyEntry captures KeyPrefix from the raw key once; the raw
+	entry := NewKeyEntryWithHasher(clientID, rawKey, roles, m.hasher)
+	// NewKeyEntryWithHasher captures KeyPrefix from the raw key once; the raw
 	// key is returned exactly once via KeyCreateResult.Key and never
 	// retained on the entry.
 
@@ -212,7 +231,7 @@ func (m *ManagedKeyStore) Create(clientID string, roles []string) (*KeyCreateRes
 	}
 
 	m.entries = updated
-	m.store = NewKeyStore(updated)
+	m.store = NewKeyStoreWithHasher(updated, m.hasher)
 
 	return &KeyCreateResult{
 		KeySummary: summarize(&entry),
@@ -250,7 +269,7 @@ func (m *ManagedKeyStore) Update(clientID string, upd KeyUpdate) (*KeySummary, e
 	}
 
 	m.entries = updated
-	m.store = NewKeyStore(updated)
+	m.store = NewKeyStoreWithHasher(updated, m.hasher)
 
 	s := summarize(&updated[idx])
 	return &s, nil
@@ -281,7 +300,7 @@ func (m *ManagedKeyStore) Delete(clientID string) error {
 	}
 
 	m.entries = updated
-	m.store = NewKeyStore(updated)
+	m.store = NewKeyStoreWithHasher(updated, m.hasher)
 	return nil
 }
 

@@ -9,7 +9,7 @@
 >
 > - Tool count: 16 -> **21** after Phase 8.8 (5 onboarding tools added).
 > - EVM client: `go-ethereum` v1.17.2 -> **`defiweb/go-eth`** (MIT-licensed, vendored). The GPL-3.0 exposure that drove the swap is closed.
-> - API keys: raw-at-rest -> **sha256-at-rest** with one-shot `.pre-migration` backup (Phase 8.6) + constant-time validation (Phase 8.7).
+> - API keys: raw-at-rest -> **versioned-hash-at-rest** (v0 = plain SHA-256, v1 = HMAC-SHA256 under `KEY_HMAC_PEPPER`) with one-shot `.pre-migration` backup (Phase 8.6) + constant-time validation (Phase 8.7) + opt-in HMAC pepper (Phase 2).
 > - Auth middleware chain: gained `originGuard` outermost (Phase 8.5) and IP-failure rate limiter (Phase 8.x).
 
 ---
@@ -667,6 +667,7 @@ The sections below record changes made after the original 2026-04-01 pre-red-tea
 - [2026-05-13 — go-ethereum replaced by defiweb/go-eth](#update-2026-05-13-go-ethereum-replaced-by-defiwebgo-eth)
 - [2026-05-13 — Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)](#update-2026-05-13-phase-86-and-87-hashed-at-rest-constant-time-auth)
 - [2026-05-14 — Phase 8.12 OWASP Top 10 self-audit](#update-2026-05-14-phase-812-owasp-top-10-self-audit)
+- [2026-06-24 — Phase 2 HMAC+pepper versioned key hashing](#update-2026-06-24-phase-2-hmacpepper-versioned-key-hashing)
 
 ---
 
@@ -1165,3 +1166,41 @@ default-deny:
 
 The "Per-tool authorization (RBAC)" row in the longer-term-hardening triage
 above has been updated to reflect these changes.
+
+## Update 2026-06-24: Phase 2 HMAC+pepper versioned key hashing
+
+API-key hashing now supports a versioned scheme. The purpose: a server-held
+pepper makes a database-only key-store dump non-reversible offline, providing
+defense-in-depth against a leaked key-store file. Peppering is **opt-in** and
+zero-config deployments are byte-for-byte unchanged.
+
+### What changed
+
+| Surface | Before | After |
+|---|---|---|
+| `HashKey` / `keyhash.go` | `sha256(rawKey)` → hex | `hash_version`-tagged digest: `v0` = plain SHA-256 (unchanged, default); `v1` = HMAC-SHA256 under `KEY_HMAC_PEPPER` when set. |
+| `KeyEntry.KeyHash` on disk | plain SHA-256 hex | same field; value is a plain 64-char hex digest in both versions — the scheme is identified by the adjacent `hash_version` field (omitted/0 = v0, 1 = v1), not by a prefix inside the hash string. |
+| `APIKeyValidator.Validate` | single candidate compare | versioned candidate lookup: computes v1 candidate when pepper active, v0 always; constant-time compare on the matching candidate. |
+| Boot validation | n/a | `ErrPepperPreviousWithoutActive`: server refuses to start if `KEY_HMAC_PEPPER_PREVIOUS` is set without `KEY_HMAC_PEPPER`. |
+| Boot logging | n/a | Logs `peppered: true` / `rotation_window: true` booleans at INFO on startup; never logs pepper material. |
+
+### Scope
+
+- **Opt-in.** `KEY_HMAC_PEPPER` unset → behavior is byte-for-byte v0. No
+  action needed for existing deployments.
+- **Legacy `v0` keys keep working.** On authentication, the validator tries
+  both the v1 candidate (if pepper active) and the v0 candidate. Legacy keys
+  continue to authenticate unchanged.
+- **No persisted re-hashing in this phase.** Persisted migration of `v0` keys
+  to `v1` on disk is deferred to the Postgres backend (Phase 3). Until then,
+  `v0` keys stay `v0` on disk; they authenticate correctly but do not gain the
+  pepper benefit until Phase 3 re-hashes them.
+- **Rotation window.** `KEY_HMAC_PEPPER_PREVIOUS` (optional) allows
+  validating keys hashed under the prior pepper while new keys are written
+  under `KEY_HMAC_PEPPER`. Setting it without `KEY_HMAC_PEPPER` fails boot.
+
+### Env-var reference
+
+Canonical rows are in `.env.example` and `docs/RUNBOOK.md §Authentication`.
+Short form: `KEY_HMAC_PEPPER` (optional, enables v1); `KEY_HMAC_PEPPER_PREVIOUS`
+(optional, rotation window, requires `KEY_HMAC_PEPPER`).

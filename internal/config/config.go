@@ -64,6 +64,13 @@ var (
 		"MCP_API_KEY_ROLES is required when MCP_API_KEY is set (set it to a comma list of reader, writer, admin, automation)")
 	ErrInvalidRole = errors.New(
 		"MCP_API_KEY_ROLES contains an unknown role; valid roles are reader, writer, admin, automation")
+	// ErrPepperPreviousWithoutActive is returned when KEY_HMAC_PEPPER_PREVIOUS
+	// is set but KEY_HMAC_PEPPER is empty. A previous pepper without an active
+	// pepper is a misconfiguration: key verification would never succeed against
+	// freshly-peppered keys. Unset the previous pepper or supply the active one.
+	ErrPepperPreviousWithoutActive = errors.New(
+		"KEY_HMAC_PEPPER_PREVIOUS is set without KEY_HMAC_PEPPER; " +
+			"set the active pepper or unset the previous one")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -82,9 +89,17 @@ type Config struct {
 	HTTPAddr         string
 	APIKey           string
 	APIKeyRoles      []string
-	APIKeysFile      string
-	AdminAPIKey      string
-	AdminAPIAddr     string
+	// KeyHMACPepper is the active HMAC pepper applied to stored key hashes
+	// (KEY_HMAC_PEPPER). Optional; when unset, key hashes are unpeppered.
+	KeyHMACPepper string
+	// KeyHMACPepperPrevious is the pepper used for key hashes that were
+	// written before the last pepper rotation (KEY_HMAC_PEPPER_PREVIOUS).
+	// Requires KeyHMACPepper to be set; a previous pepper without an active
+	// pepper is always a misconfiguration.
+	KeyHMACPepperPrevious string
+	APIKeysFile           string
+	AdminAPIKey           string
+	AdminAPIAddr          string
 
 	// Telemetry
 	OTELEndpoint     string
@@ -280,6 +295,8 @@ func Load() (*Config, error) {
 	}
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeyRoles = parseRoleList(os.Getenv("MCP_API_KEY_ROLES"))
+	cfg.KeyHMACPepper = os.Getenv("KEY_HMAC_PEPPER")
+	cfg.KeyHMACPepperPrevious = os.Getenv("KEY_HMAC_PEPPER_PREVIOUS")
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
 	// Default to loopback-only. The admin key is the master key (creates
@@ -456,6 +473,9 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateAuth() error {
+	if c.KeyHMACPepperPrevious != "" && c.KeyHMACPepper == "" {
+		return ErrPepperPreviousWithoutActive
+	}
 	if c.APIKey != "" {
 		if len(c.APIKeyRoles) == 0 {
 			return ErrStaticKeyRolesRequired

@@ -9,6 +9,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- API-key hashing now supports HMAC-SHA256 under a server-held pepper
+  (`KEY_HMAC_PEPPER`, optional; `KEY_HMAC_PEPPER_PREVIOUS` for one
+  rotation window). Keys carry a `hash_version`; legacy SHA-256 keys
+  (`v0`) continue to authenticate unchanged via versioned candidate
+  lookup. Setting `KEY_HMAC_PEPPER_PREVIOUS` without `KEY_HMAC_PEPPER`
+  fails boot.
+
 ## [1.0.0-rc10] - 2026-06-19
 
 Fixes from the rc9 dmome21 full smoke test (testnet, real MCP client),
