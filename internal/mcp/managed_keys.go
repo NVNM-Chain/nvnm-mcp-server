@@ -43,6 +43,9 @@ type KeyUpdate struct {
 	Roles   *[]string
 }
 
+// Compile-time assertion that the file backend satisfies KeyStoreBackend.
+var _ KeyStoreBackend = (*ManagedKeyStore)(nil)
+
 // ManagedKeyStore provides thread-safe CRUD over a KeyStore backed by a JSON file.
 // Reads (Lookup, Empty) acquire a read lock; mutations acquire a write lock,
 // persist to disk, and rebuild the in-memory index atomically.

@@ -39,7 +39,7 @@ func validateRoles(roles []string) bool {
 // authenticated by a separate admin bearer token.
 type AdminServer struct {
 	srv          *http.Server
-	keys         *ManagedKeyStore
+	keys         KeyStoreBackend
 	pendingStore *PendingKeyStore
 	email        EmailSender
 	logger       *slog.Logger
@@ -47,7 +47,7 @@ type AdminServer struct {
 
 // NewAdminServer creates an admin API server.
 // adminKey is the bearer token required for all requests.
-func NewAdminServer(addr, adminKey string, keys *ManagedKeyStore, logger *slog.Logger) *AdminServer {
+func NewAdminServer(addr, adminKey string, keys KeyStoreBackend, logger *slog.Logger) *AdminServer {
 	a := &AdminServer{
 		keys:   keys,
 		logger: logger,

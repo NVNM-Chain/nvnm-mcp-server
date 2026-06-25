@@ -14,6 +14,18 @@ jobs:
   check:
     name: Lint & Test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nvnm
+          POSTGRES_PASSWORD: nvnm
+          POSTGRES_DB: nvnm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nvnm"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v6
 
@@ -73,6 +85,8 @@ jobs:
         # -mod=vendor pins the dep tree to the committed vendor/
         # directory. Supply-chain hardening: a compromised upstream
         # cannot affect a build that succeeds locally.
+        env:
+          NVNM_TEST_PG_DSN: postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable
         run: go test -mod=vendor -race -coverprofile=coverage.out ./...
 
       - name: Build

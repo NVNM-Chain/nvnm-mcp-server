@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
@@ -336,12 +337,12 @@ func buildOriginAllowlist(cfg *config.Config) *mcpserver.OriginAllowlist {
 }
 
 // loadAuth creates the appropriate TokenValidator based on AUTH_PROVIDER config.
-// Returns the validator, the managed key store (only for apikey provider, nil otherwise),
+// Returns the validator, the key store backend (only for apikey provider, nil otherwise),
 // a cleanup function, and any error.
 func loadAuth(
 	cfg *config.Config,
 	logger *slog.Logger,
-) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+) (auth.TokenValidator, mcpserver.KeyStoreBackend, func(), error) {
 	switch cfg.AuthProvider {
 	case "fusionauth":
 		return loadFusionAuth(cfg, logger)
@@ -353,7 +354,7 @@ func loadAuth(
 func loadFusionAuth(
 	cfg *config.Config,
 	logger *slog.Logger,
-) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+) (auth.TokenValidator, mcpserver.KeyStoreBackend, func(), error) {
 	validator, err := auth.NewFusionAuthValidator(&auth.FusionAuthConfig{
 		BaseURL:         cfg.FusionAuthURL,
 		ApplicationID:   cfg.FusionAuthAppID,
@@ -384,11 +385,43 @@ func loadFusionAuth(
 func loadAPIKeys(
 	cfg *config.Config,
 	logger *slog.Logger,
-) (auth.TokenValidator, *mcpserver.ManagedKeyStore, func(), error) {
+) (auth.TokenValidator, mcpserver.KeyStoreBackend, func(), error) {
 	hasher := auth.NewKeyHasher([]byte(cfg.KeyHMACPepper), []byte(cfg.KeyHMACPepperPrevious))
 	logger.Info("api-key hashing",
 		slog.Bool("peppered", cfg.KeyHMACPepper != ""),
 		slog.Bool("rotation_window", cfg.KeyHMACPepperPrevious != ""))
+
+	if cfg.KeyStoreBackend == "postgres" {
+		pool, err := pgxpool.New(context.Background(), cfg.KeyStoreDSN)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("connect postgres key store: %w", err)
+		}
+		if err := mcpserver.RunMigrations(context.Background(), pool, logger); err != nil {
+			pool.Close()
+			return nil, nil, nil, fmt.Errorf("migrate postgres key store: %w", err)
+		}
+		if cfg.KeyHMACPepper == "" {
+			pool.Close()
+			return nil, nil, nil, config.ErrPepperRequired
+		}
+		pgStore := mcpserver.NewPostgresKeyStore(pool, hasher)
+		if pgStore.Empty() && cfg.Transport == "http" {
+			pool.Close()
+			return nil, nil, nil, fmt.Errorf("%w: postgres key store has no enabled keys",
+				config.ErrHTTPAuthRequired)
+		}
+		logger.Info("api-key store backend: postgres",
+			slog.Int("total", pgStore.TotalCount()),
+			slog.Int("enabled", pgStore.ActiveCount()))
+		adapter := mcpserver.NewKeyLookupAdapter(pgStore)
+		validator := auth.NewAPIKeyValidatorWithHasher(adapter, hasher)
+		cleanup := func() { pool.Close() }
+		var v auth.TokenValidator
+		if validator != nil {
+			v = validator
+		}
+		return v, pgStore, cleanup, nil
+	}
 
 	var managedKeys *mcpserver.ManagedKeyStore
 
@@ -435,7 +468,7 @@ func loadAPIKeys(
 
 func startAdminServer(
 	cfg *config.Config,
-	keys *mcpserver.ManagedKeyStore,
+	keys mcpserver.KeyStoreBackend,
 	pendingStore *mcpserver.PendingKeyStore,
 	email mcpserver.EmailSender,
 	logger *slog.Logger,

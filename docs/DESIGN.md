@@ -248,7 +248,7 @@ Responsibilities:
 - HTTP authentication middleware (`auth.go`) -- delegates to `internal/auth.TokenValidator` (API key or FusionAuth JWT)
 - Per-client token-bucket rate limiting (`ratelimit.go`) -- returns HTTP `429` when exceeded
 - Per-tool role-based authorization (`rbac.go`) -- gates each handler on `reader` / `writer` / `admin` / `automation` roles
-- API key store (`keys.go`, `managed_keys.go`) -- file-backed JSON store with hot-reload semantics
+- API key store (`keys.go`, `managed_keys.go`, `keystore_backend.go`, `postgres_store.go`, `migrate.go`) -- pluggable backend: file-backed JSON store (default, `KEY_STORE_BACKEND=file`) or Postgres `api_keys` table (`KEY_STORE_BACKEND=postgres`, Phase 3)
 - Admin REST API (`admin.go`) -- runtime key CRUD on a separate port (`:8081`), guarded by `ADMIN_API_KEY`
 - Onboarding-tool runtime info (`runtime.go`) -- bundles operator-config values (`ChainEnvironment`, anchor address, default URLs) passed once at server construction so handlers do not reach into `*config.Config` directly
 

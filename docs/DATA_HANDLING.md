@@ -120,6 +120,20 @@ at [internal/mcp/keys.go:188](../internal/mcp/keys.go#L188); advisory
 startup with a one-time backup written to
 `$MCP_API_KEYS_FILE.pre-migration` that is never overwritten.
 
+**Postgres backend (Phase 3, opt-in).** When `KEY_STORE_BACKEND=postgres`
+(see `.env.example`, Postgres key-store backend block), API-key entries
+are stored in an operator-provisioned Postgres database instead of the
+JSON file above. Keys at rest live in the `api_keys` table as a `BYTEA`
+versioned digest — the same `hash_version` scheme (`v0` = plain SHA-256,
+`v1` = HMAC-SHA256 under `KEY_HMAC_PEPPER`). `KEY_HMAC_PEPPER` is **required** when `KEY_STORE_BACKEND=postgres`
+**and** `AUTH_PROVIDER=apikey` (boot fails with `ErrPepperRequired`
+without it). FusionAuth deployments are exempt — they do not use the
+key store. Legacy `v0` entries are lazily rehashed to `v1` on first
+authenticated use and persisted atomically. The `api_keys` table includes
+an `expires_at` column; expiry enforcement is not implemented until Phase
+4 — keys do not expire today. `KEY_STORE_BACKEND=file` (the default) is
+unchanged.
+
 The admin REST API (`/admin/keys`, `GET`/`POST`/`PATCH`/`DELETE`) is
 gated by `ADMIN_API_KEY` and returns redacted `KeySummary` objects (no
 key material) — except on `POST`, which returns the newly minted raw
@@ -288,16 +302,17 @@ span.
 
 ## 8. Persistence summary
 
-| Item                                | Storage                            | Lifetime                        |
-|-------------------------------------|------------------------------------|---------------------------------|
-| API-key hash + metadata             | `$MCP_API_KEYS_FILE` (JSON)        | Until deleted                   |
-| One-time legacy migration backup    | `$MCP_API_KEYS_FILE.pre-migration` | Indefinite, never overwritten   |
-| Authenticated claims                | Process memory                     | Single request                  |
-| Request correlation UUID            | Process memory                     | Single request                  |
-| Failed-auth IP buckets              | Process memory                     | 15-min inactivity TTL           |
-| JWKS public keys                    | Process memory (`keyfunc` cache)   | Process lifetime                |
-| Logs                                | stderr (operator-routed)           | Operator-defined                |
-| Metrics / traces                    | OTLP / Prometheus sink             | Sink-defined                    |
+| Item                                | Storage                                                                | Lifetime                        |
+|-------------------------------------|------------------------------------------------------------------------|---------------------------------|
+| API-key hash + metadata (file backend, default) | `$MCP_API_KEYS_FILE` (JSON)                            | Until deleted                   |
+| API-key hash + metadata (Postgres backend, opt-in) | `api_keys` table, `BYTEA` versioned digest — see §2.1 | Until deleted                   |
+| One-time legacy migration backup    | `$MCP_API_KEYS_FILE.pre-migration`                                     | Indefinite, never overwritten   |
+| Authenticated claims                | Process memory                                                         | Single request                  |
+| Request correlation UUID            | Process memory                                                         | Single request                  |
+| Failed-auth IP buckets              | Process memory                                                         | 15-min inactivity TTL           |
+| JWKS public keys                    | Process memory (`keyfunc` cache)                                       | Process lifetime                |
+| Logs                                | stderr (operator-routed)                                               | Operator-defined                |
+| Metrics / traces                    | OTLP / Prometheus sink                                                 | Sink-defined                    |
 
 No other runtime writes to local storage.
 

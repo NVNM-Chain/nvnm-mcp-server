@@ -668,6 +668,7 @@ The sections below record changes made after the original 2026-04-01 pre-red-tea
 - [2026-05-13 — Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)](#update-2026-05-13-phase-86-and-87-hashed-at-rest-constant-time-auth)
 - [2026-05-14 — Phase 8.12 OWASP Top 10 self-audit](#update-2026-05-14-phase-812-owasp-top-10-self-audit)
 - [2026-06-24 — Phase 2 HMAC+pepper versioned key hashing](#update-2026-06-24-phase-2-hmacpepper-versioned-key-hashing)
+- [Phase 3 — Postgres key-store backend _(anchor at merge)_](#update-phase-3--postgres-key-store-backend-anchor-commit-and-date-to-be-stamped-at-merge)
 
 ---
 
@@ -1169,6 +1170,8 @@ above has been updated to reflect these changes.
 
 ## Update 2026-06-24: Phase 2 HMAC+pepper versioned key hashing
 
+*Reflects code as of `60f42a0` (squash merge of PR #51, `feat/key-store-phase2-hmac-pepper`) — the commit that introduced the versioned hasher, pepper config, and the validator/CLI changes described below. Run `git log 60f42a0..HEAD -- internal/auth internal/mcp internal/config cmd` to check for drift.*
+
 API-key hashing now supports a versioned scheme. The purpose: a server-held
 pepper makes a database-only key-store dump non-reversible offline, providing
 defense-in-depth against a leaked key-store file. Peppering is **opt-in** and
@@ -1204,3 +1207,59 @@ zero-config deployments are byte-for-byte unchanged.
 Canonical rows are in `.env.example` and `docs/RUNBOOK.md §Authentication`.
 Short form: `KEY_HMAC_PEPPER` (optional, enables v1); `KEY_HMAC_PEPPER_PREVIOUS`
 (optional, rotation window, requires `KEY_HMAC_PEPPER`).
+
+---
+
+## Update (Phase 3 — Postgres key-store backend; anchor commit and date to be stamped at merge)
+
+> **Currency anchor.** This section reflects the `feat/key-store-phase3-postgres`
+> branch. The commit hash and merge date are to be filled in at merge time —
+> run `git log <merge-commit>..HEAD -- internal/auth internal/mcp internal/config cmd`
+> to check for drift after that point.
+
+Phase 3 introduces an optional Postgres key-store backend behind a `KEY_STORE_BACKEND`
+environment variable (default `file`, unchanged). The purpose: shared, authoritative
+key storage for multi-replica deployments where the file-backed JSON store cannot be
+kept in sync across pods.
+
+### What changed
+
+| Surface | Before (Phase 2) | After (Phase 3) |
+|---|---|---|
+| Key-store backend selector | n/a — always file-backed | `KEY_STORE_BACKEND=file` (default, unchanged) or `postgres` |
+| Persistent storage | `$MCP_API_KEYS_FILE` JSON on operator filesystem | `api_keys` table in operator-supplied Postgres (when `KEY_STORE_BACKEND=postgres`) |
+| At-rest representation | `KeyEntry` JSON: `key_hash` hex + `hash_version` | Same scheme, stored as `BYTEA` versioned digest in `api_keys` table |
+| Schema migrations | n/a | goose migrations run automatically at boot under `pg_advisory_lock` — safe across concurrent replicas |
+| Pepper requirement | `KEY_HMAC_PEPPER` optional (boot passes without it) | When `KEY_STORE_BACKEND=postgres` and `AUTH_PROVIDER=apikey`, `KEY_HMAC_PEPPER` is **required** — boot fails with `ErrPepperRequired` if unset. This closes the risk of running a peppered store without a pepper (e.g. after a misconfigured secret injection). |
+| Lazy v0→v1 rehash | Deferred from Phase 2: legacy keys stay `v0` on disk | On first authenticated use of a `v0` key, the Postgres backend rehashes it to `v1` under `KEY_HMAC_PEPPER` and persists the updated digest — no operator action needed. |
+
+### Security properties
+
+**`ErrPepperRequired` gate.** The hard boot-fail closes the "peppered store running
+unpeppered" gap: a misconfigured replica that drops `KEY_HMAC_PEPPER` from its
+environment cannot start, so it cannot silently fall back to weaker v0 hashing on a
+store where all other replicas use v1.
+
+**Migrations under advisory lock.** `pg_advisory_lock` serializes boot-time migration
+runs. Concurrent replica starts cannot double-apply a migration or leave the schema in
+a partial state.
+
+**Persisted lazy rehash.** v0 keys gain the pepper benefit on first use without
+requiring a bulk migration or a re-issuance campaign. The rehash is atomic (single
+`UPDATE` on the `api_keys` row) and fails safely — a rehash error is logged but does
+not fail authentication; the key continues to work.
+
+**DSN and pepper never logged.** `KEY_STORE_DSN` (which may carry a Postgres password)
+and `KEY_HMAC_PEPPER` are consumed at startup and never written to any log line, span,
+or metric label.
+
+**`expires_at` schema-only.** The `api_keys` table includes an `expires_at` column.
+Expiry enforcement is not implemented in Phase 3 — keys do not expire regardless of
+that value. Enforcement is planned for Phase 4. Operators must not rely on `expires_at`
+for access revocation; use the `enabled` flag or delete the key entry instead.
+
+### Env-var reference for this phase
+
+Canonical definitions and inline notes for `KEY_STORE_BACKEND` and `KEY_STORE_DSN`
+live in `.env.example` (Postgres key-store backend block). Operational steps live in
+`docs/RUNBOOK.md § Postgres key-store backend`.

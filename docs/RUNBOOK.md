@@ -381,6 +381,26 @@ make key-disable NAME=my-agent                       # Disable a key
 make key-enable NAME=my-agent                        # Re-enable a key
 ```
 
+### Postgres key-store backend
+
+The Postgres key-store backend lets multiple server replicas share a single authoritative key store, eliminating the file-sync coordination that the default file backend requires in horizontally scaled deployments. The operator is responsible for provisioning the Postgres instance and supplying its Data Source Name (DSN); the server owns only the `api_keys` table within that database.
+
+**When to use it.** Use the file backend (the default) for single-process deployments, local development, and any deployment where the key store is operator-managed and mounted as a file. Use the Postgres backend when you need write-once / read-everywhere semantics across multiple replicas — for example, when admin key CRUD from one pod must take effect immediately on all other pods without a file-sync mechanism.
+
+**Environment variables.** The canonical definitions and inline notes for `KEY_STORE_BACKEND` and `KEY_STORE_DSN` live in `.env.example` (the Postgres key-store backend block). In summary:
+
+- `KEY_STORE_BACKEND=postgres` — opt-in; `file` is the default and is unchanged.
+- `KEY_STORE_DSN=<postgres connection string>` — required when `KEY_STORE_BACKEND=postgres`. The DSN may carry a password; treat it as a secret (Kubernetes Secret, AWS Secrets Manager, Vault). It is **never logged**.
+- `KEY_HMAC_PEPPER` — **required** when `KEY_STORE_BACKEND=postgres` and `AUTH_PROVIDER=apikey`. Boot fails with `ErrPepperRequired` if unset. The pepper is never logged.
+
+**Migrations.** Schema migrations (goose) run automatically at boot under a `pg_advisory_lock` (see `migrate.go` / `RunMigrations`). The lock makes concurrent boot-time migration safe: if two replicas start simultaneously, one runs the migration and the other waits, then finds the schema already current. No manual migration step is needed. Migrations are append-only and backward-compatible within a Phase.
+
+**Key hashing and lazy rehash.** The Postgres backend stores keys as `BYTEA` versioned digests in the `api_keys` table, using the same `hash_version` scheme as the file backend (`v0` = plain SHA-256, `v1` = HMAC-SHA256 under `KEY_HMAC_PEPPER`). On first authenticated use, a legacy `v0` key is transparently rehashed to `v1` and the updated digest is persisted to the database — this is the persisted lazy rehash deferred from Phase 2. Existing callers notice no change; the raw Bearer token they present is unchanged.
+
+**Schema note.** The `api_keys` table includes an `expires_at` column, but expiry enforcement is not implemented yet — keys do not expire regardless of that value. Expiry enforcement is planned for Phase 4.
+
+**File backend is unchanged.** Setting `KEY_STORE_BACKEND=file` (or leaving it unset) uses `MCP_API_KEYS_FILE` exactly as before. No existing deployment is affected by Phase 3.
+
 ### Admin Key Management API
 
 | Variable | Default | Purpose |

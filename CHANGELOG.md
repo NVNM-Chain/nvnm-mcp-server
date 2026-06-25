@@ -16,6 +16,25 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`v0`) continue to authenticate unchanged via versioned candidate
   lookup. Setting `KEY_HMAC_PEPPER_PREVIOUS` without `KEY_HMAC_PEPPER`
   fails boot.
+- **Postgres key-store backend** (`KEY_STORE_BACKEND=postgres`). An
+  optional Postgres-backed key store for multi-replica deployments where
+  all replicas must share a single authoritative `api_keys` table.
+  File backend (`KEY_STORE_BACKEND=file`) remains the default and is
+  unchanged. New env vars: `KEY_STORE_BACKEND`, `KEY_STORE_DSN`
+  (required when `postgres`). Dependencies added: `pgx/v5`, `goose/v3`.
+- **Advisory-locked boot-time migrations.** goose migrations for the
+  Postgres backend run automatically at startup under a
+  `pg_advisory_lock`, making concurrent replica boot safe without a
+  separate migration job.
+- **Persisted lazy v0→v1 rehash** (Postgres backend). On first
+  authenticated use, a legacy `v0` key (plain SHA-256) is transparently
+  rehashed to `v1` (HMAC-SHA256 under `KEY_HMAC_PEPPER`) and the updated
+  digest is committed to the `api_keys` table.
+- **Hard pepper gate** (`ErrPepperRequired`). When
+  `KEY_STORE_BACKEND=postgres` and `AUTH_PROVIDER=apikey`, boot fails
+  immediately if `KEY_HMAC_PEPPER` is unset. Closes the risk of a
+  misconfigured replica falling back to unprotected v0 hashing on a
+  shared store.
 
 ## [1.0.0-rc10] - 2026-06-19
 

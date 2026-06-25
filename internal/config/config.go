@@ -71,6 +71,13 @@ var (
 	ErrPepperPreviousWithoutActive = errors.New(
 		"KEY_HMAC_PEPPER_PREVIOUS is set without KEY_HMAC_PEPPER; " +
 			"set the active pepper or unset the previous one")
+	ErrInvalidKeyStoreBackend = errors.New(
+		`KEY_STORE_BACKEND must be "file" or "postgres"`)
+	ErrKeyStoreDSNRequired = errors.New(
+		"KEY_STORE_DSN is required when KEY_STORE_BACKEND is \"postgres\"")
+	ErrPepperRequired = errors.New(
+		"KEY_HMAC_PEPPER is required when KEY_STORE_BACKEND is \"postgres\" and " +
+			"AUTH_PROVIDER is \"apikey\" (a peppered Postgres store must not run unpeppered)")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -97,6 +104,8 @@ type Config struct {
 	// Requires KeyHMACPepper to be set; a previous pepper without an active
 	// pepper is always a misconfiguration.
 	KeyHMACPepperPrevious string
+	KeyStoreBackend       string
+	KeyStoreDSN           string
 	APIKeysFile           string
 	AdminAPIKey           string
 	AdminAPIAddr          string
@@ -297,6 +306,8 @@ func Load() (*Config, error) {
 	cfg.APIKeyRoles = parseRoleList(os.Getenv("MCP_API_KEY_ROLES"))
 	cfg.KeyHMACPepper = os.Getenv("KEY_HMAC_PEPPER")
 	cfg.KeyHMACPepperPrevious = os.Getenv("KEY_HMAC_PEPPER_PREVIOUS")
+	cfg.KeyStoreBackend = os.Getenv("KEY_STORE_BACKEND")
+	cfg.KeyStoreDSN = os.Getenv("KEY_STORE_DSN")
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
 	// Default to loopback-only. The admin key is the master key (creates
@@ -469,7 +480,31 @@ func (c *Config) Validate() error {
 	if err := c.validateAuth(); err != nil {
 		return err
 	}
+	if err := c.validateKeyStore(); err != nil {
+		return err
+	}
 	return c.validateResilience()
+}
+
+// validateKeyStore checks the key-store backend selection and its
+// fail-loud prerequisites. The default (empty or "file") imposes none.
+func (c *Config) validateKeyStore() error {
+	switch c.KeyStoreBackend {
+	case "", "file":
+		return nil
+	case "postgres":
+		if c.KeyStoreDSN == "" {
+			return ErrKeyStoreDSNRequired
+		}
+		// FusionAuth never touches the key store, so the pepper gate
+		// applies only to the apikey provider.
+		if c.AuthProvider == "apikey" && c.KeyHMACPepper == "" {
+			return ErrPepperRequired
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: got %q", ErrInvalidKeyStoreBackend, c.KeyStoreBackend)
+	}
 }
 
 func (c *Config) validateAuth() error {

@@ -301,7 +301,9 @@ func writeKeysAtomic(path string, data []byte) error {
 	// Best-effort cleanup if anything below fails before the rename.
 	defer func() {
 		if tmpPath != "" {
-			_ = os.Remove(tmpPath)
+			// tmpPath is server-constructed from the configured keys-file path
+			// (operator config), never user input — not a path-traversal sink.
+			_ = os.Remove(tmpPath) //nolint:gosec // G703 false positive: server-constructed path
 		}
 	}()
 
@@ -320,7 +322,9 @@ func writeKeysAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp keys file: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	// tmpPath and path are both server-constructed from operator config, never
+	// user input — not a path-traversal sink.
+	if err := os.Rename(tmpPath, path); err != nil { //nolint:gosec // G703 false positive: server-constructed paths
 		return fmt.Errorf("rename temp keys file: %w", err)
 	}
 	tmpPath = "" // committed; suppress the deferred cleanup
@@ -344,13 +348,13 @@ func GenerateKey() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// KeyLookupAdapter wraps a ManagedKeyStore to satisfy auth.KeyLookup.
+// KeyLookupAdapter wraps a KeyStoreBackend to satisfy auth.KeyLookup.
 type KeyLookupAdapter struct {
-	store *ManagedKeyStore
+	store KeyStoreBackend
 }
 
-// NewKeyLookupAdapter creates an adapter that bridges ManagedKeyStore to auth.KeyLookup.
-func NewKeyLookupAdapter(store *ManagedKeyStore) *KeyLookupAdapter {
+// NewKeyLookupAdapter creates an adapter that bridges KeyStoreBackend to auth.KeyLookup.
+func NewKeyLookupAdapter(store KeyStoreBackend) *KeyLookupAdapter {
 	return &KeyLookupAdapter{store: store}
 }
 
