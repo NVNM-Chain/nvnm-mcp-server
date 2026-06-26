@@ -1265,7 +1265,7 @@ live in `.env.example` (Postgres key-store backend block). Operational steps liv
 
 ## Update 2026-06-26: Phase 4 key expiry — enforcement, reject taxonomy, bounded disclosure
 
-*Reflects code as of commit **TBD** — Phase 4 key-expiry squash merge (update this hash and PR number after merge, per the Phase 2/3 anchor precedent). Until merged, the implementing code is on branch `feat/key-store-phase4-expiry`. Drift check after merge: `git log <merge-commit>..HEAD -- internal/auth internal/mcp internal/config cmd`*
+*Reflects code as of commit `a93900a` (2026-06-26), the Phase 4 key-expiry squash merge (PR #53). Drift check: `git log a93900a..HEAD -- internal/auth internal/mcp internal/config cmd`*
 
 Phase 4 makes the `expires_at` column operational. The purpose: time-bound API keys
 expire automatically without operator intervention, complementing the manual
