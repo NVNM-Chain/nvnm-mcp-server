@@ -35,6 +35,31 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   immediately if `KEY_HMAC_PEPPER` is unset. Closes the risk of a
   misconfigured replica falling back to unprotected v0 hashing on a
   shared store.
+- **Key expiry enforcement (Phase 4).** `expires_at` is now enforced at
+  Lookup on both file and Postgres backends. A key expires when
+  `now >= expires_at`; a zero/NULL `expires_at` never expires.
+- **Three-way reject taxonomy with bounded disclosure.** Auth rejections
+  are classified into three messages: `invalid API key` (no-match —
+  also returned on the timing-equalised miss path so non-holders cannot
+  distinguish unknown-key from known-key), `key expired` (matched row,
+  expiry passed; appends ` — renew at <KEY_RENEWAL_URL>` when set), and
+  `key revoked` (matched row, `enabled=false`). The specific messages
+  are only reachable by a caller holding the matched key's bytes.
+- **`KEY_DEFAULT_TTL`** env var (default `8760h` ≈ 1 year). Applied by
+  the admin REST API and `key-mgmt create` when no per-key `ttl`
+  override is given. `0` means no default expiry. Does not apply to the
+  static `MCP_API_KEY` path (always non-expiring).
+- **`KEY_RENEWAL_URL`** env var (optional). URL appended to the `key
+  expired` rejection message; empty = no hint appended.
+- **Admin REST API TTL support.** `POST /admin/keys` and
+  `PATCH /admin/keys/{id}` accept an optional `"ttl"` field (duration
+  string; `"0"`/`"none"`/`"never"` = no expiry; non-positive parsed
+  duration → HTTP 400). Admin responses (`KeySummary`) now include
+  `expires_at`; the zero-value `0001-01-01T00:00:00Z` means no expiry.
+- **`key-mgmt` CLI TTL and renew.** `key-mgmt create` gains `--ttl
+  <dur|0>` (default from `KEY_DEFAULT_TTL`). New `key-mgmt renew
+  <client-id> --ttl <dur|0>` subcommand extends or clears expiry from
+  now; `--ttl` is required (the default TTL is not applied on renew).
 
 ## [1.0.0-rc10] - 2026-06-19
 

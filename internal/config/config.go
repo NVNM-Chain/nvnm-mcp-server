@@ -106,9 +106,16 @@ type Config struct {
 	KeyHMACPepperPrevious string
 	KeyStoreBackend       string
 	KeyStoreDSN           string
-	APIKeysFile           string
-	AdminAPIKey           string
-	AdminAPIAddr          string
+	// KeyDefaultTTL is the default lifetime applied to newly issued API keys
+	// (KEY_DEFAULT_TTL, default 8760h ≈ 1 year). Applied by the issuing
+	// caller; a zero per-key override means no expiry.
+	KeyDefaultTTL time.Duration
+	// KeyRenewalURL, when set (KEY_RENEWAL_URL), is appended to the
+	// expired-key reject message so the holder learns where to renew.
+	KeyRenewalURL string
+	APIKeysFile   string
+	AdminAPIKey   string
+	AdminAPIAddr  string
 
 	// Telemetry
 	OTELEndpoint     string
@@ -283,31 +290,18 @@ func Load() (*Config, error) {
 		HTTPAddr:         envOrDefault("MCP_HTTP_ADDR", ":8080"),
 	}
 
-	chainIDStr := os.Getenv("NVNM_CHAIN_ID")
-	if chainIDStr != "" {
-		id, err := strconv.ParseInt(chainIDStr, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid NVNM_CHAIN_ID %q: %w", chainIDStr, err)
-		}
-		cfg.ChainID = id
+	if loadErr := cfg.loadCoreConfig(); loadErr != nil {
+		return nil, loadErr
 	}
-
-	timeoutStr := envOrDefault("REQUEST_TIMEOUT", "15s")
-	timeout, err := time.ParseDuration(timeoutStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid REQUEST_TIMEOUT %q: %w", timeoutStr, err)
-	}
-	cfg.RequestTimeout = timeout
 
 	if loadErr := cfg.loadFeatureFlags(); loadErr != nil {
 		return nil, loadErr
 	}
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeyRoles = parseRoleList(os.Getenv("MCP_API_KEY_ROLES"))
-	cfg.KeyHMACPepper = os.Getenv("KEY_HMAC_PEPPER")
-	cfg.KeyHMACPepperPrevious = os.Getenv("KEY_HMAC_PEPPER_PREVIOUS")
-	cfg.KeyStoreBackend = os.Getenv("KEY_STORE_BACKEND")
-	cfg.KeyStoreDSN = os.Getenv("KEY_STORE_DSN")
+	if loadErr := cfg.loadKeyStoreConfig(); loadErr != nil {
+		return nil, loadErr
+	}
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
 	// Default to loopback-only. The admin key is the master key (creates
@@ -317,20 +311,13 @@ func Load() (*Config, error) {
 	// explicitly (e.g. ":8081") and pair it with a NetworkPolicy.
 	cfg.AdminAPIAddr = envOrDefault("ADMIN_API_ADDR", "127.0.0.1:8081")
 
-	cfg.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	cfg.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "nvnm-mcp-server")
-	cfg.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
+	if loadErr := cfg.loadTelemetryConfig(); loadErr != nil {
+		return nil, loadErr
+	}
 
 	if loadErr := cfg.loadResilienceConfig(); loadErr != nil {
 		return nil, loadErr
 	}
-
-	sampleRatioStr := envOrDefault("OTEL_TRACE_SAMPLE_RATIO", "1.0")
-	sampleRatio, err := strconv.ParseFloat(sampleRatioStr, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid OTEL_TRACE_SAMPLE_RATIO %q: %w", sampleRatioStr, err)
-	}
-	cfg.OTELTraceSampleRatio = sampleRatio
 
 	if loadErr := cfg.loadMCPRateConfig(); loadErr != nil {
 		return nil, loadErr
@@ -375,6 +362,63 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadCoreConfig parses the NVNM_CHAIN_ID and REQUEST_TIMEOUT env vars into c.
+// Extracted from Load() to reduce its cyclomatic complexity; both fields
+// require string-to-typed-value parsing that adds decision branches.
+func (c *Config) loadCoreConfig() error {
+	chainIDStr := os.Getenv("NVNM_CHAIN_ID")
+	if chainIDStr != "" {
+		id, err := strconv.ParseInt(chainIDStr, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid NVNM_CHAIN_ID %q: %w", chainIDStr, err)
+		}
+		c.ChainID = id
+	}
+	timeoutStr := envOrDefault("REQUEST_TIMEOUT", "15s")
+	timeout, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		return fmt.Errorf("invalid REQUEST_TIMEOUT %q: %w", timeoutStr, err)
+	}
+	c.RequestTimeout = timeout
+	return nil
+}
+
+// loadKeyStoreConfig reads the key-store, pepper, TTL, and renewal-URL env
+// vars into c. Extracted from Load() to keep Load's cyclomatic complexity
+// below the gocyclo threshold; KEY_DEFAULT_TTL parsing adds a branch and
+// all five fields are cohesively about the key-store surface.
+func (c *Config) loadKeyStoreConfig() error {
+	c.KeyHMACPepper = os.Getenv("KEY_HMAC_PEPPER")
+	c.KeyHMACPepperPrevious = os.Getenv("KEY_HMAC_PEPPER_PREVIOUS")
+	c.KeyStoreBackend = os.Getenv("KEY_STORE_BACKEND")
+	c.KeyStoreDSN = os.Getenv("KEY_STORE_DSN")
+	c.KeyRenewalURL = os.Getenv("KEY_RENEWAL_URL")
+	ttlStr := envOrDefault("KEY_DEFAULT_TTL", "8760h")
+	keyTTL, err := time.ParseDuration(ttlStr)
+	if err != nil {
+		return fmt.Errorf("invalid KEY_DEFAULT_TTL %q: %w", ttlStr, err)
+	}
+	c.KeyDefaultTTL = keyTTL
+	return nil
+}
+
+// loadTelemetryConfig reads the OTEL/metrics env vars into c. Extracted from
+// Load() to keep Load's cyclomatic complexity below the gocyclo threshold;
+// OTEL_TRACE_SAMPLE_RATIO parsing adds a branch and all three fields are
+// cohesively about the telemetry surface.
+func (c *Config) loadTelemetryConfig() error {
+	c.OTELEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	c.OTELServiceName = envOrDefault("OTEL_SERVICE_NAME", "nvnm-mcp-server")
+	c.MetricsAddr = envOrDefault("METRICS_ADDR", ":9090")
+	sampleRatioStr := envOrDefault("OTEL_TRACE_SAMPLE_RATIO", "1.0")
+	sampleRatio, err := strconv.ParseFloat(sampleRatioStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid OTEL_TRACE_SAMPLE_RATIO %q: %w", sampleRatioStr, err)
+	}
+	c.OTELTraceSampleRatio = sampleRatio
+	return nil
 }
 
 // loadResilienceConfig parses the RPC retry / backoff / rate-limit /

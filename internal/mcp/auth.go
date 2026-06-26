@@ -42,6 +42,7 @@ func AuthMiddleware(
 	failLimiter *IPFailRateLimiter,
 	keylessReads bool,
 	logger *slog.Logger,
+	renewalURL string,
 ) http.Handler {
 	if validator == nil {
 		return next
@@ -85,12 +86,20 @@ func AuthMiddleware(
 
 		token := strings.TrimPrefix(authHeader, prefix)
 
-		claims, err := validator.Validate(token)
+		claims, err := validator.Validate(r.Context(), token)
 		if err != nil {
 			penalize(r)
 			msg := "invalid credentials"
-			if errors.Is(err, auth.ErrInvalidAPIKey) {
+			switch {
+			case errors.Is(err, auth.ErrInvalidAPIKey):
 				msg = "invalid API key"
+			case errors.Is(err, auth.ErrKeyExpired):
+				msg = "key expired"
+				if renewalURL != "" {
+					msg += " — renew at " + renewalURL
+				}
+			case errors.Is(err, auth.ErrKeyRevoked):
+				msg = "key revoked"
 			}
 			logger.Warn("rejected request with invalid credentials",
 				slog.String("remote_addr", r.RemoteAddr),

@@ -74,6 +74,8 @@ func clearEnv(t *testing.T) {
 		"NVNM_SMTP_PASSWORD",
 		"NVNM_SMTP_FROM",
 		"NVNM_SMTP_FROM_NAME",
+		"KEY_DEFAULT_TTL",
+		"KEY_RENEWAL_URL",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -1042,6 +1044,47 @@ func TestValidateAuth_StaticKeyRoles(t *testing.T) {
 		c.APIKeysFile = "/some/keys.json"
 		if err := c.validateAuth(); err != nil {
 			t.Fatalf("want nil, got %v", err)
+		}
+	})
+}
+
+func TestLoad_KeyExpiryConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.KeyDefaultTTL != 8760*time.Hour {
+			t.Errorf("KeyDefaultTTL = %v, want 8760h", cfg.KeyDefaultTTL)
+		}
+		if cfg.KeyRenewalURL != "" {
+			t.Errorf("KeyRenewalURL = %q, want empty", cfg.KeyRenewalURL)
+		}
+	})
+	t.Run("custom", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		t.Setenv("KEY_DEFAULT_TTL", "720h")
+		t.Setenv("KEY_RENEWAL_URL", "https://keys.example.com/renew")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.KeyDefaultTTL != 720*time.Hour {
+			t.Errorf("KeyDefaultTTL = %v, want 720h", cfg.KeyDefaultTTL)
+		}
+		if cfg.KeyRenewalURL != "https://keys.example.com/renew" {
+			t.Errorf("KeyRenewalURL = %q, want %q", cfg.KeyRenewalURL, "https://keys.example.com/renew")
+		}
+	})
+	t.Run("invalid duration fails loud", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		t.Setenv("KEY_DEFAULT_TTL", "not-a-duration")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for invalid KEY_DEFAULT_TTL, got nil")
 		}
 	})
 }

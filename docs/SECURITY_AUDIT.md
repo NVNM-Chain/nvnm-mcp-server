@@ -668,7 +668,8 @@ The sections below record changes made after the original 2026-04-01 pre-red-tea
 - [2026-05-13 — Phase 8.6 and 8.7 (hashed-at-rest, constant-time auth)](#update-2026-05-13-phase-86-and-87-hashed-at-rest-constant-time-auth)
 - [2026-05-14 — Phase 8.12 OWASP Top 10 self-audit](#update-2026-05-14-phase-812-owasp-top-10-self-audit)
 - [2026-06-24 — Phase 2 HMAC+pepper versioned key hashing](#update-2026-06-24-phase-2-hmacpepper-versioned-key-hashing)
-- [Phase 3 — Postgres key-store backend _(anchor at merge)_](#update-phase-3--postgres-key-store-backend-anchor-commit-and-date-to-be-stamped-at-merge)
+- [2026-06-25 — Phase 3 Postgres key-store backend (commit c7e6edd)](#update-2026-06-25-phase-3-postgres-key-store-backend)
+- [2026-06-26 — Phase 4 key expiry — enforcement, reject taxonomy, bounded disclosure](#update-2026-06-26-phase-4-key-expiry--enforcement-reject-taxonomy-bounded-disclosure)
 
 ---
 
@@ -1210,12 +1211,9 @@ Short form: `KEY_HMAC_PEPPER` (optional, enables v1); `KEY_HMAC_PEPPER_PREVIOUS`
 
 ---
 
-## Update (Phase 3 — Postgres key-store backend; anchor commit and date to be stamped at merge)
+## Update 2026-06-25: Phase 3 Postgres key-store backend
 
-> **Currency anchor.** This section reflects the `feat/key-store-phase3-postgres`
-> branch. The commit hash and merge date are to be filled in at merge time —
-> run `git log <merge-commit>..HEAD -- internal/auth internal/mcp internal/config cmd`
-> to check for drift after that point.
+*Reflects code as of `c7e6edd` (squash merge of PR #52, `feat/key-store-phase3-postgres`) — the commit that introduced the Postgres key-store backend, DSN config, and the store-switching changes described below. Run `git log c7e6edd..HEAD -- internal/auth internal/mcp internal/config cmd` to check for drift.*
 
 Phase 3 introduces an optional Postgres key-store backend behind a `KEY_STORE_BACKEND`
 environment variable (default `file`, unchanged). The purpose: shared, authoritative
@@ -1253,13 +1251,95 @@ not fail authentication; the key continues to work.
 and `KEY_HMAC_PEPPER` are consumed at startup and never written to any log line, span,
 or metric label.
 
-**`expires_at` schema-only.** The `api_keys` table includes an `expires_at` column.
-Expiry enforcement is not implemented in Phase 3 — keys do not expire regardless of
-that value. Enforcement is planned for Phase 4. Operators must not rely on `expires_at`
-for access revocation; use the `enabled` flag or delete the key entry instead.
+**`expires_at` schema-only in Phase 3; enforced in Phase 4.** The `api_keys` table
+includes an `expires_at` column. Expiry enforcement was not implemented in Phase 3.
+Phase 4 closes this — see the entry below.
 
 ### Env-var reference for this phase
 
 Canonical definitions and inline notes for `KEY_STORE_BACKEND` and `KEY_STORE_DSN`
 live in `.env.example` (Postgres key-store backend block). Operational steps live in
 `docs/RUNBOOK.md § Postgres key-store backend`.
+
+---
+
+## Update 2026-06-26: Phase 4 key expiry — enforcement, reject taxonomy, bounded disclosure
+
+*Reflects code as of commit **TBD** — Phase 4 key-expiry squash merge (update this hash and PR number after merge, per the Phase 2/3 anchor precedent). Until merged, the implementing code is on branch `feat/key-store-phase4-expiry`. Drift check after merge: `git log <merge-commit>..HEAD -- internal/auth internal/mcp internal/config cmd`*
+
+Phase 4 makes the `expires_at` column operational. The purpose: time-bound API keys
+expire automatically without operator intervention, complementing the manual
+`enabled = false` revocation path that existed since Phase 1.
+
+### What changed
+
+| Surface | Before (Phase 3) | After (Phase 4) |
+|---|---|---|
+| Expiry enforcement | None — `expires_at` stored but ignored at Lookup | Enforced at Lookup on both file and Postgres backends: `now >= expires_at` → `RejectExpired` |
+| Postgres Lookup SQL | `WHERE key_hash = ANY($1) AND enabled` | `WHERE key_hash = ANY($1)` (no `AND enabled`) — row fetched regardless; classify in Go |
+| Reject taxonomy | `ErrInvalidAPIKey` for all failures | Three-way: `ErrInvalidAPIKey` (no match), `ErrKeyExpired` (matched+expired), `ErrKeyRevoked` (matched+disabled) |
+| `AuthMiddleware` messages | `invalid API key` for all failures | `invalid API key` / `key expired [— renew at <URL>]` / `key revoked` (see below) |
+| `KEY_DEFAULT_TTL` env var | n/a | Duration applied to newly issued keys when no per-key `ttl` override is given (admin REST + `key-mgmt create`). Default `8760h` (~1 year). `0` = no default expiry. Does not apply to static `MCP_API_KEY`. |
+| `KEY_RENEWAL_URL` env var | n/a | Optional URL appended to the `key expired` message. Empty = no hint appended. |
+| Admin REST `POST /admin/keys` | No `ttl` field | Optional `"ttl"` (duration string); `"0"` / `"none"` / `"never"` = no expiry; negative duration → HTTP 400. |
+| Admin REST `PATCH /admin/keys/{id}` | No `ttl` field | Optional `"ttl"` field — renews the key from now + duration; `"0"` clears expiry. |
+| Admin REST responses (`KeySummary`) | No `expires_at` field | Includes `expires_at`; zero value `0001-01-01T00:00:00Z` means no expiry (see sentinel note below). |
+| `key-mgmt create` | No `--ttl` flag | `--ttl <dur\|0>` flag; default from `KEY_DEFAULT_TTL`. |
+| `key-mgmt renew` | Not implemented | New subcommand: `key-mgmt renew <client-id> --ttl <dur\|0>` (explicit `--ttl` required; does not apply `KEY_DEFAULT_TTL`). |
+
+### Reject taxonomy and bounded disclosure
+
+**Who acts on this:** operators assessing information-disclosure risk; security reviewers auditing the auth path.
+
+The three reject messages — `invalid API key`, `key expired`, `key revoked` — carry
+different amounts of information about the key store. The security property that makes
+this safe is **bounded disclosure**:
+
+- The `invalid API key` message is returned on the **no-match path** (`RejectNotFound`).
+  The constant-time miss path in `APIKeyValidator.Validate`
+  (`internal/auth/apikey_validator.go`) burns a placeholder `subtle.ConstantTimeCompare`
+  so the response time is indistinguishable from a hit. A non-holder — someone who does
+  not possess a raw token that hashes to a stored row — always lands here regardless of
+  what token they present.
+
+- The `key expired` and `key revoked` messages are only reachable by a caller whose
+  presented token matched a real stored digest (`RejectExpired` / `RejectRevoked`). A
+  non-holder cannot reach these paths because the Lookup probe fails first.
+
+This means the helpful `key expired — renew at <URL>` text is visible only to the
+legitimate holder of that key. A credential-stuffing attacker enumerating random tokens
+always receives `invalid API key`.
+
+### Why the Phase-3 `AND enabled` SQL filter was reversed
+
+Phase 3 Postgres Lookup used `WHERE key_hash = ANY($1) AND enabled`. This prevented
+distinguishing `revoked` from `expired` from a no-match, because a disabled or expired
+row would return `pgx.ErrNoRows` — indistinguishable from a truly unknown key. Phase 4
+drops the `AND enabled` clause so any matched row is returned and classification happens
+in Go (`classifyEntry` in `internal/mcp/keys.go`). This is safe because of the
+bounded-disclosure property above: the more-specific message (`revoked` / `expired`)
+is only reachable by a caller who already holds the matched key's bytes.
+
+### `enabled` vs `expires_at` — two independent kill-switches
+
+| Kill-switch | Operational verb | How to set | Undo |
+|---|---|---|---|
+| `enabled = false` | **revoke** (manual, indefinite) | `PATCH {"enabled": false}` / `key-mgmt disable` | `PATCH {"enabled": true}` / `key-mgmt enable` |
+| `expires_at` passed | **expire** (automatic, time-bound) | `--ttl` on create / `PATCH {"ttl": "…"}` | `PATCH {"ttl": "720h"}` / `key-mgmt renew --ttl <dur>` |
+
+A key can be both disabled and expired; `classifyEntry` applies `revoked` precedence.
+
+### `0001-01-01T00:00:00Z` sentinel
+
+`KeyEntry.ExpiresAt` is `time.Time` with no `omitempty` tag (the json package ignores
+`omitempty` on value types). The zero `time.Time` serializes as `0001-01-01T00:00:00Z`
+in both the file-store JSON and admin API responses. Operators must not read this as a
+real expiry date — it is the no-expiry sentinel. This includes `MCP_API_KEY` (static
+key, always zero `ExpiresAt`) and any key created with `--ttl 0`.
+
+### Env-var reference for this phase
+
+Canonical definitions for `KEY_DEFAULT_TTL` and `KEY_RENEWAL_URL` live in
+`.env.example` (key expiry block) and the `docs/RUNBOOK.md § Authentication` table.
+Operational lifecycle guidance (revoke vs expire, renew commands) lives in
+`docs/RUNBOOK.md § Key lifecycle — revocation vs expiry`.

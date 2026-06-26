@@ -22,6 +22,11 @@ const (
 	adminMaxRequestBody = 1 * 1024 * 1024 // 1 MB
 )
 
+// errTTLNotPositive is the sentinel for the "ttl must be positive" condition
+// in resolveExpiry. Wrapping the sentinel with the actual value preserves
+// errors.Is unwrapping for callers while satisfying err113.
+var errTTLNotPositive = errors.New("ttl must be positive")
+
 // validateRoles reports whether every role in the slice is a recognized RBAC
 // role. Vacuously true for an empty slice; emptiness is enforced separately at
 // the handler layer. Delegates to auth.IsValidRole so the canonical role set
@@ -43,14 +48,25 @@ type AdminServer struct {
 	pendingStore *PendingKeyStore
 	email        EmailSender
 	logger       *slog.Logger
+	defaultTTL   time.Duration
+	now          func() time.Time
 }
 
 // NewAdminServer creates an admin API server.
 // adminKey is the bearer token required for all requests.
-func NewAdminServer(addr, adminKey string, keys KeyStoreBackend, logger *slog.Logger) *AdminServer {
+// defaultTTL is applied to newly created keys when no per-key ttl is specified
+// in the request; pass 0 for no default expiry.
+func NewAdminServer(
+	addr, adminKey string,
+	keys KeyStoreBackend,
+	defaultTTL time.Duration,
+	logger *slog.Logger,
+) *AdminServer {
 	a := &AdminServer{
-		keys:   keys,
-		logger: logger,
+		keys:       keys,
+		logger:     logger,
+		defaultTTL: defaultTTL,
+		now:        time.Now,
 	}
 
 	mux := http.NewServeMux()
@@ -104,9 +120,36 @@ func (a *AdminServer) Close(ctx context.Context) error {
 
 // --- Handlers ---
 
+// resolveExpiry maps a request TTL string to an absolute expiry time.
+//
+//   - ttl == nil         → now + defaultTTL (operator default; zero defaultTTL means no expiry)
+//   - *ttl in "0","none","never" → zero time.Time (no expiry)
+//   - else               → now + parsed duration; invalid duration returns an error
+func resolveExpiry(ttl *string, defaultTTL time.Duration, now time.Time) (time.Time, error) {
+	if ttl == nil {
+		if defaultTTL == 0 {
+			return time.Time{}, nil
+		}
+		return now.Add(defaultTTL), nil
+	}
+	switch *ttl {
+	case "0", "none", "never":
+		return time.Time{}, nil
+	}
+	d, err := time.ParseDuration(*ttl)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid ttl %q: %w", *ttl, err)
+	}
+	if d <= 0 {
+		return time.Time{}, fmt.Errorf("%w: got %q", errTTLNotPositive, *ttl)
+	}
+	return now.Add(d), nil
+}
+
 type createRequest struct {
 	ClientID string   `json:"client_id"`
 	Roles    []string `json:"roles,omitempty"`
+	TTL      *string  `json:"ttl,omitempty"`
 }
 
 func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +176,13 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.keys.Create(req.ClientID, req.Roles)
+	expiresAt, err := resolveExpiry(req.TTL, a.defaultTTL, a.now())
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := a.keys.Create(r.Context(), req.ClientID, req.Roles, expiresAt)
 	if err != nil {
 		if errors.Is(err, ErrClientExists) {
 			a.writeError(w, http.StatusConflict, err.Error())
@@ -168,6 +217,7 @@ func (a *AdminServer) handleList(w http.ResponseWriter, _ *http.Request) {
 type updateRequest struct {
 	Enabled *bool     `json:"enabled,omitempty"`
 	Roles   *[]string `json:"roles,omitempty"`
+	TTL     *string   `json:"ttl,omitempty"`
 }
 
 func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -183,9 +233,9 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Enabled == nil && req.Roles == nil {
+	if req.Enabled == nil && req.Roles == nil && req.TTL == nil {
 		a.writeError(w, http.StatusBadRequest,
-			"at least one of enabled or roles must be provided")
+			"at least one of enabled, roles, or ttl must be provided")
 		return
 	}
 
@@ -202,7 +252,17 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	summary, err := a.keys.Update(clientID, KeyUpdate(req))
+	upd := KeyUpdate{Enabled: req.Enabled, Roles: req.Roles}
+	if req.TTL != nil {
+		exp, expErr := resolveExpiry(req.TTL, a.defaultTTL, a.now())
+		if expErr != nil {
+			a.writeError(w, http.StatusBadRequest, expErr.Error())
+			return
+		}
+		upd.ExpiresAt = &exp
+	}
+
+	summary, err := a.keys.Update(clientID, upd)
 	if err != nil {
 		if errors.Is(err, ErrClientMissing) {
 			a.writeError(w, http.StatusNotFound, err.Error())

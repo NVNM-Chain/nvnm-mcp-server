@@ -3,7 +3,10 @@
 
 package auth
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // stubKeyLookup is a tiny stand-in for KeyLookup that does not depend on
 // the mcp package, so the auth package's benchmarks stay isolated. It
@@ -12,11 +15,11 @@ type stubKeyLookup struct {
 	key string
 }
 
-func (s *stubKeyLookup) Lookup(rawKey string) *KeyResult {
+func (s *stubKeyLookup) Lookup(_ context.Context, rawKey string) (*KeyResult, RejectReason) {
 	if rawKey != s.key {
-		return nil
+		return nil, RejectNotFound
 	}
-	return &KeyResult{ID: "bench-client", KeyHash: HashKey(s.key)}
+	return &KeyResult{ID: "bench-client", KeyHash: HashKey(s.key)}, RejectNone
 }
 
 func (s *stubKeyLookup) Empty() bool { return s.key == "" }
@@ -28,7 +31,7 @@ func (s *stubKeyLookup) Empty() bool { return s.key == "" }
 func BenchmarkAPIKeyValidator_HotHit(b *testing.B) {
 	v := NewAPIKeyValidator(&stubKeyLookup{key: "abcdefghijklmnopqrstuvwxyz0123456789"})
 	for i := 0; i < b.N; i++ {
-		if _, err := v.Validate("abcdefghijklmnopqrstuvwxyz0123456789"); err != nil {
+		if _, err := v.Validate(context.Background(), "abcdefghijklmnopqrstuvwxyz0123456789"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -40,7 +43,7 @@ func BenchmarkAPIKeyValidator_HotHit(b *testing.B) {
 func BenchmarkAPIKeyValidator_Miss(b *testing.B) {
 	v := NewAPIKeyValidator(&stubKeyLookup{key: "abcdefghijklmnopqrstuvwxyz0123456789"})
 	for i := 0; i < b.N; i++ {
-		if _, err := v.Validate("not-the-key"); err == nil {
+		if _, err := v.Validate(context.Background(), "not-the-key"); err == nil {
 			b.Fatal("expected miss")
 		}
 	}

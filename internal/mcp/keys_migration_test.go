@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -108,7 +109,10 @@ func TestMigration_LegacyFileMigratedAndBackedUp(t *testing.T) {
 	}
 
 	// 3. Lookup works post-migration with the raw key as input.
-	entry := mks.Lookup("raw-bearer-token-aaaaaaaa")
+	entry, reason := mks.Lookup(context.Background(), "raw-bearer-token-aaaaaaaa")
+	if reason != auth.RejectNone {
+		t.Fatalf("Lookup post-migration rejected legacy-1: %v", reason)
+	}
 	if entry == nil {
 		t.Fatal("Lookup post-migration returned nil for legacy-1")
 	}

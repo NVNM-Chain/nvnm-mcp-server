@@ -159,6 +159,8 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // When allowedOrigins is nil, DefaultOriginAllowlist() is used
 // (localhost variants only); production deployments must supply a
 // non-nil allowlist that includes the origins of trusted MCP clients.
+// renewalURL, when non-empty, is appended to the "key expired" rejection
+// message so clients know where to renew (KEY_RENEWAL_URL config field).
 func (s *Server) RunHTTP(
 	ctx context.Context,
 	addr string,
@@ -169,6 +171,7 @@ func (s *Server) RunHTTP(
 	allowedOrigins *OriginAllowlist,
 	metrics *telemetry.Metrics,
 	keyRequestHandler http.Handler,
+	renewalURL string,
 ) error {
 	if allowedOrigins == nil {
 		allowedOrigins = DefaultOriginAllowlist()
@@ -223,7 +226,7 @@ func (s *Server) RunHTTP(
 	if anonLimiter != nil {
 		mcpChain = anonLimiter.Middleware(mcpChain, s.logger)
 	}
-	mcpChain = AuthMiddleware(mcpChain, validator, failLimiter, s.keylessReads, s.logger)
+	mcpChain = AuthMiddleware(mcpChain, validator, failLimiter, s.keylessReads, s.logger, renewalURL)
 
 	// Path mux: if the public key-request handler is wired, route its
 	// exact path to it; everything else falls through to the MCP auth

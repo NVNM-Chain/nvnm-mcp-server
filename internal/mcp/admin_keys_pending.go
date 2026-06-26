@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
@@ -126,7 +127,7 @@ func (a *AdminServer) handleApprovePending(w http.ResponseWriter, r *http.Reques
 	// email so log lines and audit records can correlate without
 	// the reviewer making up another identifier.
 	clientID := "pending:" + req.ID
-	created, err := a.keys.Create(clientID, []string{"reader"})
+	created, err := a.keys.Create(r.Context(), clientID, []string{"reader"}, time.Time{})
 	if err != nil {
 		// ErrClientExists is unreachable today (the ID embeds the
 		// request UUID) but treat it as a 500 if it ever surfaces so

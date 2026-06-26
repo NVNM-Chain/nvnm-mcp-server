@@ -23,6 +23,7 @@ import (
 type PostgresKeyStore struct {
 	pool   *pgxpool.Pool
 	hasher *auth.KeyHasher
+	now    func() time.Time
 }
 
 // Compile-time assertion that PostgresKeyStore satisfies KeyStoreBackend.
@@ -31,7 +32,9 @@ var _ KeyStoreBackend = (*PostgresKeyStore)(nil)
 // NewPostgresKeyStore returns a Postgres-backed store using pool and the
 // versioned hasher (nil hasher => v0/plain-sha256 only).
 func NewPostgresKeyStore(pool *pgxpool.Pool, hasher *auth.KeyHasher) *PostgresKeyStore {
-	return &PostgresKeyStore{pool: pool, hasher: hasher}
+	p := &PostgresKeyStore{pool: pool, hasher: hasher}
+	p.now = time.Now
+	return p
 }
 
 // digestBytes converts a 64-char hex digest (as produced by auth.KeyHasher)
@@ -45,25 +48,27 @@ func digestBytes(hexDigest string) []byte {
 	return b
 }
 
-// Lookup probes the candidate digests (v0 + active/previous pepper) and
-// returns the matching enabled entry, or nil. The raw key is hashed per
-// candidate; no row is returned for a disabled key.
-func (p *PostgresKeyStore) Lookup(rawKey string) *KeyEntry {
-	ctx := context.Background()
+// Lookup probes the candidate digests and returns the matching entry with a
+// RejectReason. AND enabled is dropped so disabled rows surface as revoked.
+// The raw key is hashed per candidate; no raw key is retained.
+func (p *PostgresKeyStore) Lookup(ctx context.Context, rawKey string) (*KeyEntry, auth.RejectReason) {
 	cands := p.hasher.Candidates(rawKey)
 	raw := make([][]byte, len(cands))
 	for i, c := range cands {
 		raw[i] = digestBytes(c.Hash)
 	}
 	row := p.pool.QueryRow(ctx,
-		`SELECT id, key_hash, hash_version, key_prefix, roles, enabled, created_at
-		   FROM api_keys WHERE key_hash = ANY($1) AND enabled`, raw)
+		`SELECT id, key_hash, hash_version, key_prefix, roles, enabled, created_at, expires_at
+		   FROM api_keys WHERE key_hash = ANY($1)`, raw)
 	e, err := scanEntry(row)
 	if err != nil {
-		return nil // no match (pgx.ErrNoRows) or scan error => unauthenticated
+		return nil, auth.RejectNotFound // pgx.ErrNoRows or scan error
 	}
-	p.maybeRehash(ctx, rawKey, e)
-	return e
+	reason := classifyEntry(e, p.now())
+	if reason == auth.RejectNone {
+		p.maybeRehash(ctx, rawKey, e)
+	}
+	return e, reason
 }
 
 // maybeRehash persistently upgrades a matched row to the active pepper
@@ -87,19 +92,24 @@ func scanEntry(row pgx.Row) (*KeyEntry, error) {
 		e       KeyEntry
 		hashB   []byte
 		created time.Time
+		expires *time.Time
 	)
-	if err := row.Scan(&e.ID, &hashB, &e.HashVersion, &e.KeyPrefix, &e.Roles, &e.Enabled, &created); err != nil {
+	if err := row.Scan(&e.ID, &hashB, &e.HashVersion, &e.KeyPrefix, &e.Roles, &e.Enabled, &created, &expires); err != nil {
 		return nil, err
 	}
 	e.KeyHash = hex.EncodeToString(hashB)
 	e.CreatedAt = created
+	if expires != nil {
+		e.ExpiresAt = *expires
+	}
 	return &e, nil
 }
 
-// Create generates a new key, persists it (hashed under the active
-// scheme), and returns the raw key once. ErrClientExists if id taken.
-func (p *PostgresKeyStore) Create(clientID string, roles []string) (*KeyCreateResult, error) {
-	ctx := context.Background()
+// Create generates a new key with optional expiry, persists it (hashed under
+// the active scheme), and returns the raw key once. ErrClientExists if id taken.
+func (p *PostgresKeyStore) Create(
+	ctx context.Context, clientID string, roles []string, expiresAt time.Time,
+) (*KeyCreateResult, error) {
 	rawKey, err := GenerateKey()
 	if err != nil {
 		return nil, err
@@ -111,13 +121,18 @@ func (p *PostgresKeyStore) Create(clientID string, roles []string) (*KeyCreateRe
 		HashVersion: version,
 		KeyPrefix:   keyPrefixOf(rawKey),
 		Enabled:     true,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   p.now().UTC(),
 		Roles:       roles,
+		ExpiresAt:   expiresAt,
+	}
+	var exp any
+	if !expiresAt.IsZero() {
+		exp = expiresAt
 	}
 	_, err = p.pool.Exec(ctx,
-		`INSERT INTO api_keys (id, key_hash, hash_version, key_prefix, roles, enabled, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		entry.ID, digestBytes(hash), version, entry.KeyPrefix, roles, true, entry.CreatedAt)
+		`INSERT INTO api_keys (id, key_hash, hash_version, key_prefix, roles, enabled, created_at, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		entry.ID, digestBytes(hash), version, entry.KeyPrefix, roles, true, entry.CreatedAt, exp)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, fmt.Errorf("client %q: %w", clientID, ErrClientExists)
@@ -141,6 +156,15 @@ func (p *PostgresKeyStore) Update(clientID string, upd KeyUpdate) (*KeySummary, 
 	if upd.Roles != nil {
 		set += fmt.Sprintf("roles=$%d,", i)
 		args = append(args, *upd.Roles)
+		i++
+	}
+	if upd.ExpiresAt != nil {
+		set += fmt.Sprintf("expires_at=$%d,", i)
+		if upd.ExpiresAt.IsZero() {
+			args = append(args, nil)
+		} else {
+			args = append(args, *upd.ExpiresAt)
+		}
 		i++
 	}
 	if set == "" {
@@ -175,10 +199,12 @@ func (p *PostgresKeyStore) summary(ctx context.Context, clientID string) (*KeySu
 	var (
 		s       KeySummary
 		created time.Time
+		expires *time.Time
 	)
 	err := p.pool.QueryRow(ctx,
-		`SELECT id, enabled, created_at, roles, key_prefix FROM api_keys WHERE id=$1`, clientID).
-		Scan(&s.ID, &s.Enabled, &created, &s.Roles, &s.KeyPrefix)
+		`SELECT id, enabled, created_at, roles, key_prefix, expires_at
+		   FROM api_keys WHERE id=$1`, clientID).
+		Scan(&s.ID, &s.Enabled, &created, &s.Roles, &s.KeyPrefix, &expires)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("client %q: %w", clientID, ErrClientMissing)
@@ -186,25 +212,35 @@ func (p *PostgresKeyStore) summary(ctx context.Context, clientID string) (*KeySu
 		return nil, fmt.Errorf("fetch summary %q: %w", clientID, err)
 	}
 	s.CreatedAt = created
+	if expires != nil {
+		s.ExpiresAt = *expires
+	}
 	return &s, nil
 }
 
 // List returns redacted summaries of all keys.
 func (p *PostgresKeyStore) List() []KeySummary {
 	rows, err := p.pool.Query(context.Background(),
-		"SELECT id, enabled, created_at, roles, key_prefix FROM api_keys ORDER BY created_at")
+		`SELECT id, enabled, created_at, roles, key_prefix, expires_at
+		   FROM api_keys ORDER BY created_at`)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 	var out []KeySummary
 	for rows.Next() {
-		var s KeySummary
-		var created time.Time
-		if err := rows.Scan(&s.ID, &s.Enabled, &created, &s.Roles, &s.KeyPrefix); err != nil {
+		var (
+			s       KeySummary
+			created time.Time
+			expires *time.Time
+		)
+		if err := rows.Scan(&s.ID, &s.Enabled, &created, &s.Roles, &s.KeyPrefix, &expires); err != nil {
 			return out
 		}
 		s.CreatedAt = created
+		if expires != nil {
+			s.ExpiresAt = *expires
+		}
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {

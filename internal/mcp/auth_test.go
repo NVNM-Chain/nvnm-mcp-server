@@ -4,8 +4,10 @@
 package mcp
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
@@ -18,7 +20,7 @@ type fakeValidator struct {
 	err    error
 }
 
-func (f fakeValidator) Validate(_ string) (*auth.Claims, error) {
+func (f fakeValidator) Validate(_ context.Context, _ string) (*auth.Claims, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -40,7 +42,7 @@ func TestAuthMiddleware_KeylessAllowsMissingHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := AuthMiddleware(next, fakeValidator{}, nil, true, discardLogger())
+	handler := AuthMiddleware(next, fakeValidator{}, nil, true, discardLogger(), "")
 	req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody) // no Authorization
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -55,7 +57,7 @@ func TestAuthMiddleware_KeylessStillRejectsBadToken(t *testing.T) {
 		t.Error("handler must not be reached with a bad token")
 	})
 
-	handler := AuthMiddleware(next, fakeValidator{err: auth.ErrInvalidAPIKey}, nil, true, discardLogger())
+	handler := AuthMiddleware(next, fakeValidator{err: auth.ErrInvalidAPIKey}, nil, true, discardLogger(), "")
 	req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
 	req.Header.Set("Authorization", "Bearer garbage")
 	w := httptest.NewRecorder()
@@ -71,7 +73,7 @@ func TestAuthMiddleware_FlagOffRejectsMissingHeader(t *testing.T) {
 		t.Error("handler must not be reached when flag off and no header")
 	})
 
-	handler := AuthMiddleware(next, fakeValidator{}, nil, false, discardLogger())
+	handler := AuthMiddleware(next, fakeValidator{}, nil, false, discardLogger(), "")
 	req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -85,7 +87,7 @@ func TestAuthMiddleware_KeylessStillRejectsWrongScheme(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("handler must not be reached with wrong scheme")
 	})
-	handler := AuthMiddleware(next, fakeValidator{}, nil, true, discardLogger())
+	handler := AuthMiddleware(next, fakeValidator{}, nil, true, discardLogger(), "")
 	req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
 	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 	w := httptest.NewRecorder()
@@ -102,7 +104,7 @@ func TestAuthMiddleware_KeylessAuthenticatesValidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := AuthMiddleware(next, fakeValidator{claims: &auth.Claims{ClientID: "alice"}}, nil, true, discardLogger())
+	handler := AuthMiddleware(next, fakeValidator{claims: &auth.Claims{ClientID: "alice"}}, nil, true, discardLogger(), "")
 	req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
 	req.Header.Set("Authorization", "Bearer good")
 	w := httptest.NewRecorder()
@@ -153,7 +155,7 @@ func TestAuthMiddleware_Sets_WWWAuthenticate_On401(t *testing.T) {
 				t.Error("handler must not be reached on a 401 path")
 			})
 			// keylessReads=false so a missing header is a 401, not anonymous.
-			handler := AuthMiddleware(next, tt.validator, nil, false, discardLogger())
+			handler := AuthMiddleware(next, tt.validator, nil, false, discardLogger(), "")
 			req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
 			if tt.setHeader {
 				req.Header.Set("Authorization", tt.authValue)
@@ -166,6 +168,38 @@ func TestAuthMiddleware_Sets_WWWAuthenticate_On401(t *testing.T) {
 			}
 			if got := w.Header().Get("WWW-Authenticate"); got != want {
 				t.Errorf("WWW-Authenticate: got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestAuthMiddleware_RejectMessages(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		renewalURL string
+		wantMsg    string
+	}{
+		{"invalid_key", auth.ErrInvalidAPIKey, "", "invalid API key"},
+		{"expired_no_url", auth.ErrKeyExpired, "", "key expired"},
+		{"expired_with_url", auth.ErrKeyExpired, "https://example.com/renew", "key expired — renew at https://example.com/renew"},
+		{"revoked", auth.ErrKeyRevoked, "", "key revoked"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				t.Error("handler must not be reached")
+			})
+			handler := AuthMiddleware(next, fakeValidator{err: c.err}, nil, false, discardLogger(), c.renewalURL)
+			req := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", w.Code)
+			}
+			if !strings.Contains(w.Body.String(), c.wantMsg) {
+				t.Errorf("body %q does not contain %q", w.Body.String(), c.wantMsg)
 			}
 		})
 	}

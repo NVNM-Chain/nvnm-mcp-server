@@ -103,17 +103,17 @@ type fakeKeyLookup struct {
 	entries map[string]*KeyResult
 }
 
-func (f *fakeKeyLookup) Lookup(rawKey string) *KeyResult {
+func (f *fakeKeyLookup) Lookup(_ context.Context, rawKey string) (*KeyResult, RejectReason) {
 	e, ok := f.entries[rawKey]
 	if !ok {
-		return nil
+		return nil, RejectNotFound
 	}
 	// Defensive copy with KeyHash synthesized from the raw key.
 	return &KeyResult{
 		ID:      e.ID,
 		KeyHash: HashKey(rawKey),
 		Roles:   e.Roles,
-	}
+	}, RejectNone
 }
 
 func (f *fakeKeyLookup) Empty() bool {
@@ -129,7 +129,7 @@ func TestAPIKeyValidator_ValidKey(t *testing.T) {
 		t.Fatal("expected non-nil validator")
 	}
 
-	claims, err := v.Validate("test-key-123")
+	claims, err := v.Validate(context.Background(), "test-key-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestAPIKeyValidator_InvalidKey(t *testing.T) {
 	}}
 	v := NewAPIKeyValidator(lookup)
 
-	_, err := v.Validate("wrong-key")
+	_, err := v.Validate(context.Background(), "wrong-key")
 	if err == nil {
 		t.Fatal("expected error for invalid key")
 	}
@@ -174,7 +174,7 @@ func TestAPIKeyValidator_RolesPropagated(t *testing.T) {
 	}}
 	v := NewAPIKeyValidator(lookup)
 
-	claims, err := v.Validate("key")
+	claims, err := v.Validate(context.Background(), "key")
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAPIKeyValidator_EmptyRolesNoEnforcement(t *testing.T) {
 	}}
 	v := NewAPIKeyValidator(lookup)
 
-	claims, err := v.Validate("key")
+	claims, err := v.Validate(context.Background(), "key")
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestFusionAuth_DoesNotLogRawSub(t *testing.T) {
 		"iat": time.Now().Unix(),
 	})
 
-	if _, err := v.Validate(token); err != nil {
+	if _, err := v.Validate(context.Background(), token); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 
@@ -326,7 +326,7 @@ func TestFusionAuth_AutomationRoleInClaims(t *testing.T) {
 		"iat":   time.Now().Unix(),
 	})
 
-	claims, err := v.Validate(token)
+	claims, err := v.Validate(context.Background(), token)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestFusionAuth_InvalidIssuer(t *testing.T) {
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
 
-	_, err = v.Validate(token)
+	_, err = v.Validate(context.Background(), token)
 	if err == nil {
 		t.Fatal("expected error for wrong issuer")
 	}
@@ -395,7 +395,7 @@ func TestFusionAuth_InvalidAudience(t *testing.T) {
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
 
-	_, err = v.Validate(token)
+	_, err = v.Validate(context.Background(), token)
 	if err == nil {
 		t.Fatal("expected error for wrong audience")
 	}
@@ -425,7 +425,7 @@ func TestFusionAuth_ExpiredToken(t *testing.T) {
 		"exp": time.Now().Add(-time.Hour).Unix(),
 	})
 
-	_, err = v.Validate(token)
+	_, err = v.Validate(context.Background(), token)
 	if err == nil {
 		t.Fatal("expected error for expired token")
 	}
@@ -457,7 +457,7 @@ func TestFusionAuth_AppScopedRoles(t *testing.T) {
 		},
 	})
 
-	claims, err := v.Validate(token)
+	claims, err := v.Validate(context.Background(), token)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestFusionAuth_BadSignature(t *testing.T) {
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
 
-	_, err = v.Validate(token)
+	_, err = v.Validate(context.Background(), token)
 	if err == nil {
 		t.Fatal("expected error for bad signature")
 	}
@@ -516,7 +516,7 @@ func TestFusionAuth_GarbageToken(t *testing.T) {
 	}
 	defer v.Close()
 
-	_, err = v.Validate("not.a.jwt")
+	_, err = v.Validate(context.Background(), "not.a.jwt")
 	if err == nil {
 		t.Fatal("expected error for garbage token")
 	}

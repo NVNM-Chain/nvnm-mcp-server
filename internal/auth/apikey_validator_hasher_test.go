@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -14,11 +15,11 @@ type stubLookup struct {
 	entry *KeyResult
 }
 
-func (s *stubLookup) Lookup(rawKey string) *KeyResult {
+func (s *stubLookup) Lookup(_ context.Context, rawKey string) (*KeyResult, RejectReason) {
 	if rawKey == s.raw {
-		return s.entry
+		return s.entry, RejectNone
 	}
-	return nil
+	return nil, RejectNotFound
 }
 func (s *stubLookup) Empty() bool { return s.entry == nil }
 
@@ -28,7 +29,7 @@ func TestValidate_V1Key_PassesReverify(t *testing.T) {
 	lk := &stubLookup{raw: "raw-secret", entry: &KeyResult{ID: "c1", KeyHash: v1hash, Roles: []string{"writer"}}}
 
 	v := NewAPIKeyValidatorWithHasher(lk, h)
-	claims, err := v.Validate("raw-secret")
+	claims, err := v.Validate(context.Background(), "raw-secret")
 	if err != nil {
 		t.Fatalf("Validate of a v1 key failed re-verify: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestValidate_LegacyValidator_V0StillWorks(t *testing.T) {
 	lk := &stubLookup{raw: "raw-secret", entry: &KeyResult{ID: "c1", KeyHash: v0hash}}
 
 	v := NewAPIKeyValidator(lk) // nil hasher => v0-only candidates
-	if _, err := v.Validate("raw-secret"); err != nil {
+	if _, err := v.Validate(context.Background(), "raw-secret"); err != nil {
 		t.Fatalf("legacy validator regressed on a v0 key: %v", err)
 	}
 }
@@ -51,7 +52,7 @@ func TestValidate_UnknownKey_Rejected(t *testing.T) {
 	h := NewKeyHasher([]byte("pepper-A"), nil)
 	lk := &stubLookup{raw: "raw-secret", entry: &KeyResult{ID: "c1", KeyHash: "deadbeef"}}
 	v := NewAPIKeyValidatorWithHasher(lk, h)
-	if _, err := v.Validate("not-the-key"); !errors.Is(err, ErrInvalidAPIKey) {
+	if _, err := v.Validate(context.Background(), "not-the-key"); !errors.Is(err, ErrInvalidAPIKey) {
 		t.Fatalf("unknown key error = %v, want ErrInvalidAPIKey", err)
 	}
 }
@@ -75,7 +76,7 @@ func TestValidate_FoundButHashMismatch_Rejected(t *testing.T) {
 		entry: &KeyResult{ID: "c1", KeyHash: zeroHash},
 	}
 	v := NewAPIKeyValidatorWithHasher(lk, h)
-	_, err := v.Validate("raw-secret")
+	_, err := v.Validate(context.Background(), "raw-secret")
 	if !errors.Is(err, ErrInvalidAPIKey) {
 		t.Fatalf("found-but-hash-mismatch error = %v, want ErrInvalidAPIKey", err)
 	}

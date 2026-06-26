@@ -189,7 +189,7 @@ type testKeyLookup struct {
 	entries []KeyEntry
 }
 
-func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
+func (t *testKeyLookup) Lookup(_ context.Context, rawKey string) (*auth.KeyResult, auth.RejectReason) {
 	wantHash := auth.HashKey(rawKey)
 	for i := range t.entries {
 		if !t.entries[i].Enabled {
@@ -204,10 +204,10 @@ func (t *testKeyLookup) Lookup(rawKey string) *auth.KeyResult {
 				ID:      t.entries[i].ID,
 				KeyHash: entryHash,
 				Roles:   t.entries[i].Roles,
-			}
+			}, auth.RejectNone
 		}
 	}
-	return nil
+	return nil, auth.RejectNotFound
 }
 
 func (t *testKeyLookup) Empty() bool {
@@ -286,7 +286,7 @@ func startAuthTestServer(
 		return srv.mcpServer
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
-	handler := AuthMiddleware(mcpHandler, validator, nil, cfg.keylessReads, logger)
+	handler := AuthMiddleware(mcpHandler, validator, nil, cfg.keylessReads, logger, "")
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)

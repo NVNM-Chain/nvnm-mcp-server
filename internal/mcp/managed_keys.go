@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -21,13 +22,15 @@ var (
 )
 
 // KeySummary is a redacted view of a KeyEntry suitable for API responses.
-// The raw key is never included.
+// The raw key is never included. ExpiresAt uses the zero value (not omitempty)
+// so callers can distinguish "no expiry set" from a missing field.
 type KeySummary struct {
 	ID        string    `json:"client_id"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	Roles     []string  `json:"roles,omitempty"`
 	KeyPrefix string    `json:"key_prefix"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // KeyCreateResult is returned from Create. It includes the raw key exactly once.
@@ -41,6 +44,10 @@ type KeyCreateResult struct {
 type KeyUpdate struct {
 	Enabled *bool
 	Roles   *[]string
+	// ExpiresAt controls expiry: nil leaves it unchanged; a non-nil zero
+	// time.Time clears the expiry (no expiry, SQL NULL); a non-nil non-zero
+	// time.Time renews the key to that absolute UTC deadline.
+	ExpiresAt *time.Time
 }
 
 // Compile-time assertion that the file backend satisfies KeyStoreBackend.
@@ -55,6 +62,7 @@ type ManagedKeyStore struct {
 	entries []KeyEntry
 	path    string
 	hasher  *auth.KeyHasher
+	now     func() time.Time
 }
 
 // NewManagedKeyStore loads keys with no pepper (version-0). Legacy entry
@@ -133,12 +141,14 @@ func NewManagedKeyStoreWithHasher(path string, hasher *auth.KeyHasher, logger *s
 		}
 	}
 
-	return &ManagedKeyStore{
+	mks := &ManagedKeyStore{
 		store:   NewKeyStoreWithHasher(entries, hasher),
 		entries: entries,
 		path:    path,
 		hasher:  hasher,
-	}, nil
+	}
+	mks.now = time.Now
+	return mks, nil
 }
 
 // writePreMigrationBackup copies path verbatim to
@@ -172,19 +182,24 @@ func NewManagedKeyStoreFromEntries(path string, entries []KeyEntry) *ManagedKeyS
 // NewManagedKeyStoreFromEntriesWithHasher builds a ManagedKeyStore from
 // pre-loaded entries whose lookups and new-key digests use hasher.
 func NewManagedKeyStoreFromEntriesWithHasher(path string, entries []KeyEntry, hasher *auth.KeyHasher) *ManagedKeyStore {
-	return &ManagedKeyStore{
+	mks := &ManagedKeyStore{
 		store:   NewKeyStoreWithHasher(entries, hasher),
 		entries: copyEntries(entries),
 		path:    path,
 		hasher:  hasher,
 	}
+	mks.now = time.Now
+	return mks
 }
 
-// Lookup delegates to the underlying KeyStore under a read lock.
-func (m *ManagedKeyStore) Lookup(rawKey string) *KeyEntry {
+// Lookup resolves rawKey to its stored entry (enabled or not) and classifies
+// it as of the store clock. ctx is accepted for interface symmetry; the
+// file backend does no I/O on the hot path.
+func (m *ManagedKeyStore) Lookup(_ context.Context, rawKey string) (*KeyEntry, auth.RejectReason) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.store.Lookup(rawKey)
+	e := m.store.Lookup(rawKey)
+	m.mu.RUnlock()
+	return e, classifyEntry(e, m.now())
 }
 
 // Empty returns true if the store has no enabled keys.
@@ -206,9 +221,11 @@ func (m *ManagedKeyStore) List() []KeySummary {
 	return summaries
 }
 
-// Create generates a new API key for clientID, persists it, and returns the
-// result including the raw key. Returns ErrClientExists if clientID is taken.
-func (m *ManagedKeyStore) Create(clientID string, roles []string) (*KeyCreateResult, error) {
+// Create generates a new API key for clientID with optional expiry, persists it,
+// and returns the result including the raw key. Returns ErrClientExists if clientID is taken.
+func (m *ManagedKeyStore) Create(
+	_ context.Context, clientID string, roles []string, expiresAt time.Time,
+) (*KeyCreateResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -224,9 +241,7 @@ func (m *ManagedKeyStore) Create(clientID string, roles []string) (*KeyCreateRes
 	}
 
 	entry := NewKeyEntryWithHasher(clientID, rawKey, roles, m.hasher)
-	// NewKeyEntryWithHasher captures KeyPrefix from the raw key once; the raw
-	// key is returned exactly once via KeyCreateResult.Key and never
-	// retained on the entry.
+	entry.ExpiresAt = expiresAt
 
 	updated := append(copyEntries(m.entries), entry)
 	if err := SaveKeysFile(m.path, updated); err != nil {
@@ -265,6 +280,9 @@ func (m *ManagedKeyStore) Update(clientID string, upd KeyUpdate) (*KeySummary, e
 	}
 	if upd.Roles != nil {
 		updated[idx].Roles = *upd.Roles
+	}
+	if upd.ExpiresAt != nil {
+		updated[idx].ExpiresAt = *upd.ExpiresAt
 	}
 
 	if err := SaveKeysFile(m.path, updated); err != nil {
@@ -334,6 +352,7 @@ func summarize(e *KeyEntry) KeySummary {
 		CreatedAt: e.CreatedAt,
 		Roles:     e.Roles,
 		KeyPrefix: e.KeyPrefix,
+		ExpiresAt: e.ExpiresAt,
 	}
 }
 

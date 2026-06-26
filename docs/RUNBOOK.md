@@ -367,6 +367,8 @@ No configuration beyond `NVNM_ALLOWED_ORIGINS` is required; the same production 
 | `MCP_API_KEY_ROLES` | _(empty)_ | Comma-separated roles for `MCP_API_KEY`. Required when `MCP_API_KEY` is set. Valid roles: `reader`, `writer`, `admin`, `automation`. Authorization is default-deny: an authenticated key authorizes only the tools its assigned roles permit; a key with no roles authorizes nothing. |
 | `KEY_HMAC_PEPPER` | _(empty)_ | Optional. Server-side secret that makes a key-store dump non-reversible offline. When set, newly issued keys are stored as HMAC-SHA256 under this pepper (`hash_version 1`). Legacy `v0` keys (plain SHA-256) continue to authenticate via versioned candidate lookup. Wire from Vault / k8s Secret / AWS SM — never hardcode. See `.env.example` for details. |
 | `KEY_HMAC_PEPPER_PREVIOUS` | _(empty)_ | Optional. Previous pepper for one rotation window. Requires `KEY_HMAC_PEPPER`; boot fails with `ErrPepperPreviousWithoutActive` if set without it. |
+| `KEY_DEFAULT_TTL` | `8760h` | Lifetime applied to newly issued keys when no per-key `ttl` override is given (admin REST API and `key-mgmt create`). Go duration string; `0` means no default expiry. Does **not** apply to the static `MCP_API_KEY` path (always non-expiring). |
+| `KEY_RENEWAL_URL` | _(empty)_ | Optional URL appended to the `key expired` rejection message. Only shown to a caller who presented a key matching a real stored row (bounded disclosure — non-holders receive the generic `invalid API key` message). |
 | `OTLP_INSECURE` | `true` | Use plaintext connection to OTLP endpoint. Set `false` for TLS. |
 
 When either key variable is set, all HTTP requests must include `Authorization: Bearer <key>`. The server warns at startup if HTTP transport runs with no keys configured.
@@ -377,9 +379,22 @@ Manage keys via Makefile targets:
 make key-create NAME=my-agent                       # Create key, prints key to stdout
 make key-create NAME=pipeline ROLES=writer           # Create key with the writer role
 make key-list                                        # List all keys (ID, enabled, roles, created)
-make key-disable NAME=my-agent                       # Disable a key
-make key-enable NAME=my-agent                        # Re-enable a key
+make key-disable NAME=my-agent                       # Disable a key (sets enabled=false)
+make key-enable NAME=my-agent                        # Re-enable a disabled key
 ```
+
+Or use the `key-mgmt` CLI directly for TTL control and renewal:
+
+```bash
+key-mgmt create my-agent --roles reader,writer --ttl 720h  # 30-day key
+key-mgmt create my-agent --roles reader --ttl 0            # no expiry override
+key-mgmt renew my-agent --ttl 720h                        # extend expiry from now
+key-mgmt enable  my-agent
+key-mgmt disable my-agent
+key-mgmt list
+```
+
+`key-mgmt renew` requires an explicit `--ttl`; it does not apply `KEY_DEFAULT_TTL`. Use `--ttl 0` (or `none` / `never`) to clear the expiry entirely.
 
 ### Postgres key-store backend
 
@@ -397,7 +412,7 @@ The Postgres key-store backend lets multiple server replicas share a single auth
 
 **Key hashing and lazy rehash.** The Postgres backend stores keys as `BYTEA` versioned digests in the `api_keys` table, using the same `hash_version` scheme as the file backend (`v0` = plain SHA-256, `v1` = HMAC-SHA256 under `KEY_HMAC_PEPPER`). On first authenticated use, a legacy `v0` key is transparently rehashed to `v1` and the updated digest is persisted to the database — this is the persisted lazy rehash deferred from Phase 2. Existing callers notice no change; the raw Bearer token they present is unchanged.
 
-**Schema note.** The `api_keys` table includes an `expires_at` column, but expiry enforcement is not implemented yet — keys do not expire regardless of that value. Expiry enforcement is planned for Phase 4.
+**Schema note.** The `api_keys` table includes an `expires_at` column. As of Phase 4, expiry is enforced at Lookup: a key whose `expires_at` has passed is rejected with `key expired` (plus the `KEY_RENEWAL_URL` hint when configured). A zero `expires_at` (SQL `NULL`) means no expiry.
 
 **File backend is unchanged.** Setting `KEY_STORE_BACKEND=file` (or leaving it unset) uses `MCP_API_KEYS_FILE` exactly as before. No existing deployment is affected by Phase 3.
 
@@ -414,23 +429,59 @@ When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` w
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/admin/keys` | Create a new client key (returns raw key once). Body: `{"client_id": "name", "roles": ["reader","writer"]}` |
-| `GET` | `/admin/keys` | List all keys (redacted, no raw keys). |
-| `PATCH` | `/admin/keys/{id}` | Update enabled/roles. Body: `{"enabled": false}` or `{"roles": ["reader","writer"]}` |
+| `POST` | `/admin/keys` | Create a new client key (returns raw key once). Body: `{"client_id": "name", "roles": ["reader","writer"], "ttl": "720h"}` |
+| `GET` | `/admin/keys` | List all keys (redacted). Response includes `expires_at` per key; zero value (`0001-01-01T00:00:00Z`) means no expiry. |
+| `PATCH` | `/admin/keys/{id}` | Update enabled/roles/ttl. Body fields: `enabled` (bool), `roles` (string array), `ttl` (duration string; omit = unchanged). |
 | `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
 
 All requests require `Authorization: Bearer <ADMIN_API_KEY>`.
 
-**Example: create a key via curl:**
+**TTL on create and PATCH.** The optional `"ttl"` field is a Go duration string (e.g. `"720h"`, `"8760h"`). Use `"0"`, `"none"`, or `"never"` for no expiry. A negative or zero-parsed duration returns HTTP 400. When `"ttl"` is omitted on create, `KEY_DEFAULT_TTL` applies (default `8760h`). On PATCH, omitting `"ttl"` leaves the existing expiry unchanged; sending `"ttl": "0"` clears it.
+
+**Example: create a 30-day key:**
 
 ```bash
 curl -X POST http://localhost:8081/admin/keys \
   -H "Authorization: Bearer $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"client_id": "new-agent", "roles": ["reader"]}'
+  -d '{"client_id": "new-agent", "roles": ["reader"], "ttl": "720h"}'
+```
+
+**Example: renew (extend) an existing key by 90 days:**
+
+```bash
+curl -X PATCH http://localhost:8081/admin/keys/new-agent \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"ttl": "2160h"}'
 ```
 
 **Security:** The admin port should be restricted via firewall or Kubernetes NetworkPolicy to ops tooling only. The admin token is separate from client keys.
+
+### Key lifecycle — revocation vs expiry
+
+This section is for operators who manage key state. Two independent kill-switches control whether a key is accepted at Lookup:
+
+| Kill-switch | Field | How to set | Semantics |
+|---|---|---|---|
+| **Revoke** (manual, indefinite) | `enabled = false` | `make key-disable NAME=…` / `PATCH {"enabled": false}` / `key-mgmt disable` | Rejects immediately; no time component. Undo with `key-mgmt enable` or `PATCH {"enabled": true}`. |
+| **Expire** (automatic, time-bound) | `expires_at` | `--ttl` on create/renew; `PATCH {"ttl": "…"}` | Rejects once `now >= expires_at`. Renew with `key-mgmt renew --ttl <dur>` or `PATCH {"ttl": "…"}` to extend. |
+
+A key can be both disabled and expired; the `revoked` precedence wins (see `classifyEntry` in `internal/mcp/keys.go`).
+
+**No-expiry sentinel.** A zero `expires_at` (Go zero `time.Time`, SQL `NULL`) means the key never expires. The JSON representation in both the file-store and admin API responses is `"expires_at": "0001-01-01T00:00:00Z"` — this is the Go zero-time value, not a real expiry date. Operators must not mistake it for an ancient date; it means "no expiry set."
+
+**Static `MCP_API_KEY`.** The single static key set via `MCP_API_KEY` always has a zero `expires_at` (no expiry). `KEY_DEFAULT_TTL` does not apply to it. To time-bound access, use the admin key store (`MCP_API_KEYS_FILE`) instead.
+
+**Reject messages (bounded disclosure).** The server sends different 401 messages depending on the classification:
+
+| Situation | Message shown to caller |
+|---|---|
+| No stored row matches the presented key | `invalid API key` (generic — same message for typos and unknown keys) |
+| Row matched, `expires_at` has passed | `key expired` (+ ` — renew at <KEY_RENEWAL_URL>` when set) |
+| Row matched, `enabled = false` | `key revoked` |
+
+The specific `expired` / `revoked` messages are **only** reachable by a caller who presented a token matching a real stored row — a non-holder always lands on the generic path via the constant-time miss path in `APIKeyValidator`. This is bounded disclosure: the helpful detail is reserved for the key holder.
 
 ### Write-approval removal
 

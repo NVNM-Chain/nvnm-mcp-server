@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 // fakeEmailSender records the to / subject / body of every Send call
@@ -76,7 +78,7 @@ func startPendingAdminTestServer(t *testing.T) (*httptest.Server, *ManagedKeySto
 	email := &fakeEmailSender{}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, logger).
+	adminSrv := NewAdminServer(":0", testAdminKey, mks, 0, logger).
 		WithPendingKeyStore(ps, email)
 
 	ts := httptest.NewServer(adminSrv.srv.Handler)
@@ -169,7 +171,7 @@ func TestAdminPending_Approve_Success(t *testing.T) {
 	}
 
 	// Key issued in ManagedKeyStore
-	if mks.Lookup(out.APIKey) == nil {
+	if _, r := mks.Lookup(context.Background(), out.APIKey); r != auth.RejectNone {
 		t.Error("issued key not found via Lookup")
 	}
 
@@ -273,7 +275,7 @@ func TestAdminPending_NotConfigured503(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, logger) // no WithPendingKeyStore
+	adminSrv := NewAdminServer(":0", testAdminKey, mks, 0, logger) // no WithPendingKeyStore
 
 	ts := httptest.NewServer(adminSrv.srv.Handler)
 	defer ts.Close()

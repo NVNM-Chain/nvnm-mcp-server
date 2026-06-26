@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 )
@@ -28,7 +29,7 @@ type KeyResult struct {
 // Implementations of Lookup must hash the input internally; callers pass
 // the raw token, never a pre-hashed value.
 type KeyLookup interface {
-	Lookup(rawKey string) *KeyResult
+	Lookup(ctx context.Context, rawKey string) (*KeyResult, RejectReason)
 	Empty() bool
 }
 
@@ -72,28 +73,19 @@ var missPathPlaceholder = []byte("00000000000000000000000000000000" +
 // success. Miss and hit paths burn the same constant-time compare so
 // a network observer cannot use response timing to distinguish
 // unknown-key from known-key-with-wrong-digest.
-func (v *APIKeyValidator) Validate(token string) (*Claims, error) {
-	entry := v.keys.Lookup(token)
-	if entry == nil {
-		// Flatten the hit/miss timing distinction. The compare is on
-		// equal placeholder bytes so it always "succeeds" against
-		// itself; the discarded result is correct -- the rejection
-		// happens unconditionally below.
+func (v *APIKeyValidator) Validate(ctx context.Context, token string) (*Claims, error) {
+	entry, reason := v.keys.Lookup(ctx, token)
+	switch reason {
+	case RejectNotFound:
+		// Flatten hit/miss timing for a non-holder.
 		_ = subtle.ConstantTimeCompare(missPathPlaceholder, missPathPlaceholder)
 		return nil, ErrInvalidAPIKey
+	case RejectExpired:
+		return nil, ErrKeyExpired
+	case RejectRevoked:
+		return nil, ErrKeyRevoked
 	}
-
-	// Defense-in-depth: Lookup already established exact hash equality,
-	// but we re-derive the digest from the token under constant time to
-	// guard against any future hashmap side-channel. With versioned
-	// hashing the stored digest may be a peppered HMAC, so we compare
-	// against every candidate (v0 + active/previous pepper) and
-	// OR-accumulate without an early return to keep the path
-	// data-independent. All candidates are 64-char SHA-256 hex, matching
-	// entry.KeyHash's length, so ConstantTimeCompare's length shortcut
-	// cannot leak the digest. The equal-length (64-hex) invariant is
-	// guaranteed upstream by the hasher (both v0 and v1 emit 64-char hex);
-	// it is not re-enforced here.
+	// RejectNone: entry is non-nil. Re-verify the digest under constant time.
 	var match int
 	for _, c := range v.hasher.Candidates(token) {
 		match |= subtle.ConstantTimeCompare([]byte(c.Hash), []byte(entry.KeyHash))
@@ -101,11 +93,7 @@ func (v *APIKeyValidator) Validate(token string) (*Claims, error) {
 	if match != 1 {
 		return nil, ErrInvalidAPIKey
 	}
-
-	return &Claims{
-		ClientID: entry.ID,
-		Roles:    entry.Roles,
-	}, nil
+	return &Claims{ClientID: entry.ID, Roles: entry.Roles}, nil
 }
 
 // Close is a no-op for API key validation.

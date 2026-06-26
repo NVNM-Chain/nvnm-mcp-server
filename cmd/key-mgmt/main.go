@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
@@ -28,6 +29,12 @@ var (
 		"at least one role is required (--roles reader,writer,...); " +
 			"a key with no roles authorizes nothing",
 	)
+	// errRenewTTLRequired is returned by runRenew when --ttl is omitted.
+	// Renew does not apply a default TTL; the operator must be explicit.
+	errRenewTTLRequired = errors.New("--ttl is required for renew")
+	// errTTLMustBePositive is returned by resolveCLIExpiry when --ttl parses
+	// to a non-positive duration (e.g. --ttl -1h).
+	errTTLMustBePositive = errors.New("--ttl must be positive")
 )
 
 var errUsage = errors.New("see usage")
@@ -55,6 +62,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "create":
 		return runCreate(keysFile, args[1:])
+	case "renew":
+		return runRenew(keysFile, args[1:])
 	case "disable":
 		return runSetEnabled(keysFile, args[1:], false)
 	case "enable":
@@ -72,7 +81,7 @@ func run(args []string) error {
 func runCreate(keysFile string, args []string) error {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr,
-			"usage: key-mgmt create <client-id> [--roles reader,writer,...]\n")
+			"usage: key-mgmt create <client-id> [--roles reader,writer,...] [--ttl <dur|0>]\n")
 		return errUsage
 	}
 	rolesStr := parseFlag(args[1:], "--roles")
@@ -83,7 +92,18 @@ func runCreate(keysFile string, args []string) error {
 	if len(roles) == 0 {
 		return errNoRoles
 	}
-	return createKey(keysFile, args[0], roles)
+
+	defaultTTL, err := defaultKeyTTL()
+	if err != nil {
+		return err
+	}
+	ttlStr := parseFlag(args[1:], "--ttl")
+	expiresAt, err := resolveCLIExpiry(ttlStr, defaultTTL, time.Now())
+	if err != nil {
+		return err
+	}
+
+	return createKey(keysFile, args[0], roles, expiresAt)
 }
 
 func runSetEnabled(keysFile string, args []string, enabled bool) error {
@@ -116,8 +136,14 @@ func runSetRoles(keysFile string, args []string) error {
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: key-mgmt <command> [args]\n\n")
 	fmt.Fprintf(os.Stderr, "commands:\n")
-	fmt.Fprintf(os.Stderr, "  create <client-id> [--roles reader,writer,...]\n")
+	fmt.Fprintf(os.Stderr, "  create <client-id> [--roles reader,writer,...] [--ttl <dur|0>]\n")
 	fmt.Fprintf(os.Stderr, "                       Generate a new API key for a client\n")
+	fmt.Fprintf(os.Stderr,
+		"                       --ttl: key lifetime (e.g. 24h, 90d)."+
+			" Default: KEY_DEFAULT_TTL (8760h).\n")
+	fmt.Fprintf(os.Stderr, "                       Use --ttl 0 (or none/never) for no expiry.\n")
+	fmt.Fprintf(os.Stderr, "  renew <client-id> --ttl <dur|0>\n")
+	fmt.Fprintf(os.Stderr, "                       Update the expiry of an existing key\n")
 	fmt.Fprintf(os.Stderr, "  disable <client-id>  Disable an existing API key\n")
 	fmt.Fprintf(os.Stderr, "  enable <client-id>   Re-enable a disabled API key\n")
 	fmt.Fprintf(os.Stderr, "  set-roles <client-id> <role1,role2,...|\"\">\n")
@@ -165,7 +191,94 @@ func parseRoles(rolesStr string) ([]string, error) {
 	return roles, nil
 }
 
-func createKey(path, clientID string, roles []string) error {
+// defaultKeyTTL reads KEY_DEFAULT_TTL from the environment (default "8760h")
+// and returns it as a time.Duration. A zero duration means no expiry.
+func defaultKeyTTL() (time.Duration, error) {
+	s := os.Getenv("KEY_DEFAULT_TTL")
+	if s == "" {
+		s = "8760h"
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid KEY_DEFAULT_TTL %q: %w", s, err)
+	}
+	return d, nil
+}
+
+// resolveCLIExpiry maps a CLI --ttl string to an absolute expiry time.
+//
+//   - ttlStr == ""               → now + defaultTTL (zero defaultTTL → no expiry)
+//   - ttlStr in "0","none","never" → zero time.Time (no expiry)
+//   - else                       → now + parsed duration; invalid → error
+func resolveCLIExpiry(ttlStr string, defaultTTL time.Duration, now time.Time) (time.Time, error) {
+	if ttlStr == "" {
+		if defaultTTL == 0 {
+			return time.Time{}, nil
+		}
+		return now.Add(defaultTTL), nil
+	}
+	switch ttlStr {
+	case "0", "none", "never":
+		return time.Time{}, nil
+	}
+	d, err := time.ParseDuration(ttlStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid --ttl %q: %w", ttlStr, err)
+	}
+	if d <= 0 {
+		return time.Time{}, fmt.Errorf("%w: got %q", errTTLMustBePositive, ttlStr)
+	}
+	return now.Add(d), nil
+}
+
+// runRenew implements: key-mgmt renew <client-id> --ttl <dur|0>
+func runRenew(keysFile string, args []string) error {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "usage: key-mgmt renew <client-id> --ttl <dur|0>\n")
+		return errUsage
+	}
+	clientID := args[0]
+	ttlStr := parseFlag(args[1:], "--ttl")
+	if ttlStr == "" {
+		return errRenewTTLRequired
+	}
+
+	// For renew we do not apply the default TTL; the operator must be explicit.
+	expiresAt, err := resolveCLIExpiry(ttlStr, 0, time.Now())
+	if err != nil {
+		return err
+	}
+
+	entries, err := loadOrInit(keysFile)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for i := range entries {
+		if entries[i].ID == clientID {
+			entries[i].ExpiresAt = expiresAt
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("client %q: %w", clientID, errClientMissing)
+	}
+
+	if err := mcpkeys.SaveKeysFile(keysFile, entries); err != nil {
+		return err
+	}
+
+	if expiresAt.IsZero() {
+		fmt.Printf("Client %q expiry cleared (no expiry).\n", clientID)
+	} else {
+		fmt.Printf("Client %q renewed; expires: %s\n", clientID, expiresAt.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+func createKey(path, clientID string, roles []string, expiresAt time.Time) error {
 	entries, err := loadOrInit(path)
 	if err != nil {
 		return err
@@ -193,7 +306,9 @@ func createKey(path, clientID string, roles []string) error {
 	}
 
 	hasher := auth.NewKeyHasher([]byte(active), []byte(prev))
-	entries = append(entries, mcpkeys.NewKeyEntryWithHasher(clientID, key, roles, hasher))
+	e := mcpkeys.NewKeyEntryWithHasher(clientID, key, roles, hasher)
+	e.ExpiresAt = expiresAt
+	entries = append(entries, e)
 
 	if err := mcpkeys.SaveKeysFile(path, entries); err != nil {
 		return err
@@ -203,6 +318,11 @@ func createKey(path, clientID string, roles []string) error {
 	fmt.Printf("  Bearer %s\n\n", key)
 	if len(roles) > 0 {
 		fmt.Printf("  Roles: %s\n", strings.Join(roles, ", "))
+	}
+	if expiresAt.IsZero() {
+		fmt.Printf("  Expires: no expiry\n")
+	} else {
+		fmt.Printf("  Expires: %s\n", expiresAt.UTC().Format(time.RFC3339))
 	}
 	fmt.Printf("Store this key securely — it cannot be retrieved later.\n")
 	fmt.Printf("Keys file: %s\n", path)

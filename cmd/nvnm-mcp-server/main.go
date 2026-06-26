@@ -196,7 +196,7 @@ func run() error {
 
 	return runTransport(ctx, srv, cfg, validator,
 		mcpLimiter, anonLimiter, failLimiter,
-		tel.Metrics, keyRequestHandler)
+		tel.Metrics, keyRequestHandler, cfg.KeyRenewalURL)
 }
 
 // runTransport dispatches to the configured transport. Extracted from
@@ -212,6 +212,7 @@ func runTransport(
 	failLimiter *mcpserver.IPFailRateLimiter,
 	metrics *telemetry.Metrics,
 	keyRequestHandler http.Handler,
+	renewalURL string,
 ) error {
 	switch cfg.Transport {
 	case "stdio":
@@ -221,7 +222,7 @@ func runTransport(
 			ctx, cfg.HTTPAddr, validator,
 			mcpLimiter, anonLimiter, failLimiter,
 			buildOriginAllowlist(cfg), metrics,
-			keyRequestHandler,
+			keyRequestHandler, renewalURL,
 		)
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
@@ -444,6 +445,9 @@ func loadAPIKeys(
 	case cfg.APIKey != "":
 		logger.Info("using single API key from MCP_API_KEY",
 			slog.Any("roles", cfg.APIKeyRoles))
+		// Static MCP_API_KEY is intentionally non-expiring: ExpiresAt is left
+		// as zero (no expiry). KEY_DEFAULT_TTL applies only to admin-issued
+		// keys, never to the single-key environment variable path.
 		entry := mcpserver.NewKeyEntryWithHasher("static-key", cfg.APIKey, cfg.APIKeyRoles, hasher)
 		managedKeys = mcpserver.NewManagedKeyStoreFromEntriesWithHasher("", []mcpserver.KeyEntry{entry}, hasher)
 	default:
@@ -489,7 +493,7 @@ func startAdminServer(
 	}
 
 	adminSrv := mcpserver.NewAdminServer(
-		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, logger,
+		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, cfg.KeyDefaultTTL, logger,
 	).WithPendingKeyStore(pendingStore, email)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {

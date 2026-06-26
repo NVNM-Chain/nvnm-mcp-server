@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -60,6 +61,26 @@ type KeyEntry struct {
 	// Roles controls per-tool RBAC. Valid values: reader, writer, admin, automation.
 	// Empty (omitted) means no role enforcement for this key.
 	Roles []string `json:"roles,omitempty"`
+	// ExpiresAt is the absolute time after which the key is rejected. The
+	// zero value (and SQL NULL) means no expiry (static/dev keys). The zero
+	// value serializes as the zero-time sentinel (0001-01-01T00:00:00Z).
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// classifyEntry maps a matched key entry to a RejectReason as of now.
+// Precedence: not-found, then revoked (disabled), then expired, then ok —
+// a disabled key reads "revoked" even if also past expiry.
+func classifyEntry(e *KeyEntry, now time.Time) auth.RejectReason {
+	if e == nil {
+		return auth.RejectNotFound
+	}
+	if !e.Enabled {
+		return auth.RejectRevoked
+	}
+	if !e.ExpiresAt.IsZero() && !now.Before(e.ExpiresAt) {
+		return auth.RejectExpired
+	}
+	return auth.RejectNone
 }
 
 // NewKeyEntry is the legacy constructor: it produces a version-0
@@ -95,13 +116,15 @@ func keyPrefixOf(rawKey string) string {
 	return rawKey[:keyPrefixLen] + "..."
 }
 
-// KeyStore indexes enabled keys by their stored digest for O(1) lookup.
-// Lookup callers pass the raw token; the store derives the candidate
-// digests via its KeyHasher and probes the index with each. Raw key
-// bytes are not retained.
+// KeyStore indexes all keys (enabled and disabled) by their stored digest
+// for O(1) lookup. Lookup callers pass the raw token; the store derives the
+// candidate digests via its KeyHasher and probes the index with each. Raw
+// key bytes are not retained. Classification (enabled/expired/revoked) is
+// performed by ManagedKeyStore.Lookup via classifyEntry, not at index time.
 type KeyStore struct {
-	byHash map[string]*KeyEntry
-	hasher *auth.KeyHasher
+	byHash       map[string]*KeyEntry
+	hasher       *auth.KeyHasher
+	enabledCount int // number of enabled entries; used by Empty()
 }
 
 // NewKeyStore builds a version-0 (no-pepper) KeyStore. Legacy entry
@@ -112,8 +135,9 @@ func NewKeyStore(entries []KeyEntry) *KeyStore {
 
 // NewKeyStoreWithHasher builds a KeyStore that derives lookup candidates
 // via hasher (nil = version-0 only). Pre-8.6 entries are normalized in
-// place via migrateLegacyEntries before indexing; only enabled entries
-// with a non-empty KeyHash are indexed.
+// place via migrateLegacyEntries before indexing. All entries with a
+// non-empty KeyHash are indexed; enabledCount tracks only the enabled ones
+// so Empty() can report "no enabled keys" correctly.
 func NewKeyStoreWithHasher(entries []KeyEntry, hasher *auth.KeyHasher) *KeyStore {
 	_, _ = migrateLegacyEntries(entries) // normalizes in place
 	ks := &KeyStore{
@@ -121,8 +145,13 @@ func NewKeyStoreWithHasher(entries []KeyEntry, hasher *auth.KeyHasher) *KeyStore
 		hasher: hasher,
 	}
 	for i := range entries {
-		if entries[i].Enabled && entries[i].KeyHash != "" {
+		// Index every entry with a hash, enabled or not, so Lookup can
+		// surface a matched-but-disabled row as "revoked" (Phase 4).
+		if entries[i].KeyHash != "" {
 			ks.byHash[entries[i].KeyHash] = &entries[i]
+			if entries[i].Enabled {
+				ks.enabledCount++
+			}
 		}
 	}
 	return ks
@@ -158,11 +187,12 @@ func migrateLegacyEntries(entries []KeyEntry) (changed bool, count int) {
 	return changed, count
 }
 
-// Lookup returns the enabled KeyEntry whose stored KeyHash matches any
-// candidate digest for rawKey (version-0 plain SHA-256, plus the active
-// and previous pepper HMAC digests when configured), or nil if none
-// match. The first hit wins. The raw key is hashed per candidate; the
-// input string is otherwise not retained.
+// Lookup returns the KeyEntry (enabled or disabled) whose stored KeyHash
+// matches any candidate digest for rawKey (version-0 plain SHA-256, plus
+// the active and previous pepper HMAC digests when configured), or nil if
+// none match. The first hit wins. Caller is responsible for classifying the
+// returned entry (enabled/expired/revoked) via classifyEntry. The raw key
+// is hashed per candidate; the input string is otherwise not retained.
 func (ks *KeyStore) Lookup(rawKey string) *KeyEntry {
 	for _, c := range ks.hasher.Candidates(rawKey) {
 		if e := ks.byHash[c.Hash]; e != nil {
@@ -172,9 +202,9 @@ func (ks *KeyStore) Lookup(rawKey string) *KeyEntry {
 	return nil
 }
 
-// Empty returns true if the store has no active keys.
+// Empty returns true if the store has no enabled keys.
 func (ks *KeyStore) Empty() bool {
-	return len(ks.byHash) == 0
+	return ks.enabledCount == 0
 }
 
 // LoadKeysFile reads a JSON array of KeyEntry from the given path. If
@@ -358,19 +388,15 @@ func NewKeyLookupAdapter(store KeyStoreBackend) *KeyLookupAdapter {
 	return &KeyLookupAdapter{store: store}
 }
 
-// Lookup returns a KeyResult for the given raw API key, or nil if not
-// found. The raw key is hashed by the underlying KeyStore; this
-// adapter does not retain the input.
-func (a *KeyLookupAdapter) Lookup(rawKey string) *auth.KeyResult {
-	entry := a.store.Lookup(rawKey)
-	if entry == nil {
-		return nil
+// Lookup returns a KeyResult and RejectReason for the given raw API key.
+// The raw key is hashed by the underlying KeyStore; this adapter does not
+// retain the input.
+func (a *KeyLookupAdapter) Lookup(ctx context.Context, rawKey string) (*auth.KeyResult, auth.RejectReason) {
+	e, reason := a.store.Lookup(ctx, rawKey)
+	if reason != auth.RejectNone {
+		return nil, reason
 	}
-	return &auth.KeyResult{
-		ID:      entry.ID,
-		KeyHash: entry.KeyHash,
-		Roles:   entry.Roles,
-	}
+	return &auth.KeyResult{ID: e.ID, KeyHash: e.KeyHash, Roles: e.Roles}, auth.RejectNone
 }
 
 // Empty returns true if the underlying store has no enabled keys.

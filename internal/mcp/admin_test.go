@@ -5,12 +5,16 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 const testAdminKey = "admin-secret-key-for-testing"
@@ -25,7 +29,7 @@ func startAdminTestServer(t *testing.T) (*httptest.Server, *ManagedKeyStore) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, logger)
+	adminSrv := NewAdminServer(":0", testAdminKey, mks, 0, logger)
 
 	ts := httptest.NewServer(adminSrv.srv.Handler)
 	t.Cleanup(ts.Close)
@@ -173,10 +177,10 @@ func TestAdmin_List_Empty(t *testing.T) {
 func TestAdmin_List_WithKeys(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("alpha", nil); err != nil {
+	if _, err := mks.Create(context.Background(), "alpha", nil, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mks.Create("beta", nil); err != nil {
+	if _, err := mks.Create(context.Background(), "beta", nil, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +204,7 @@ func TestAdmin_List_WithKeys(t *testing.T) {
 func TestAdmin_Update_DisableAndEnable(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("target", nil)
+	result, err := mks.Create(context.Background(), "target", nil, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +223,7 @@ func TestAdmin_Update_DisableAndEnable(t *testing.T) {
 		t.Fatal("expected enabled=false after disable")
 	}
 
-	if entry := mks.Lookup(result.Key); entry != nil {
+	if _, r := mks.Lookup(context.Background(), result.Key); r == auth.RejectNone {
 		t.Fatal("expected disabled key to be nil on Lookup")
 	}
 
@@ -231,7 +235,7 @@ func TestAdmin_Update_DisableAndEnable(t *testing.T) {
 	}
 	resp2.Body.Close()
 
-	if entry := mks.Lookup(result.Key); entry == nil {
+	if _, r := mks.Lookup(context.Background(), result.Key); r != auth.RejectNone {
 		t.Fatal("expected re-enabled key to be findable")
 	}
 }
@@ -250,7 +254,7 @@ func TestAdmin_Update_NotFound(t *testing.T) {
 func TestAdmin_Update_EmptyBody(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("target", nil); err != nil {
+	if _, err := mks.Create(context.Background(), "target", nil, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -267,7 +271,7 @@ func TestAdmin_Update_EmptyBody(t *testing.T) {
 func TestAdmin_Delete_Success(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("to-delete", nil); err != nil {
+	if _, err := mks.Create(context.Background(), "to-delete", nil, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -307,7 +311,7 @@ func TestAdmin_FullLifecycle(t *testing.T) {
 	decodeJSON(t, resp, &created)
 	rawKey := created.Key
 
-	if entry := mks.Lookup(rawKey); entry == nil {
+	if _, r := mks.Lookup(context.Background(), rawKey); r != auth.RejectNone {
 		t.Fatal("key not findable via Lookup immediately after creation")
 	}
 
@@ -325,7 +329,7 @@ func TestAdmin_FullLifecycle(t *testing.T) {
 		t.Fatalf("disable: got status %d, want 200", patchResp.StatusCode)
 	}
 	patchResp.Body.Close()
-	if entry := mks.Lookup(rawKey); entry != nil {
+	if _, r := mks.Lookup(context.Background(), rawKey); r == auth.RejectNone {
 		t.Fatal("disabled key should not be findable via Lookup")
 	}
 
@@ -336,7 +340,7 @@ func TestAdmin_FullLifecycle(t *testing.T) {
 		t.Fatalf("enable: got status %d, want 200", patchResp2.StatusCode)
 	}
 	patchResp2.Body.Close()
-	if entry := mks.Lookup(rawKey); entry == nil {
+	if _, r := mks.Lookup(context.Background(), rawKey); r != auth.RejectNone {
 		t.Fatal("re-enabled key should be findable via Lookup")
 	}
 
@@ -345,7 +349,7 @@ func TestAdmin_FullLifecycle(t *testing.T) {
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete: got status %d, want 204", delResp.StatusCode)
 	}
-	if entry := mks.Lookup(rawKey); entry != nil {
+	if _, r := mks.Lookup(context.Background(), rawKey); r == auth.RejectNone {
 		t.Fatal("deleted key should not be findable via Lookup")
 	}
 	if mks.TotalCount() != 0 {
@@ -367,8 +371,8 @@ func TestAdmin_HotReload_CreatedKeyImmediatelyUsable(t *testing.T) {
 	var created KeyCreateResult
 	decodeJSON(t, resp, &created)
 
-	entry := mks.Lookup(created.Key)
-	if entry == nil {
+	entry, lookupR := mks.Lookup(context.Background(), created.Key)
+	if lookupR != auth.RejectNone {
 		t.Fatal("newly created key not immediately findable via ManagedKeyStore.Lookup")
 	}
 	if entry.ID != "hot-client" {
@@ -379,7 +383,7 @@ func TestAdmin_HotReload_CreatedKeyImmediatelyUsable(t *testing.T) {
 func TestAdmin_HotReload_DisabledKeyImmediatelyRejected(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("soon-disabled", nil)
+	result, err := mks.Create(context.Background(), "soon-disabled", nil, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,8 +393,8 @@ func TestAdmin_HotReload_DisabledKeyImmediatelyRejected(t *testing.T) {
 	resp := adminRequest(t, ts, "PATCH", "/admin/keys/soon-disabled", testAdminKey, updateBody)
 	resp.Body.Close()
 
-	entry := mks.Lookup(rawKey)
-	if entry != nil {
+	_, lookupR := mks.Lookup(context.Background(), rawKey)
+	if lookupR == auth.RejectNone {
 		t.Fatal("disabled key should be immediately rejected by Lookup")
 	}
 }
@@ -432,7 +436,7 @@ func TestAdmin_Create_InvalidRole(t *testing.T) {
 func TestAdmin_Update_SetRoles(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	result, err := mks.Create("no-role-client", nil)
+	result, err := mks.Create(context.Background(), "no-role-client", nil, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,8 +457,8 @@ func TestAdmin_Update_SetRoles(t *testing.T) {
 	}
 
 	// Lookup confirms roles propagated to in-memory store
-	entry := mks.Lookup(result.Key)
-	if entry == nil || len(entry.Roles) != 1 || entry.Roles[0] != "admin" {
+	entry, lookupR2 := mks.Lookup(context.Background(), result.Key)
+	if lookupR2 != auth.RejectNone || entry == nil || len(entry.Roles) != 1 || entry.Roles[0] != "admin" {
 		t.Errorf("roles not propagated to store: %v", entry)
 	}
 }
@@ -462,7 +466,7 @@ func TestAdmin_Update_SetRoles(t *testing.T) {
 func TestAdmin_Update_InvalidRole(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("some-client", nil); err != nil {
+	if _, err := mks.Create(context.Background(), "some-client", nil, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -479,7 +483,7 @@ func TestAdmin_Update_InvalidRole(t *testing.T) {
 func TestAdmin_Update_NothingProvided(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("some-client", nil); err != nil {
+	if _, err := mks.Create(context.Background(), "some-client", nil, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -560,7 +564,7 @@ func TestAdmin_Create_ValidRoles_Created(t *testing.T) {
 func TestAdmin_Update_ClearRoles_Rejected(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("role-client", []string{"reader"}); err != nil {
+	if _, err := mks.Create(context.Background(), "role-client", []string{"reader"}, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -579,7 +583,7 @@ func TestAdmin_Update_ClearRoles_Rejected(t *testing.T) {
 func TestAdmin_Update_ValidRoles_Accepted(t *testing.T) {
 	ts, mks := startAdminTestServer(t)
 
-	if _, err := mks.Create("role-client2", []string{"reader"}); err != nil {
+	if _, err := mks.Create(context.Background(), "role-client2", []string{"reader"}, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -596,5 +600,292 @@ func TestAdmin_Update_ValidRoles_Accepted(t *testing.T) {
 	decodeJSON(t, resp, &summary)
 	if len(summary.Roles) != 2 {
 		t.Errorf("expected 2 roles after update, got %v", summary.Roles)
+	}
+}
+
+// --- TTL / expiry tests ---
+
+// startAdminTestServerTTL creates an admin test server with a controlled clock
+// and defaultTTL. The same clock is wired into both the AdminServer and the
+// ManagedKeyStore so create-time and lookup-time agree.
+func startAdminTestServerTTL(t *testing.T, defaultTTL time.Duration, startTime time.Time) (*httptest.Server, *ManagedKeyStore) {
+	t.Helper()
+
+	path := tempKeysFile(t)
+	mks, err := NewManagedKeyStore(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fixed clock shared by both AdminServer and ManagedKeyStore.
+	clock := startTime
+	nowFn := func() time.Time { return clock }
+	mks.now = nowFn
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	adminSrv := NewAdminServer(":0", testAdminKey, mks, defaultTTL, logger)
+	adminSrv.now = nowFn
+
+	// Allow tests to advance the shared clock by mutating mks.now and
+	// adminSrv.now directly — but expose a single setter via mks.now so
+	// callers can just replace mks.now and adminSrv.now.
+
+	ts := httptest.NewServer(adminSrv.srv.Handler)
+	t.Cleanup(ts.Close)
+	return ts, mks
+}
+
+// TestResolveExpiry covers all branches of the helper.
+func TestResolveExpiry(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	defaultTTL := 8760 * time.Hour // 1 year
+
+	// nil ttl → now + defaultTTL
+	got, err := resolveExpiry(nil, defaultTTL, now)
+	if err != nil {
+		t.Fatalf("nil ttl: unexpected error: %v", err)
+	}
+	want := now.Add(defaultTTL)
+	if !got.Equal(want) {
+		t.Errorf("nil ttl: got %v, want %v", got, want)
+	}
+
+	// "0" → zero time (no expiry)
+	for _, sentinel := range []string{"0", "none", "never"} {
+		s := sentinel
+		got, err = resolveExpiry(&s, defaultTTL, now)
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", sentinel, err)
+		}
+		if !got.IsZero() {
+			t.Errorf("%q: got %v, want zero time", sentinel, got)
+		}
+	}
+
+	// valid duration → now + parsed
+	dur := "24h"
+	got, err = resolveExpiry(&dur, defaultTTL, now)
+	if err != nil {
+		t.Fatalf("24h: unexpected error: %v", err)
+	}
+	if !got.Equal(now.Add(24 * time.Hour)) {
+		t.Errorf("24h: got %v, want %v", got, now.Add(24*time.Hour))
+	}
+
+	// invalid duration → error
+	bad := "banana"
+	_, err = resolveExpiry(&bad, defaultTTL, now)
+	if err == nil {
+		t.Error("invalid ttl: expected error, got nil")
+	}
+
+	// negative parsed duration → error (would produce already-expired key)
+	neg := "-1h"
+	_, err = resolveExpiry(&neg, defaultTTL, now)
+	if err == nil {
+		t.Error("negative ttl: expected error, got nil")
+	}
+
+	// "0s" parses to zero duration, bypasses string sentinel → error
+	zeroS := "0s"
+	_, err = resolveExpiry(&zeroS, defaultTTL, now)
+	if err == nil {
+		t.Error("0s ttl: expected error, got nil")
+	}
+}
+
+// TestAdmin_Create_TTL_Explicit verifies that a key created with ttl:"24h"
+// is valid immediately and rejected as expired after 25h.
+func TestAdmin_Create_TTL_Explicit(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ts, mks := startAdminTestServerTTL(t, 8760*time.Hour, now)
+
+	body := map[string]interface{}{
+		"client_id": "x",
+		"roles":     []string{"writer"},
+		"ttl":       "24h",
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	if resp.StatusCode != http.StatusCreated {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create: got status %d; body: %s", resp.StatusCode, b)
+	}
+	var result KeyCreateResult
+	decodeJSON(t, resp, &result)
+	rawKey := result.Key
+
+	// Key should be valid at creation time.
+	_, reason := mks.Lookup(context.Background(), rawKey)
+	if reason != auth.RejectNone {
+		t.Fatalf("key should be valid immediately after creation, got reason %v", reason)
+	}
+
+	// Advance clock past 24h → key should be expired.
+	mks.now = func() time.Time { return now.Add(25 * time.Hour) }
+	_, reason = mks.Lookup(context.Background(), rawKey)
+	if reason != auth.RejectExpired {
+		t.Errorf("want RejectExpired after 25h, got %v", reason)
+	}
+
+	// Response body should include expires_at.
+	if result.ExpiresAt.IsZero() {
+		t.Error("create response missing expires_at")
+	}
+}
+
+// TestAdmin_Create_TTL_Default verifies that when ttl is omitted the expiry
+// is approximately now + defaultTTL.
+func TestAdmin_Create_TTL_Default(t *testing.T) {
+	defaultTTL := 8760 * time.Hour
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ts, mks := startAdminTestServerTTL(t, defaultTTL, now)
+
+	body := map[string]interface{}{
+		"client_id": "y",
+		"roles":     []string{"reader"},
+		// ttl omitted → defaultTTL applied
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	if resp.StatusCode != http.StatusCreated {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create: got status %d; body: %s", resp.StatusCode, b)
+	}
+	var result KeyCreateResult
+	decodeJSON(t, resp, &result)
+
+	wantExpiry := now.Add(defaultTTL)
+	if result.ExpiresAt.IsZero() {
+		t.Fatal("create response missing expires_at when defaultTTL is set")
+	}
+	diff := result.ExpiresAt.Sub(wantExpiry)
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > time.Second {
+		t.Errorf("expires_at = %v, want ≈ %v (diff %v)", result.ExpiresAt, wantExpiry, diff)
+	}
+
+	// Advance clock past defaultTTL → key expired.
+	mks.now = func() time.Time { return now.Add(defaultTTL + time.Hour) }
+	_, reason := mks.Lookup(context.Background(), result.Key)
+	if reason != auth.RejectExpired {
+		t.Errorf("want RejectExpired after defaultTTL+1h, got %v", reason)
+	}
+}
+
+// TestAdmin_Create_TTL_NoExpiry verifies that ttl:"0" creates a key with no expiry.
+func TestAdmin_Create_TTL_NoExpiry(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ts, mks := startAdminTestServerTTL(t, 8760*time.Hour, now)
+
+	ttlZero := "0"
+	body := map[string]interface{}{
+		"client_id": "z",
+		"roles":     []string{"reader"},
+		"ttl":       ttlZero,
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	if resp.StatusCode != http.StatusCreated {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create: got status %d; body: %s", resp.StatusCode, b)
+	}
+	var result KeyCreateResult
+	decodeJSON(t, resp, &result)
+
+	// Key valid far in the future — no expiry.
+	mks.now = func() time.Time { return now.Add(100 * 365 * 24 * time.Hour) }
+	_, reason := mks.Lookup(context.Background(), result.Key)
+	if reason != auth.RejectNone {
+		t.Errorf("ttl:0 key should never expire, got reason %v", reason)
+	}
+}
+
+// TestAdmin_Update_TTL_Renew verifies that PATCH with ttl:"48h" renews an
+// expired key back to valid.
+func TestAdmin_Update_TTL_Renew(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ts, mks := startAdminTestServerTTL(t, 8760*time.Hour, now)
+
+	// Create a key that expires in 1h.
+	body := map[string]interface{}{
+		"client_id": "renew-client",
+		"roles":     []string{"writer"},
+		"ttl":       "1h",
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	if resp.StatusCode != http.StatusCreated {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create: got status %d; body: %s", resp.StatusCode, b)
+	}
+	var created KeyCreateResult
+	decodeJSON(t, resp, &created)
+	rawKey := created.Key
+
+	// Advance to 2h → key expired.
+	future := now.Add(2 * time.Hour)
+	mks.now = func() time.Time { return future }
+	_, reason := mks.Lookup(context.Background(), rawKey)
+	if reason != auth.RejectExpired {
+		t.Fatalf("want RejectExpired after 2h, got %v", reason)
+	}
+
+	// PATCH with ttl:"48h" from the future clock → renews.
+	updateBody := map[string]interface{}{
+		"ttl": "48h",
+	}
+	patchResp := adminRequest(t, ts, "PATCH", "/admin/keys/renew-client", testAdminKey, updateBody)
+	if patchResp.StatusCode != http.StatusOK {
+		defer patchResp.Body.Close()
+		b, _ := io.ReadAll(patchResp.Body)
+		t.Fatalf("patch renew: got status %d; body: %s", patchResp.StatusCode, b)
+	}
+	patchResp.Body.Close()
+
+	// Key should now be valid again (new expiry = future + 48h).
+	_, reason = mks.Lookup(context.Background(), rawKey)
+	if reason != auth.RejectNone {
+		t.Errorf("want RejectNone after renew, got %v", reason)
+	}
+}
+
+// TestAdmin_Create_TTL_Invalid verifies that an unparseable ttl returns 400.
+func TestAdmin_Create_TTL_Invalid(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ts, _ := startAdminTestServerTTL(t, 8760*time.Hour, now)
+
+	body := map[string]interface{}{
+		"client_id": "bad-ttl-client",
+		"roles":     []string{"reader"},
+		"ttl":       "banana",
+	}
+	resp := adminRequest(t, ts, "POST", "/admin/keys", testAdminKey, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("invalid ttl: want 400, got %d; body: %s", resp.StatusCode, b)
+	}
+}
+
+// TestAdmin_Update_TTL_Invalid verifies that an unparseable ttl in PATCH returns 400.
+func TestAdmin_Update_TTL_Invalid(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ts, mks := startAdminTestServerTTL(t, 8760*time.Hour, now)
+
+	if _, err := mks.Create(context.Background(), "patch-bad-ttl", []string{"reader"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := map[string]interface{}{
+		"ttl": "banana",
+	}
+	resp := adminRequest(t, ts, "PATCH", "/admin/keys/patch-bad-ttl", testAdminKey, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("invalid ttl patch: want 400, got %d; body: %s", resp.StatusCode, b)
 	}
 }

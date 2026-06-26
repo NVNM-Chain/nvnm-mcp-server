@@ -103,7 +103,7 @@ func NewFusionAuthValidator(cfg *FusionAuthConfig, logger *slog.Logger) (*Fusion
 }
 
 // Validate parses and validates a FusionAuth JWT, returning unified Claims.
-func (v *FusionAuthValidator) Validate(tokenString string) (*Claims, error) {
+func (v *FusionAuthValidator) Validate(_ context.Context, tokenString string) (*Claims, error) {
 	v.mu.RLock()
 	jwks := v.jwks
 	v.mu.RUnlock()
