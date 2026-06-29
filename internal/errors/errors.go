@@ -82,6 +82,7 @@ func IsInputError(err error) bool {
 		errors.Is(err, ErrInvalidRecordID) ||
 		errors.Is(err, ErrInvalidChecksum) ||
 		errors.Is(err, ErrInputTooLarge) ||
+		errors.Is(err, ErrTxDecode) ||
 		errors.Is(err, ErrPrecompileValidation)
 }
 

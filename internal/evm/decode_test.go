@@ -7,11 +7,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"math/big"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/defiweb/go-eth/wallet"
+
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 const testChainID = uint64(787111)
@@ -122,6 +125,35 @@ func TestDecodeSignedTx_TypesAndDestinations(t *testing.T) {
 			}
 			if dtx.Value == nil {
 				t.Error("value is nil, want non-nil")
+			}
+		})
+	}
+}
+
+func TestDecodeSignedTx_Rejects(t *testing.T) {
+	// oversized: more hex chars than maxSignedTxHexLen after the 0x strip.
+	oversized := "0x" + hex.EncodeToString(make([]byte, maxSignedTxHexLen))
+
+	cases := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"empty", "", apperrors.ErrTxDecode},
+		{"0x only", "0x", apperrors.ErrTxDecode},
+		{"non-hex", "0xzzzz", apperrors.ErrTxDecode},
+		{"garbage rlp", "0xc0ffee", apperrors.ErrTxDecode},
+		{"oversized", oversized, apperrors.ErrInputTooLarge},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dtx, err := DecodeSignedTx(tc.input)
+			if dtx != nil {
+				t.Errorf("dtx = %+v, want nil", dtx)
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("err = %v, want errors.Is(_, %v)", err, tc.wantErr)
 			}
 		})
 	}
