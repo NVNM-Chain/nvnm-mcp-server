@@ -19,6 +19,10 @@ var (
 	ErrInvalidRecordID   = errors.New("invalid record ID")
 	ErrInvalidChecksum   = errors.New("invalid checksum")
 	ErrInputTooLarge     = errors.New("input exceeds maximum allowed size")
+	// ErrTxDecode marks a signed transaction that could not be decoded,
+	// had trailing bytes, or whose signer could not be recovered. It is a
+	// caller-input rejection.
+	ErrTxDecode = errors.New("decode signed transaction")
 	// ErrPrecompileValidation marks a caller-input rejection that the
 	// anchoring precompile reported (e.g. a value the server does not
 	// pre-validate). It is treated as an input error so SafeForClient
@@ -78,6 +82,7 @@ func IsInputError(err error) bool {
 		errors.Is(err, ErrInvalidRecordID) ||
 		errors.Is(err, ErrInvalidChecksum) ||
 		errors.Is(err, ErrInputTooLarge) ||
+		errors.Is(err, ErrTxDecode) ||
 		errors.Is(err, ErrPrecompileValidation)
 }
 
