@@ -81,3 +81,48 @@ func TestDecodeSignedTx_DynamicFeeHappyPath(t *testing.T) {
 		t.Error("CanonicalRaw is empty")
 	}
 }
+
+func TestDecodeSignedTx_TypesAndDestinations(t *testing.T) {
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000A00")
+	eoa := defitypes.MustAddressFromHex("0x00000000000000000000000000000000000000Ee")
+
+	cases := []struct {
+		name      string
+		txType    defitypes.TransactionType
+		to        *defitypes.Address
+		value     *big.Int
+		input     []byte
+		wantToNil bool
+	}{
+		{"legacy anchor call", defitypes.LegacyTxType, &anchor, big.NewInt(0), []byte{0x01, 0x02}, false},
+		{"dynamic anchor call", defitypes.DynamicFeeTxType, &anchor, big.NewInt(0), []byte{0x01, 0x02}, false},
+		{"legacy value transfer", defitypes.LegacyTxType, &eoa, big.NewInt(1_000), nil, false},
+		{"contract creation (to nil)", defitypes.DynamicFeeTxType, nil, big.NewInt(0), []byte{0x60, 0x80}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hexStr := signedTxHex(t, key, tc.txType, tc.to, tc.value, tc.input)
+			dtx, err := DecodeSignedTx(hexStr)
+			if err != nil {
+				t.Fatalf("DecodeSignedTx: %v", err)
+			}
+			if dtx.Signer != key.Address() {
+				t.Errorf("signer = %s, want %s", dtx.Signer, key.Address())
+			}
+			if tc.wantToNil {
+				if dtx.To != nil {
+					t.Errorf("to = %s, want nil (contract creation)", dtx.To)
+				}
+			} else {
+				if dtx.To == nil || *dtx.To != *tc.to {
+					t.Errorf("to = %v, want %s", dtx.To, tc.to)
+				}
+			}
+			if dtx.Value == nil {
+				t.Error("value is nil, want non-nil")
+			}
+		})
+	}
+}

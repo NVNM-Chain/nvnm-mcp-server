@@ -45,6 +45,25 @@ func DecodeSignedTx(signedTxHex string) (*DecodedTx, error) {
 		return nil, fmt.Errorf("rlp-decode signed tx: %w", apperrors.ErrTxDecode)
 	}
 
+	// Workaround for defiweb/go-eth v0.7.0: DecodeRLP unconditionally sets
+	// ChainID to zero for legacy transactions, because a legacy tx encodes
+	// the chain ID inside V (EIP-155), not as a separate RLP field. That
+	// bogus zero then makes crypto.ECRecoverer.RecoverTransaction fail its
+	// own chain-ID cross-check. Re-derive the chain ID from V for EIP-155
+	// legacy txs (V >= 35) so recovery and the signing-hash recomputation
+	// agree. This does NOT affect CanonicalRaw: legacy EncodeRLP ignores
+	// ChainID (V already carries it). Pre-EIP-155 legacy (V in {27,28}) and
+	// typed txs decode their chain ID correctly and need no fixup.
+	if tx.Type == defitypes.LegacyTxType && tx.Signature != nil &&
+		tx.Signature.V.Cmp(big.NewInt(35)) >= 0 {
+		derived := new(big.Int).Div(
+			new(big.Int).Sub(tx.Signature.V, big.NewInt(35)),
+			big.NewInt(2),
+		)
+		cid := derived.Uint64()
+		tx.ChainID = &cid
+	}
+
 	signer, err := crypto.ECRecoverer.RecoverTransaction(tx)
 	if err != nil {
 		return nil, fmt.Errorf("recover signer: %w", apperrors.ErrTxDecode)
