@@ -146,6 +146,12 @@ type Config struct {
 	// keyless-read auth-middleware design (Phase 9.16).
 	KeylessReads bool // MCP_KEYLESS_READS: allow unauthenticated read tools (default false)
 
+	// Keyless writes (HTTP only, authless connector). When true, the
+	// evm_send_raw_transaction relay is restricted to the anchor precompile
+	// (precompile-only scope) and broadcasts the canonical re-serialization.
+	// Default false: authed/self-host keeps the general-purpose relay (D9).
+	KeylessWrites bool // MCP_KEYLESS_WRITES: precompile-only authless write relay (default false)
+
 	// Per-IP rate limit for anonymous reads. Must be tighter than the
 	// per-client limits above (documented invariant; not enforced here).
 	AnonRateLimit float64 // MCP_ANON_RATE_LIMIT: requests/second per source IP (default 5)
@@ -645,6 +651,12 @@ func (c *Config) loadKeylessConfig() error {
 		return err
 	}
 	c.KeylessReads = keyless
+
+	keylessW, err := envBool("MCP_KEYLESS_WRITES", false)
+	if err != nil {
+		return err
+	}
+	c.KeylessWrites = keylessW
 
 	anonLimitStr := envOrDefault("MCP_ANON_RATE_LIMIT", "5")
 	anonLimit, err := strconv.ParseFloat(anonLimitStr, 64)

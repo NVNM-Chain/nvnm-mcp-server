@@ -5,9 +5,11 @@ package mcp
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 
+	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
@@ -18,6 +20,8 @@ import (
 func registerEVMWriteTools(
 	srv *mcp.Server,
 	evmClient evm.Client,
+	anchorAddr string,
+	keylessWrites bool,
 	logger *slog.Logger,
 ) {
 	addTool(srv, &mcp.Tool{
@@ -33,7 +37,7 @@ func registerEVMWriteTools(
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
 		Annotations: newDestructiveWriteTool(),
-	}, makeSendRawTxHandler(evmClient, logger))
+	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, logger))
 }
 
 // --- Input/output types ---
@@ -50,7 +54,7 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, logger *slog.Logger,
+	c evm.Client, anchorAddr string, keylessWrites bool, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context,
@@ -68,9 +72,35 @@ func makeSendRawTxHandler(
 				)
 		}
 
+		// Broadcast bytes: today's raw passthrough (authed/self-host), or the
+		// scoped, canonical re-serialization under keyless writes (D9 / §5).
+		broadcastHex := input.SignedTxHex
+		if keylessWrites {
+			dtx, derr := evm.DecodeSignedTx(input.SignedTxHex)
+			if derr != nil {
+				return nil, sendRawTxOutput{}, derr // ErrTxDecode (input class)
+			}
+			anchor, aerr := defitypes.AddressFromHex(anchorAddr)
+			if aerr != nil {
+				return nil, sendRawTxOutput{},
+					fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
+			}
+			if serr := checkRelayScope(dtx.To, anchor); serr != nil {
+				logger.LogAttrs(ctx, slog.LevelWarn, "audit",
+					slog.Group("audit",
+						slog.String("tool", "evm_send_raw_transaction"),
+						slog.String("phase", "relay_scope_rejected"),
+						slog.String("signer", dtx.Signer.String()),
+					),
+				)
+				return nil, sendRawTxOutput{}, serr // ErrRelayScopeRejected (input class)
+			}
+			broadcastHex = "0x" + hex.EncodeToString(dtx.CanonicalRaw)
+		}
+
 		clientID := auth.ClientIDFromContext(ctx)
 
-		txHash, err := c.SendRawTransaction(ctx, input.SignedTxHex)
+		txHash, err := c.SendRawTransaction(ctx, broadcastHex)
 		if err != nil {
 			logger.LogAttrs(ctx, slog.LevelWarn, "audit",
 				slog.Group("audit",

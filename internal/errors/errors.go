@@ -23,6 +23,13 @@ var (
 	// had trailing bytes, or whose signer could not be recovered. It is a
 	// caller-input rejection.
 	ErrTxDecode = errors.New("decode signed transaction")
+	// ErrRelayScopeRejected marks a write whose destination is not the NVNM
+	// anchor precompile, rejected by precompile-only relay scope. The message
+	// is the client-facing text (input-validation class, surfaced verbatim).
+	ErrRelayScopeRejected = errors.New(
+		"transaction not relayed: this connector only broadcasts writes to the " +
+			"NVNM anchoring registry (reads of any data are unrestricted); other " +
+			"transaction destinations are rejected")
 	// ErrPrecompileValidation marks a caller-input rejection that the
 	// anchoring precompile reported (e.g. a value the server does not
 	// pre-validate). It is treated as an input error so SafeForClient
@@ -83,6 +90,7 @@ func IsInputError(err error) bool {
 		errors.Is(err, ErrInvalidChecksum) ||
 		errors.Is(err, ErrInputTooLarge) ||
 		errors.Is(err, ErrTxDecode) ||
+		errors.Is(err, ErrRelayScopeRejected) ||
 		errors.Is(err, ErrPrecompileValidation)
 }
 
