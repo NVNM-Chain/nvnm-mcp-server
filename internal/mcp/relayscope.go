@@ -20,3 +20,14 @@ func checkRelayScope(to *defitypes.Address, anchor defitypes.Address) error {
 	}
 	return apperrors.ErrRelayScopeRejected
 }
+
+// addrString renders an optional destination address for audit logs,
+// returning "" for a nil pointer (contract creation). Used so the
+// signer-keyed audit record carries the destination without panicking on
+// contract-creation transactions.
+func addrString(to *defitypes.Address) string {
+	if to == nil {
+		return ""
+	}
+	return to.String()
+}

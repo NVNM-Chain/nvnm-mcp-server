@@ -75,6 +75,7 @@ func makeSendRawTxHandler(
 		// Broadcast bytes: today's raw passthrough (authed/self-host), or the
 		// scoped, canonical re-serialization under keyless writes (D9 / §5).
 		broadcastHex := input.SignedTxHex
+		var decoded *evm.DecodedTx // populated under keyless writes; drives signer-keyed audit
 		if keylessWrites {
 			dtx, derr := evm.DecodeSignedTx(input.SignedTxHex)
 			if derr != nil {
@@ -86,42 +87,66 @@ func makeSendRawTxHandler(
 					fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
 			}
 			if serr := checkRelayScope(dtx.To, anchor); serr != nil {
-				logger.LogAttrs(ctx, slog.LevelWarn, "audit",
-					slog.Group("audit",
-						slog.String("tool", "evm_send_raw_transaction"),
-						slog.String("phase", "relay_scope_rejected"),
-						slog.String("signer", dtx.Signer.String()),
-					),
-				)
+				logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+					slog.String("tool", "evm_send_raw_transaction"),
+					slog.String("phase", "relay_scope_rejected"),
+					slog.String("signer", dtx.Signer.String()),
+					slog.String("to", addrString(dtx.To)),
+				}))
 				return nil, sendRawTxOutput{}, serr // ErrRelayScopeRejected (input class)
 			}
+			decoded = dtx
 			broadcastHex = "0x" + hex.EncodeToString(dtx.CanonicalRaw)
 		}
 
 		clientID := auth.ClientIDFromContext(ctx)
 
+		// identityAttrs keys the audit record on the recovered signer under
+		// keyless writes (client_id is empty under authless), or on client_id
+		// in authed/self-host mode -- §4.D. Addresses/tx hashes only, no keys.
+		identityAttrs := func() []slog.Attr {
+			if decoded != nil {
+				return []slog.Attr{
+					slog.String("signer", decoded.Signer.String()),
+					slog.String("to", addrString(decoded.To)),
+					slog.String("value_wei", decoded.Value.String()),
+					slog.Int("calldata_len", len(decoded.Input)),
+				}
+			}
+			return []slog.Attr{slog.String("client_id", clientID)}
+		}
+
 		txHash, err := c.SendRawTransaction(ctx, broadcastHex)
 		if err != nil {
-			logger.LogAttrs(ctx, slog.LevelWarn, "audit",
-				slog.Group("audit",
-					slog.String("tool", "evm_send_raw_transaction"),
-					slog.String("phase", "broadcast_failed"),
-					slog.String("client_id", clientID),
-					slog.Int("signed_tx_len", len(input.SignedTxHex)),
-					slog.String("error", err.Error()),
-				),
-			)
+			failAttrs := append([]slog.Attr{
+				slog.String("tool", "evm_send_raw_transaction"),
+				slog.String("phase", "broadcast_failed"),
+				slog.Int("signed_tx_len", len(input.SignedTxHex)),
+				slog.String("error", err.Error()),
+			}, identityAttrs()...)
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup(failAttrs))
 			return nil, sendRawTxOutput{}, err
 		}
 
-		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
-			slog.Group("audit",
-				slog.String("tool", "evm_send_raw_transaction"),
-				slog.String("phase", "broadcast_ok"),
-				slog.String("client_id", clientID),
-				slog.String("tx_hash", txHash),
-			),
-		)
+		okAttrs := append([]slog.Attr{
+			slog.String("tool", "evm_send_raw_transaction"),
+			slog.String("phase", "broadcast_ok"),
+			slog.String("tx_hash", txHash),
+		}, identityAttrs()...)
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit", auditGroup(okAttrs))
 		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}
+}
+
+// auditGroup builds the "audit" slog group from a dynamic attribute set.
+// It uses slog.Group rather than a slog.Attr{Key: ...} composite literal so
+// the package's raw-key-literal guard (keys_constraint_test.go, which forbids
+// `Key:` struct literals) is not tripped by audit logging. slog.Group accepts
+// slog.Attr values among its variadic args.
+func auditGroup(attrs []slog.Attr) slog.Attr {
+	args := make([]any, len(attrs))
+	for i, a := range attrs {
+		args[i] = a
+	}
+	return slog.Group("audit", args...)
 }

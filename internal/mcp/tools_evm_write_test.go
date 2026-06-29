@@ -4,12 +4,14 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
 	"math/big"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
@@ -113,4 +115,42 @@ func TestSendRawTx_KeylessScope(t *testing.T) {
 			t.Errorf("expected raw passthrough; called=%v hex=%s", cc.called, cc.gotHex)
 		}
 	})
+}
+
+func TestSendRawTx_SignerAudit(t *testing.T) {
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxTo(t, key, anchor)
+
+	// keyless: success audit log is signer-keyed (signer/to/value/calldata),
+	// not client_id.
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, logger)
+	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+		t.Fatalf("keyless broadcast err: %v", err)
+	}
+	logStr := buf.String()
+	for _, want := range []string{
+		`"phase":"broadcast_ok"`, `"signer"`, key.Address().String(),
+		`"to"`, `"value_wei"`, `"calldata_len"`, "0xabc",
+	} {
+		if !strings.Contains(logStr, want) {
+			t.Errorf("keyless audit log missing %q\nlog: %s", want, logStr)
+		}
+	}
+
+	// authed (keyless off): success audit log keeps client_id, no signer field.
+	buf.Reset()
+	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, logger)
+	if _, _, err := h2(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+		t.Fatalf("authed broadcast err: %v", err)
+	}
+	authed := buf.String()
+	if strings.Contains(authed, `"signer"`) {
+		t.Errorf("authed audit log should not contain signer field\nlog: %s", authed)
+	}
+	if !strings.Contains(authed, `"client_id"`) {
+		t.Errorf("authed audit log should contain client_id\nlog: %s", authed)
+	}
 }
