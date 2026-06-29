@@ -53,7 +53,7 @@ func DecodeSignedTx(signedTxHex string) (result *DecodedTx, err error) {
 	if len(raw) >= 2 && raw[:2] == "0x" {
 		raw = raw[2:]
 	}
-	if len(raw) == 0 {
+	if raw == "" {
 		return nil, fmt.Errorf("empty signed tx: %w", apperrors.ErrTxDecode)
 	}
 	if len(raw) > maxSignedTxHexLen {
