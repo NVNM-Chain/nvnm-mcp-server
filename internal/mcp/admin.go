@@ -50,6 +50,7 @@ type AdminServer struct {
 	logger       *slog.Logger
 	defaultTTL   time.Duration
 	now          func() time.Time
+	writeAudit   WriteAuditStore
 }
 
 // NewAdminServer creates an admin API server.
@@ -82,6 +83,7 @@ func NewAdminServer(
 	mux.HandleFunc("GET /admin/keys/pending", a.handleListPending)
 	mux.HandleFunc("POST /admin/keys/pending/{id}/approve", a.handleApprovePending)
 	mux.HandleFunc("POST /admin/keys/pending/{id}/reject", a.handleRejectPending)
+	mux.HandleFunc("GET /admin/write-audit", a.handleWriteAudit)
 
 	handler := adminAuth(
 		limitAdminRequestBody(mux),
