@@ -129,7 +129,8 @@ func NewServer(
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, logger)
+		// audit store wired in Task 5
+		registerEVMWriteTools(mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, nil, logger)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
 	}

@@ -22,6 +22,7 @@ func registerEVMWriteTools(
 	evmClient evm.Client,
 	anchorAddr string,
 	keylessWrites bool,
+	audit WriteAuditStore,
 	logger *slog.Logger,
 ) {
 	addTool(srv, &mcp.Tool{
@@ -37,7 +38,7 @@ func registerEVMWriteTools(
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
 		Annotations: newDestructiveWriteTool(),
-	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, logger))
+	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, audit, logger))
 }
 
 // --- Input/output types ---
@@ -54,7 +55,7 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, anchorAddr string, keylessWrites bool, logger *slog.Logger,
+	c evm.Client, anchorAddr string, keylessWrites bool, audit WriteAuditStore, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context,
@@ -116,6 +117,32 @@ func makeSendRawTxHandler(
 			return []slog.Attr{slog.String("client_id", clientID)}
 		}
 
+		// recordAudit persists one broadcast attempt best-effort. Only the
+		// keyless path has a recovered signer (decoded != nil); authed mode
+		// keeps client_id in the slog line and is not persisted here.
+		recordAudit := func(outcome, txHash, errMsg string) {
+			if audit == nil || decoded == nil {
+				return
+			}
+			rerr := audit.Record(ctx, WriteAuditEntry{
+				Signer:      decoded.Signer.String(),
+				To:          addrString(decoded.To),
+				ValueWei:    decoded.Value.String(),
+				CalldataLen: len(decoded.Input),
+				TxHash:      txHash,
+				Outcome:     outcome,
+				Error:       errMsg,
+			})
+			if rerr != nil {
+				logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+					slog.String("tool", "evm_send_raw_transaction"),
+					slog.String("phase", "write_audit_persist_failed"),
+					slog.String("signer", decoded.Signer.String()),
+					slog.String("error", rerr.Error()),
+				}))
+			}
+		}
+
 		txHash, err := c.SendRawTransaction(ctx, broadcastHex)
 		if err != nil {
 			failAttrs := append([]slog.Attr{
@@ -125,6 +152,7 @@ func makeSendRawTxHandler(
 				slog.String("error", err.Error()),
 			}, identityAttrs()...)
 			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup(failAttrs))
+			recordAudit("broadcast_failed", "", err.Error())
 			return nil, sendRawTxOutput{}, err
 		}
 
@@ -134,6 +162,7 @@ func makeSendRawTxHandler(
 			slog.String("tx_hash", txHash),
 		}, identityAttrs()...)
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit", auditGroup(okAttrs))
+		recordAudit("broadcast_ok", txHash, "")
 		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}
 }
