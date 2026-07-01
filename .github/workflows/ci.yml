@@ -19,7 +19,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: nvnm
-          POSTGRES_PASSWORD: nvnm
+          POSTGRES_PASSWORD: nvnm  # pragma: allowlist secret -- ephemeral CI service
           POSTGRES_DB: nvnm_test
         ports:
           - 5432:5432
@@ -86,7 +86,7 @@ jobs:
         # directory. Supply-chain hardening: a compromised upstream
         # cannot affect a build that succeeds locally.
         env:
-          NVNM_TEST_PG_DSN: postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable
+          NVNM_TEST_PG_DSN: postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable  # pragma: allowlist secret -- ephemeral CI service
         run: go test -mod=vendor -race -coverprofile=coverage.out ./...
 
       - name: Build
@@ -114,3 +114,26 @@ jobs:
       - name: Sign binary
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cosign sign-blob --yes bin/nvnm-mcp-server
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install detect-secrets
+        # Pinned to the same version as the detect-secrets pre-commit hook
+        # (.pre-commit-config.yaml) so CI and local scans agree.
+        run: pip install detect-secrets==1.5.0
+
+      - name: Scan tracked files against the baseline
+        # Server-side mirror of the detect-secrets pre-commit hook: a secret
+        # not present in .secrets.baseline fails the build, so a contributor
+        # who skipped the local hook (or used --no-verify) cannot land a
+        # secret. Excludes match .pre-commit-config.yaml.
+        run: |
+          git ls-files \
+            | grep -vE '^(build/|dist/|coverage\.html$|\.golangci-lint-cache/)' \
+            | xargs detect-secrets-hook --baseline .secrets.baseline
