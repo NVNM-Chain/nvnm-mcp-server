@@ -155,14 +155,12 @@ func run() error {
 		return err
 	}
 
-	// --- Admin API Server (API key mode only) ---
-	adminShutdown, err := startAdminServer(cfg, managedKeys, pendingStore, emailSender, logger)
+	// --- Write-audit store + Admin API Server ---
+	writeAudit, adminCleanup, err := startAuditAndAdmin(cfg, managedKeys, pendingStore, emailSender, logger)
 	if err != nil {
 		return err
 	}
-	if adminShutdown != nil {
-		defer adminShutdown()
-	}
+	defer adminCleanup()
 
 	// --- Per-client / anonymous / fail-rate limiters (HTTP only) ---
 	var (
@@ -184,7 +182,7 @@ func run() error {
 	srv := mcpserver.NewServer(
 		evmClient, anchorClient,
 		cfg,
-		middleware, logger,
+		middleware, writeAudit, logger,
 	)
 
 	// --- Phase 11 L3: public self-serve key-request endpoint (opt-in) ---
@@ -470,11 +468,60 @@ func loadAPIKeys(
 	return v, managedKeys, nil, nil
 }
 
+// startAuditAndAdmin combines loadWriteAudit and startAdminServer into a
+// single call so run() does not accumulate their error and nil-check
+// branches against its cyclomatic-complexity budget.
+func startAuditAndAdmin(
+	cfg *config.Config,
+	keys mcpserver.KeyStoreBackend,
+	pendingStore *mcpserver.PendingKeyStore,
+	email mcpserver.EmailSender,
+	logger *slog.Logger,
+) (mcpserver.WriteAuditStore, func(), error) {
+	writeAudit, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, logger)
+	if err != nil {
+		writeAuditCleanup()
+		return nil, func() {}, err
+	}
+	return writeAudit, func() {
+		if adminShutdown != nil {
+			adminShutdown()
+		}
+		writeAuditCleanup()
+	}, nil
+}
+
+// loadWriteAudit stands up the dedicated authless-bundle Postgres pool +
+// write-audit store. Returns (nil, noop, nil) when persistence is not
+// configured (logs-only). Gated on keyless writes + a DSN.
+func loadWriteAudit(
+	cfg *config.Config, logger *slog.Logger,
+) (mcpserver.WriteAuditStore, func(), error) {
+	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
+		return nil, func() {}, nil
+	}
+	pool, err := pgxpool.New(context.Background(), cfg.KeylessPGDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect keyless pg: %w", err)
+	}
+	if err := mcpserver.RunMigrations(context.Background(), pool, logger); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
+	}
+	logger.Info("write-audit backend: postgres (keyless bundle)")
+	return mcpserver.NewPostgresWriteAuditStore(pool), func() { pool.Close() }, nil
+}
+
 func startAdminServer(
 	cfg *config.Config,
 	keys mcpserver.KeyStoreBackend,
 	pendingStore *mcpserver.PendingKeyStore,
 	email mcpserver.EmailSender,
+	writeAudit mcpserver.WriteAuditStore,
 	logger *slog.Logger,
 ) (shutdown func(), err error) {
 	if cfg.AdminAPIKey == "" {
@@ -494,7 +541,7 @@ func startAdminServer(
 
 	adminSrv := mcpserver.NewAdminServer(
 		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, cfg.KeyDefaultTTL, logger,
-	).WithPendingKeyStore(pendingStore, email)
+	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {
 			logger.Error("admin API server error", slog.String("error", aErr.Error()))

@@ -152,6 +152,12 @@ type Config struct {
 	// Default false: authed/self-host keeps the general-purpose relay (D9).
 	KeylessWrites bool // MCP_KEYLESS_WRITES: precompile-only authless write relay (default false)
 
+	// KeylessPGDSN is the dedicated Postgres DSN for the authless-bundle
+	// shared state (write_audit now; per-signer quota/blacklist later).
+	// Separate from KEY_STORE_DSN: hosted authless runs no key store.
+	// Empty => logs-only audit, no persistence. MCP_KEYLESS_PG_DSN.
+	KeylessPGDSN string
+
 	// Per-IP rate limit for anonymous reads. Must be tighter than the
 	// per-client limits above (documented invariant; not enforced here).
 	AnonRateLimit float64 // MCP_ANON_RATE_LIMIT: requests/second per source IP (default 5)
@@ -657,6 +663,7 @@ func (c *Config) loadKeylessConfig() error {
 		return err
 	}
 	c.KeylessWrites = keylessW
+	c.KeylessPGDSN = os.Getenv("MCP_KEYLESS_PG_DSN")
 
 	anonLimitStr := envOrDefault("MCP_ANON_RATE_LIMIT", "5")
 	anonLimit, err := strconv.ParseFloat(anonLimitStr, 64)
