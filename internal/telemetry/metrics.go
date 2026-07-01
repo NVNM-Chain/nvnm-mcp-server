@@ -4,8 +4,10 @@
 package telemetry
 
 import (
+	"context"
 	"fmt"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
@@ -36,6 +38,12 @@ type Metrics struct {
 	// ClassifyStatus) for the Phase 10 error-rate SLI. Exported to
 	// Prometheus as mcp_http_responses_total.
 	HTTPResponses metric.Int64Counter
+	// WriteBroadcasts counts broadcast attempts that passed relay scope,
+	// labeled outcome=ok|failed. No signer/address label (bounded cardinality).
+	WriteBroadcasts metric.Int64Counter
+	// WriteRelayScopeRejected counts pre-broadcast write rejections, labeled
+	// cause=relay_scope|decode|anchor_misconfig. No signer/address label.
+	WriteRelayScopeRejected metric.Int64Counter
 }
 
 // NewMetrics creates and registers all metric instruments with the provider.
@@ -126,16 +134,54 @@ func NewMetrics(provider *sdkmetric.MeterProvider) (*Metrics, error) {
 		return nil, fmt.Errorf("http responses counter: %w", err)
 	}
 
+	writeBroadcasts, err := meter.Int64Counter(
+		"mcp.write.broadcasts",
+		metric.WithDescription("Broadcast attempts that passed relay scope, by outcome (ok|failed)"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("write broadcasts counter: %w", err)
+	}
+
+	writeRelayRejected, err := meter.Int64Counter(
+		"mcp.write.relay_scope_rejected",
+		metric.WithDescription("Pre-broadcast write rejections, by cause (relay_scope|decode|anchor_misconfig)"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("write relay-scope rejected counter: %w", err)
+	}
+
 	return &Metrics{
-		ToolCallDuration:    toolDur,
-		ToolCallCount:       toolCount,
-		ToolErrorCount:      toolErrors,
-		ActiveRequests:      active,
-		RPCDuration:         rpcDur,
-		RPCErrorCount:       rpcErrors,
-		RPCRetryCount:       rpcRetries,
-		CircuitBreakerState: cbState,
-		RPCRateLimited:      rateLimited,
-		HTTPResponses:       httpResponses,
+		ToolCallDuration:        toolDur,
+		ToolCallCount:           toolCount,
+		ToolErrorCount:          toolErrors,
+		ActiveRequests:          active,
+		RPCDuration:             rpcDur,
+		RPCErrorCount:           rpcErrors,
+		RPCRetryCount:           rpcRetries,
+		CircuitBreakerState:     cbState,
+		RPCRateLimited:          rateLimited,
+		HTTPResponses:           httpResponses,
+		WriteBroadcasts:         writeBroadcasts,
+		WriteRelayScopeRejected: writeRelayRejected,
 	}, nil
+}
+
+// RecordBroadcast increments the broadcast counter for the given outcome
+// ("ok" or "failed"). Safe to call on a nil *Metrics (no-op) so stdio and
+// test callers need no telemetry wiring.
+func (m *Metrics) RecordBroadcast(ctx context.Context, outcome string) {
+	if m == nil || m.WriteBroadcasts == nil {
+		return
+	}
+	m.WriteBroadcasts.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+}
+
+// RecordRelayReject increments the pre-broadcast rejection counter for the
+// given cause ("relay_scope", "decode", or "anchor_misconfig"). Safe to call
+// on a nil *Metrics (no-op).
+func (m *Metrics) RecordRelayReject(ctx context.Context, cause string) {
+	if m == nil || m.WriteRelayScopeRejected == nil {
+		return
+	}
+	m.WriteRelayScopeRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("cause", cause)))
 }

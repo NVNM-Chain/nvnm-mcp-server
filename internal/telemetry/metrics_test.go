@@ -42,3 +42,29 @@ func TestNewMetrics(t *testing.T) {
 		t.Error("RPCErrorCount is nil")
 	}
 }
+
+func TestNewMetrics_WriteDetectionInstruments(t *testing.T) {
+	mp := sdkmetric.NewMeterProvider()
+	t.Cleanup(func() {
+		if err := mp.Shutdown(context.Background()); err != nil {
+			t.Logf("meter shutdown: %v", err)
+		}
+	})
+
+	m, err := NewMetrics(mp)
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+	if m.WriteBroadcasts == nil {
+		t.Error("WriteBroadcasts is nil")
+	}
+	if m.WriteRelayScopeRejected == nil {
+		t.Error("WriteRelayScopeRejected is nil")
+	}
+}
+
+func TestMetrics_RecordersNilSafe(t *testing.T) {
+	var m *Metrics // nil receiver must not panic
+	m.RecordBroadcast(context.Background(), "ok")
+	m.RecordRelayReject(context.Background(), "relay_scope")
+}
