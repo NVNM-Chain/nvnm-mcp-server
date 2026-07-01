@@ -525,6 +525,108 @@ new dashboards.
 
 ---
 
+## Relay-scope rejections spiking <a id="relay-scope-rejections-spiking"></a>
+
+**Metric:** `mcp_write_relay_scope_rejected_total{cause}`.
+**Expression (example — tune threshold per deployment):**
+
+```promql
+increase(mcp_write_relay_scope_rejected_total{cause="relay_scope"}[5m]) > <threshold>
+```
+
+### What it means
+
+Callers are submitting signed transactions whose `to` is not the
+anchor precompile — the relay-scope guard is rejecting off-target
+broadcasts. A sustained spike on `cause="relay_scope"` is the primary
+relay-abuse signal. `cause="decode"` indicates malformed-input
+probing; `cause="anchor_misconfig"` is a server misconfiguration
+(should never fire — page immediately).
+
+### Likely causes
+
+1. **Relay abuse** — a caller (or bot) probing the authless write path
+   with transactions targeting arbitrary addresses instead of the
+   anchor precompile.
+2. **Malformed-input probing** (`cause="decode"`) — callers submitting
+   transaction hex that fails to decode; often automated scanning.
+3. **Server misconfiguration** (`cause="anchor_misconfig"`) — the
+   configured anchor address is missing or invalid. This should never
+   fire in a healthy deployment; treat any nonzero rate as a page.
+
+### First-look queries
+
+```promql
+# Breakdown by cause
+sum by (cause) (rate(mcp_write_relay_scope_rejected_total[5m]))
+
+# Relay-abuse signal specifically
+increase(mcp_write_relay_scope_rejected_total{cause="relay_scope"}[5m])
+```
+
+### Investigate
+
+Correlate with the `write_audit` table (per-signer — see
+[`docs/DATA_HANDLING.md` § "Per-signer write analysis"](DATA_HANDLING.md#per-signer-write-analysis-query-write_audit-not-prometheus))
+to identify offending signers; check whether keyless writes are
+enabled and the anchor address is correct.
+
+### Escalation
+
+Any sustained `cause="anchor_misconfig"` rate is a page regardless of
+volume — it means the server is rejecting all legitimate writes.
+Sustained `cause="relay_scope"` growth without a corresponding traffic
+explanation should be treated as active relay abuse.
+
+---
+
+## Write failure rate elevated <a id="write-failure-rate-elevated"></a>
+
+**Metric:** `mcp_write_broadcasts_total{outcome}`.
+**Expression:**
+
+```promql
+rate(mcp_write_broadcasts_total{outcome="failed"}[5m]) / rate(mcp_write_broadcasts_total[5m]) > <threshold>
+```
+
+### What it means
+
+Broadcasts are passing relay scope but failing at the RPC layer
+(upstream node issues, gas/nonce problems, chain congestion).
+
+### Likely causes
+
+1. **Upstream EVM RPC degraded** — correlate with `evm_rpc_errors_total`
+   and the circuit-breaker state gauge.
+2. **Gas or nonce problems** at the anchor precompile under load.
+3. **Chain congestion** causing broadcast timeouts or rejections.
+
+### First-look queries
+
+```promql
+# Failure ratio
+rate(mcp_write_broadcasts_total{outcome="failed"}[5m])
+  / rate(mcp_write_broadcasts_total[5m])
+
+# Correlate with upstream RPC health
+sum(rate(evm_rpc_errors_total[5m]))
+evm_rpc_circuit_breaker_state
+```
+
+### Investigate
+
+Check `evm.rpc.*` metrics and the circuit-breaker state gauge; inspect
+recent `broadcast_failed` audit log lines for the underlying error.
+
+### Escalation
+
+If the failure rate tracks
+[`NvnmMCPCircuitBreakerOpen`](#inveniam-mcp-circuit-breaker-open),
+treat as an upstream RPC incident — page the RPC provider's NOC in
+parallel with local triage.
+
+---
+
 ## Cross-references
 
 - [`docs/RUNBOOK.md`](RUNBOOK.md) — deployment + day-two operations.

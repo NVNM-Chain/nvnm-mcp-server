@@ -328,6 +328,35 @@ Retention is scoped by Privacy Policy §8 (cross-reference; do not duplicate):
 
 Retention/partitioning mechanism is operator-owned (see `.env.example`, `MCP_KEYLESS_PG_DSN` documentation).
 
+### Per-signer write analysis (query `write_audit`, not Prometheus) <a id="per-signer-write-analysis-query-write_audit-not-prometheus"></a>
+
+Prometheus write counters (`mcp_write_broadcasts_total{outcome}`,
+`mcp_write_relay_scope_rejected_total{cause}` — see
+[`docs/INCIDENT_RUNBOOK.md`](INCIDENT_RUNBOOK.md#relay-scope-rejections-spiking))
+are intentionally aggregate — no signer label — to keep cardinality
+bounded and signer addresses off the unauthenticated `/metrics`
+endpoint. Per-signer and new-signer detection is served from the
+signer-keyed `write_audit` table instead (columns `signer`,
+`created_at` per the schema above and
+[`internal/mcp/migrations/0002_init_write_audit.sql`](../internal/mcp/migrations/0002_init_write_audit.sql)):
+
+**Per-signer write volume:**
+
+```sql
+SELECT signer, count(*) AS writes FROM write_audit GROUP BY signer ORDER BY writes DESC;
+```
+
+**New signers over time (first-seen per signer, bucketed by day):**
+
+```sql
+SELECT date_trunc('day', first_seen) AS day, count(*) AS new_signers
+  FROM (SELECT signer, min(created_at) AS first_seen FROM write_audit GROUP BY signer) s
+ GROUP BY day ORDER BY day;
+```
+
+New-signer flooding becomes a meaningful sybil signal once anonymous
+writes flip (Phase 5); until then these are ad-hoc forensic queries.
+
 ## 9. Outbound network destinations
 
 1. **EVM JSON-RPC endpoint** (`$NVNM_EVM_RPC_URL`, optionally
