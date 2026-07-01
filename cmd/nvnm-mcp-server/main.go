@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -29,6 +30,16 @@ import (
 )
 
 const shutdownTimeout = 5 * time.Second
+
+// keylessPGBootTimeout bounds the keyless-bundle Postgres connect + migrate at
+// startup so an unreachable database cannot hang boot indefinitely.
+const keylessPGBootTimeout = 10 * time.Second
+
+// errKeylessDSNInvalid is returned (never wrapped) when MCP_KEYLESS_PG_DSN
+// fails to parse: pgx's parse error can echo the raw connection string,
+// including the password, so it must not reach a log or a returned error.
+var errKeylessDSNInvalid = errors.New(
+	"invalid MCP_KEYLESS_PG_DSN: check the DSN format (value withheld from logs)")
 
 func main() {
 	if err := run(); err != nil {
@@ -504,11 +515,30 @@ func loadWriteAudit(
 	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
 		return nil, func() {}, nil
 	}
-	pool, err := pgxpool.New(context.Background(), cfg.KeylessPGDSN)
+	// Parse the DSN before connecting: a malformed DSN produces a pgx error
+	// that can echo the connection string (password included), so it must
+	// never be wrapped or logged -- return a fixed, credential-free error.
+	// The connect/migrate errors below are pgx connection errors, which
+	// redact the password, and are safe to wrap.
+	poolCfg, err := pgxpool.ParseConfig(cfg.KeylessPGDSN)
+	if err != nil {
+		return nil, nil, errKeylessDSNInvalid
+	}
+	// Bound the boot-time dial + migrate so an unreachable Postgres cannot
+	// hang startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
+	ctx, cancel := context.WithTimeout(context.Background(), keylessPGBootTimeout)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect keyless pg: %w", err)
 	}
-	if err := mcpserver.RunMigrations(context.Background(), pool, logger); err != nil {
+	// pgxpool is lazy; Ping forces the initial dial under the bounded context
+	// so a down database fails boot fast instead of at first write.
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("ping keyless pg: %w", err)
+	}
+	if err := mcpserver.RunMigrations(ctx, pool, logger); err != nil {
 		pool.Close()
 		return nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
 	}
