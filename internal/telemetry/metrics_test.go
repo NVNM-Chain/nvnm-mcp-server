@@ -63,7 +63,7 @@ func TestNewMetrics_WriteDetectionInstruments(t *testing.T) {
 	}
 }
 
-func TestMetrics_RecordersNilSafe(t *testing.T) {
+func TestMetrics_RecordersNilSafe(_ *testing.T) {
 	var m *Metrics // nil receiver must not panic
 	m.RecordBroadcast(context.Background(), "ok")
 	m.RecordRelayReject(context.Background(), "relay_scope")
