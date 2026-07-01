@@ -15,6 +15,10 @@ import (
 // limit cannot scan the whole append-only table.
 const defaultWriteAuditQueryLimit = 100
 
+// maxWriteAuditQueryLimit is the hard ceiling on a single query so a caller
+// cannot force a full scan of the append-only table with a huge Limit.
+const maxWriteAuditQueryLimit = 1000
+
 // WriteAuditEntry is one recorded broadcast attempt. Addresses and tx hashes
 // only -- there is no key material on the authless path.
 type WriteAuditEntry struct {
@@ -29,7 +33,9 @@ type WriteAuditEntry struct {
 }
 
 // WriteAuditFilter narrows an admin query. Zero Signer means any signer; nil
-// From/To means unbounded on that side; Limit <= 0 means defaultWriteAuditQueryLimit.
+// From/To means unbounded on that side; Limit <= 0 means
+// defaultWriteAuditQueryLimit and any Limit above maxWriteAuditQueryLimit is
+// clamped to that ceiling.
 type WriteAuditFilter struct {
 	Signer string
 	From   *time.Time
@@ -78,6 +84,9 @@ func (s *PostgresWriteAuditStore) Query(
 	limit := f.Limit
 	if limit <= 0 {
 		limit = defaultWriteAuditQueryLimit
+	}
+	if limit > maxWriteAuditQueryLimit {
+		limit = maxWriteAuditQueryLimit
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT signer, to_addr, value_wei, calldata_len, tx_hash, outcome, error, created_at

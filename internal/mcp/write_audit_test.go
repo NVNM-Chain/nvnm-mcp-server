@@ -81,3 +81,24 @@ func TestPostgresWriteAuditStore_FilterByWindow(t *testing.T) {
 		t.Fatalf("want 0 rows from a future window, got %d", len(got))
 	}
 }
+
+// A Limit above the hard ceiling must be clamped so a caller cannot force a
+// full scan of the append-only table.
+func TestPostgresWriteAuditStore_QueryClampsToMax(t *testing.T) {
+	pool := testPool(t)
+	s := NewPostgresWriteAuditStore(pool)
+	ctx := context.Background()
+
+	for range maxWriteAuditQueryLimit + 10 {
+		if err := s.Record(ctx, WriteAuditEntry{Signer: "0xcap", Outcome: "broadcast_ok"}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+	}
+	got, err := s.Query(ctx, WriteAuditFilter{Limit: maxWriteAuditQueryLimit + 10})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != maxWriteAuditQueryLimit {
+		t.Fatalf("want %d rows (clamped to ceiling), got %d", maxWriteAuditQueryLimit, len(got))
+	}
+}
