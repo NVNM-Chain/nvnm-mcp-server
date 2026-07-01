@@ -126,7 +126,7 @@ func makeSendRawTxHandler(
 			}
 			rerr := audit.Record(ctx, WriteAuditEntry{
 				Signer:      decoded.Signer.String(),
-				To:          addrString(decoded.To),
+				ToAddr:      addrString(decoded.To),
 				ValueWei:    decoded.Value.String(),
 				CalldataLen: len(decoded.Input),
 				TxHash:      txHash,

@@ -27,21 +27,11 @@ func (a *AdminServer) handleWriteAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := WriteAuditFilter{Signer: q.Get("signer")}
-	if v := q.Get("from"); v != "" {
-		ts, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			http.Error(w, "invalid 'from' (want RFC3339)", http.StatusBadRequest)
-			return
-		}
-		f.From = &ts
+	if !parseTimeParam(w, "from", q.Get("from"), &f.From) {
+		return
 	}
-	if v := q.Get("to"); v != "" {
-		ts, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			http.Error(w, "invalid 'to' (want RFC3339)", http.StatusBadRequest)
-			return
-		}
-		f.To = &ts
+	if !parseTimeParam(w, "to", q.Get("to"), &f.To) {
+		return
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -63,4 +53,20 @@ func (a *AdminServer) handleWriteAudit(w http.ResponseWriter, r *http.Request) {
 	}{Entries: entries}); err != nil {
 		a.logger.Error("admin: encode write-audit response", slog.String("error", err.Error()))
 	}
+}
+
+// parseTimeParam parses an optional RFC3339 query param into dst. An empty
+// value is a no-op (dst left nil). A present-but-malformed value writes a 400
+// and returns false so the caller can stop; a valid value sets *dst.
+func parseTimeParam(w http.ResponseWriter, name, v string, dst **time.Time) bool {
+	if v == "" {
+		return true
+	}
+	ts, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		http.Error(w, "invalid '"+name+"' (want RFC3339)", http.StatusBadRequest)
+		return false
+	}
+	*dst = &ts
+	return true
 }

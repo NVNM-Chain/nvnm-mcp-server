@@ -23,7 +23,7 @@ const maxWriteAuditQueryLimit = 1000
 // only -- there is no key material on the authless path.
 type WriteAuditEntry struct {
 	Signer      string
-	To          string
+	ToAddr      string // destination address (SQL column to_addr)
 	ValueWei    string
 	CalldataLen int
 	TxHash      string
@@ -65,12 +65,11 @@ func NewPostgresWriteAuditStore(pool *pgxpool.Pool) *PostgresWriteAuditStore {
 //
 //nolint:gocritic // hugeParam accepted
 func (s *PostgresWriteAuditStore) Record(ctx context.Context, e WriteAuditEntry) error {
-
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO write_audit
 		   (signer, to_addr, value_wei, calldata_len, tx_hash, outcome, error)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		e.Signer, e.To, e.ValueWei, e.CalldataLen, e.TxHash, e.Outcome, e.Error)
+		e.Signer, e.ToAddr, e.ValueWei, e.CalldataLen, e.TxHash, e.Outcome, e.Error)
 	if err != nil {
 		return fmt.Errorf("record write_audit: %w", err)
 	}
@@ -106,7 +105,7 @@ func (s *PostgresWriteAuditStore) Query(
 	for rows.Next() {
 		var e WriteAuditEntry
 		if scanErr := rows.Scan(
-			&e.Signer, &e.To, &e.ValueWei, &e.CalldataLen,
+			&e.Signer, &e.ToAddr, &e.ValueWei, &e.CalldataLen,
 			&e.TxHash, &e.Outcome, &e.Error, &e.CreatedAt,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scan write_audit row: %w", scanErr)

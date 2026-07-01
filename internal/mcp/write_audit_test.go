@@ -16,7 +16,7 @@ func TestPostgresWriteAuditStore_RecordQueryRoundTrip(t *testing.T) {
 
 	in := WriteAuditEntry{
 		Signer:   "0x1111111111111111111111111111111111111111",
-		To:       "0x0000000000000000000000000000000000000A00",
+		ToAddr:   "0x0000000000000000000000000000000000000A00",
 		ValueWei: "0", CalldataLen: 36, TxHash: "0xabc", Outcome: "broadcast_ok",
 	}
 	if err := s.Record(ctx, in); err != nil {
