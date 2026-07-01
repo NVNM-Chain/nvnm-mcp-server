@@ -311,10 +311,22 @@ span.
 | Request correlation UUID            | Process memory                                                         | Single request                  |
 | Failed-auth IP buckets              | Process memory                                                         | 15-min inactivity TTL           |
 | JWKS public keys                    | Process memory (`keyfunc` cache)                                       | Process lifetime                |
+| Write-audit log (keyless writes, Phase 4a) | `write_audit` Postgres table (opt-in via `MCP_KEYLESS_PG_DSN`) | Per Privacy Policy §8: **90 days** (write-path structured logs); `grantRole` broadcasts map to **12-month administrative audit-trail window**. Retention mechanism (time-partitioning, archival) is DevOps-owned. |
 | Logs                                | stderr (operator-routed)                                               | Operator-defined                |
 | Metrics / traces                    | OTLP / Prometheus sink                                                 | Sink-defined                    |
 
 No other runtime writes to local storage.
+
+### 8.1 Write-audit table
+
+The `write_audit` table records attempted keyless broadcasts (when `MCP_KEYLESS_WRITES=true`). Each row captures the on-chain signer address, destination, value, calldata length, transaction hash, outcome (success/failure/queued), and timestamp. The table is append-only and populated when `MCP_KEYLESS_PG_DSN` is configured; without it, the server logs broadcast attempts but does not persist them.
+
+Retention is scoped by Privacy Policy §8 (cross-reference; do not duplicate):
+
+- **Write-path broadcasts** (typical `evm_send_raw_transaction` calls): **90 days** per Privacy Policy §8 write-path window.
+- **Administrative broadcasts** (`grantRole` signer-keyed actions): **12 months** per Privacy Policy §8 administrative audit-trail window.
+
+Retention/partitioning mechanism is operator-owned (see `.env.example`, `MCP_KEYLESS_PG_DSN` documentation).
 
 ## 9. Outbound network destinations
 

@@ -31,11 +31,15 @@ type captureClient struct {
 	gotHex string
 	called bool
 	txHash string
+	err    error
 }
 
 func (c *captureClient) SendRawTransaction(_ context.Context, signedTxHex string) (string, error) {
 	c.called = true
 	c.gotHex = signedTxHex
+	if c.err != nil {
+		return "", c.err
+	}
 	if c.txHash == "" {
 		c.txHash = "0xhash"
 	}
@@ -64,7 +68,7 @@ func signedTxTo(t *testing.T, key *wallet.PrivateKey, to defitypes.Address) stri
 func callHandler(t *testing.T, c evm.Client, keyless bool, in sendRawTxInput) (sendRawTxOutput, error) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(c, anchorHex, keyless, logger)
+	h := makeSendRawTxHandler(c, anchorHex, keyless, nil, logger)
 	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, in)
 	return out, err
 }
@@ -117,6 +121,90 @@ func TestSendRawTx_KeylessScope(t *testing.T) {
 	})
 }
 
+// fakeWriteAudit is an in-memory WriteAuditStore for unit tests. Task 4 reuses
+// it from the same package.
+type fakeWriteAudit struct{ recorded []WriteAuditEntry }
+
+//nolint:gocritic // hugeParam: WriteAuditEntry matches the interface signature; pointer would diverge.
+func (f *fakeWriteAudit) Record(_ context.Context, e WriteAuditEntry) error {
+	f.recorded = append(f.recorded, e)
+	return nil
+}
+
+func (f *fakeWriteAudit) Query(_ context.Context, _ WriteAuditFilter) ([]WriteAuditEntry, error) {
+	return f.recorded, nil
+}
+
+func TestSendRawTx_RecordsWriteAuditOnSuccess(t *testing.T) {
+	fa := &fakeWriteAudit{}
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxTo(t, key, anchor)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, fa, logger)
+	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(fa.recorded) != 1 {
+		t.Fatalf("want 1 audit row, got %d", len(fa.recorded))
+	}
+	got := fa.recorded[0]
+	if got.Outcome != "broadcast_ok" {
+		t.Errorf("outcome = %q, want broadcast_ok", got.Outcome)
+	}
+	if got.TxHash != "0xabc" {
+		t.Errorf("tx_hash = %q, want 0xabc", got.TxHash)
+	}
+	if got.Signer == "" {
+		t.Error("signer is empty")
+	}
+	if got.Signer != key.Address().String() {
+		t.Errorf("signer = %q, want %q", got.Signer, key.Address().String())
+	}
+}
+
+func TestSendRawTx_RecordsWriteAuditOnFailure(t *testing.T) {
+	fa := &fakeWriteAudit{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxTo(t, key, anchor)
+
+	boom := errors.New("rpc down")
+	h := makeSendRawTxHandler(&captureClient{err: boom}, anchorHex, true, fa, logger)
+	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
+	if err == nil {
+		t.Fatal("expected broadcast error to propagate")
+	}
+	if len(fa.recorded) != 1 {
+		t.Fatalf("want 1 audit row, got %d", len(fa.recorded))
+	}
+	got := fa.recorded[0]
+	if got.Outcome != "broadcast_failed" {
+		t.Errorf("outcome = %q, want broadcast_failed", got.Outcome)
+	}
+	if got.Error == "" {
+		t.Error("expected non-empty Error on failure row")
+	}
+	if got.Signer != key.Address().String() {
+		t.Errorf("signer = %q, want %q", got.Signer, key.Address().String())
+	}
+}
+
+func TestSendRawTx_NilWriteAuditNoPanic(t *testing.T) {
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxTo(t, key, anchor)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, logger)
+	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+		t.Fatalf("handler with nil store: %v", err)
+	}
+}
+
 func TestSendRawTx_SignerAudit(t *testing.T) {
 	key := wallet.NewRandomKey()
 	anchor := defitypes.MustAddressFromHex(anchorHex)
@@ -126,7 +214,7 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 	// not client_id.
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, logger)
 	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("keyless broadcast err: %v", err)
 	}
@@ -142,7 +230,7 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 
 	// authed (keyless off): success audit log keeps client_id, no signer field.
 	buf.Reset()
-	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, logger)
+	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, nil, logger)
 	if _, _, err := h2(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("authed broadcast err: %v", err)
 	}

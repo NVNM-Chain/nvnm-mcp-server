@@ -78,6 +78,10 @@ var (
 	ErrPepperRequired = errors.New(
 		"KEY_HMAC_PEPPER is required when KEY_STORE_BACKEND is \"postgres\" and " +
 			"AUTH_PROVIDER is \"apikey\" (a peppered Postgres store must not run unpeppered)")
+	ErrKeylessWritesRequiresDSN = errors.New(
+		"MCP_KEYLESS_PG_DSN is required when MCP_KEYLESS_WRITES is true " +
+			"(keyless writes without a shared-state audit backend is not a supported mode; " +
+			"the persisted write-audit is a security control, not optional)")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -151,6 +155,12 @@ type Config struct {
 	// (precompile-only scope) and broadcasts the canonical re-serialization.
 	// Default false: authed/self-host keeps the general-purpose relay (D9).
 	KeylessWrites bool // MCP_KEYLESS_WRITES: precompile-only authless write relay (default false)
+
+	// KeylessPGDSN is the dedicated Postgres DSN for the authless-bundle
+	// shared state (write_audit now; per-signer quota/blacklist later).
+	// Separate from KEY_STORE_DSN: hosted authless runs no key store.
+	// Empty => logs-only audit, no persistence. MCP_KEYLESS_PG_DSN.
+	KeylessPGDSN string
 
 	// Per-IP rate limit for anonymous reads. Must be tighter than the
 	// per-client limits above (documented invariant; not enforced here).
@@ -533,7 +543,22 @@ func (c *Config) Validate() error {
 	if err := c.validateKeyStore(); err != nil {
 		return err
 	}
+	if err := c.validateKeyless(); err != nil {
+		return err
+	}
 	return c.validateResilience()
+}
+
+// validateKeyless enforces the authless-write bundle's prerequisites.
+// Keyless writes ship a mandatory shared-state audit trail (the persisted
+// write-audit is a security control, per the authless-writes design); running
+// keyless writes without MCP_KEYLESS_PG_DSN would silently degrade to
+// logs-only, which is not a supported posture -- fail fast instead.
+func (c *Config) validateKeyless() error {
+	if c.KeylessWrites && c.KeylessPGDSN == "" {
+		return ErrKeylessWritesRequiresDSN
+	}
+	return nil
 }
 
 // validateKeyStore checks the key-store backend selection and its
@@ -657,6 +682,7 @@ func (c *Config) loadKeylessConfig() error {
 		return err
 	}
 	c.KeylessWrites = keylessW
+	c.KeylessPGDSN = os.Getenv("MCP_KEYLESS_PG_DSN")
 
 	anonLimitStr := envOrDefault("MCP_ANON_RATE_LIMIT", "5")
 	anonLimit, err := strconv.ParseFloat(anonLimitStr, 64)

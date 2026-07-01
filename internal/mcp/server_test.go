@@ -38,7 +38,7 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 		},
 	}
 
-	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, testLogger())
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer

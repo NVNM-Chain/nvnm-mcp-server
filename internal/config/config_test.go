@@ -60,6 +60,8 @@ func clearEnv(t *testing.T) {
 		"NVNM_ALLOWED_ORIGINS",
 		"MCP_CLIENT_ID_HMAC_KEY",
 		"MCP_KEYLESS_READS",
+		"MCP_KEYLESS_WRITES",
+		"MCP_KEYLESS_PG_DSN",
 		"MCP_ANON_RATE_LIMIT",
 		"MCP_ANON_RATE_BURST",
 		"NVNM_WALLET_GENERATOR_URL",
@@ -903,6 +905,52 @@ func TestLoad_AnonRateBurstMustBePositive(t *testing.T) {
 
 	if _, err := Load(); !errors.Is(err, ErrInvalidAnonRateBurst) {
 		t.Errorf("got %v, want ErrInvalidAnonRateBurst", err)
+	}
+}
+
+func TestLoad_KeylessPGDSN(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_PG_DSN", "postgres://x/y")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.KeylessPGDSN != "postgres://x/y" {
+		t.Fatalf("KeylessPGDSN = %q, want %q", cfg.KeylessPGDSN, "postgres://x/y")
+	}
+}
+
+// Keyless writes without a shared-state audit DSN is not a supported mode
+// (logs-only would silently drop the mandatory write-audit control) -- Load
+// must fail fast rather than boot a degraded relay.
+func TestValidate_KeylessWritesRequiresDSN(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_WRITES", "true")
+	// MCP_KEYLESS_PG_DSN deliberately unset.
+
+	_, err := Load()
+	if !errors.Is(err, ErrKeylessWritesRequiresDSN) {
+		t.Fatalf("want ErrKeylessWritesRequiresDSN, got %v", err)
+	}
+}
+
+// With the DSN present, keyless writes validate and load cleanly.
+func TestValidate_KeylessWritesWithDSN(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_WRITES", "true")
+	t.Setenv("MCP_KEYLESS_PG_DSN", "postgres://x/y")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
+		t.Fatalf("keyless writes config not captured: writes=%v dsn=%q",
+			cfg.KeylessWrites, cfg.KeylessPGDSN)
 	}
 }
 

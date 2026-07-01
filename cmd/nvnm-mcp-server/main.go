@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -29,6 +30,16 @@ import (
 )
 
 const shutdownTimeout = 5 * time.Second
+
+// keylessPGBootTimeout bounds the keyless-bundle Postgres connect + migrate at
+// startup so an unreachable database cannot hang boot indefinitely.
+const keylessPGBootTimeout = 10 * time.Second
+
+// errKeylessDSNInvalid is returned (never wrapped) when MCP_KEYLESS_PG_DSN
+// fails to parse: pgx's parse error can echo the raw connection string,
+// including the password, so it must not reach a log or a returned error.
+var errKeylessDSNInvalid = errors.New(
+	"invalid MCP_KEYLESS_PG_DSN: check the DSN format (value withheld from logs)")
 
 func main() {
 	if err := run(); err != nil {
@@ -155,14 +166,12 @@ func run() error {
 		return err
 	}
 
-	// --- Admin API Server (API key mode only) ---
-	adminShutdown, err := startAdminServer(cfg, managedKeys, pendingStore, emailSender, logger)
+	// --- Write-audit store + Admin API Server ---
+	writeAudit, adminCleanup, err := startAuditAndAdmin(cfg, managedKeys, pendingStore, emailSender, logger)
 	if err != nil {
 		return err
 	}
-	if adminShutdown != nil {
-		defer adminShutdown()
-	}
+	defer adminCleanup()
 
 	// --- Per-client / anonymous / fail-rate limiters (HTTP only) ---
 	var (
@@ -184,7 +193,7 @@ func run() error {
 	srv := mcpserver.NewServer(
 		evmClient, anchorClient,
 		cfg,
-		middleware, logger,
+		middleware, writeAudit, logger,
 	)
 
 	// --- Phase 11 L3: public self-serve key-request endpoint (opt-in) ---
@@ -470,11 +479,79 @@ func loadAPIKeys(
 	return v, managedKeys, nil, nil
 }
 
+// startAuditAndAdmin combines loadWriteAudit and startAdminServer into a
+// single call so run() does not accumulate their error and nil-check
+// branches against its cyclomatic-complexity budget.
+func startAuditAndAdmin(
+	cfg *config.Config,
+	keys mcpserver.KeyStoreBackend,
+	pendingStore *mcpserver.PendingKeyStore,
+	email mcpserver.EmailSender,
+	logger *slog.Logger,
+) (mcpserver.WriteAuditStore, func(), error) {
+	writeAudit, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, logger)
+	if err != nil {
+		writeAuditCleanup()
+		return nil, func() {}, err
+	}
+	return writeAudit, func() {
+		if adminShutdown != nil {
+			adminShutdown()
+		}
+		writeAuditCleanup()
+	}, nil
+}
+
+// loadWriteAudit stands up the dedicated authless-bundle Postgres pool +
+// write-audit store. Returns (nil, noop, nil) when persistence is not
+// configured (logs-only). Gated on keyless writes + a DSN.
+func loadWriteAudit(
+	cfg *config.Config, logger *slog.Logger,
+) (mcpserver.WriteAuditStore, func(), error) {
+	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
+		return nil, func() {}, nil
+	}
+	// Parse the DSN before connecting: a malformed DSN produces a pgx error
+	// that can echo the connection string (password included), so it must
+	// never be wrapped or logged -- return a fixed, credential-free error.
+	// The connect/migrate errors below are pgx connection errors, which
+	// redact the password, and are safe to wrap.
+	poolCfg, err := pgxpool.ParseConfig(cfg.KeylessPGDSN)
+	if err != nil {
+		return nil, nil, errKeylessDSNInvalid
+	}
+	// Bound the boot-time dial + migrate so an unreachable Postgres cannot
+	// hang startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
+	ctx, cancel := context.WithTimeout(context.Background(), keylessPGBootTimeout)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect keyless pg: %w", err)
+	}
+	// pgxpool is lazy; Ping forces the initial dial under the bounded context
+	// so a down database fails boot fast instead of at first write.
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("ping keyless pg: %w", err)
+	}
+	if err := mcpserver.RunMigrations(ctx, pool, logger); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
+	}
+	logger.Info("write-audit backend: postgres (keyless bundle)")
+	return mcpserver.NewPostgresWriteAuditStore(pool), func() { pool.Close() }, nil
+}
+
 func startAdminServer(
 	cfg *config.Config,
 	keys mcpserver.KeyStoreBackend,
 	pendingStore *mcpserver.PendingKeyStore,
 	email mcpserver.EmailSender,
+	writeAudit mcpserver.WriteAuditStore,
 	logger *slog.Logger,
 ) (shutdown func(), err error) {
 	if cfg.AdminAPIKey == "" {
@@ -494,7 +571,7 @@ func startAdminServer(
 
 	adminSrv := mcpserver.NewAdminServer(
 		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, cfg.KeyDefaultTTL, logger,
-	).WithPendingKeyStore(pendingStore, email)
+	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {
 			logger.Error("admin API server error", slog.String("error", aErr.Error()))
