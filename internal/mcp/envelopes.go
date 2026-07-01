@@ -55,17 +55,20 @@ type anchorInfoOutput struct {
 
 type registryOutput struct {
 	anchor.Registry
-	NextActions []NextAction `json:"next_actions,omitempty"`
+	ContentTrust string       `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
+	NextActions  []NextAction `json:"next_actions,omitempty"`
 }
 
 type registriesOutput struct {
 	anchor.GetRegistriesResponse
-	NextActions []NextAction `json:"next_actions,omitempty"`
+	ContentTrust string       `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
+	NextActions  []NextAction `json:"next_actions,omitempty"`
 }
 
 type recordsOutput struct {
 	anchor.GetRecordsResponse
-	NextActions []NextAction `json:"next_actions,omitempty"`
+	ContentTrust string       `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
+	NextActions  []NextAction `json:"next_actions,omitempty"`
 }
 
 type unsignedTxOutput struct {
