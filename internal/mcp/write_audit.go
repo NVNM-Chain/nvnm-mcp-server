@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +23,7 @@ const maxWriteAuditQueryLimit = 1000
 // WriteAuditEntry is one recorded broadcast attempt. Addresses and tx hashes
 // only -- there is no key material on the authless path.
 type WriteAuditEntry struct {
-	Signer      string
+	Signer      string // recovered signer address; normalized to lowercase on store
 	ToAddr      string // destination address (SQL column to_addr)
 	ValueWei    string
 	CalldataLen int
@@ -32,10 +33,11 @@ type WriteAuditEntry struct {
 	CreatedAt   time.Time
 }
 
-// WriteAuditFilter narrows an admin query. Zero Signer means any signer; nil
-// From/To means unbounded on that side; Limit <= 0 means
-// defaultWriteAuditQueryLimit and any Limit above maxWriteAuditQueryLimit is
-// clamped to that ceiling.
+// WriteAuditFilter narrows an admin query. Zero Signer means any signer; a
+// Signer match is case-insensitive (addresses are normalized to lowercase, so
+// a checksummed query matches a lowercase-stored row). Nil From/To means
+// unbounded on that side; Limit <= 0 means defaultWriteAuditQueryLimit and any
+// Limit above maxWriteAuditQueryLimit is clamped to that ceiling.
 type WriteAuditFilter struct {
 	Signer string
 	From   *time.Time
@@ -69,7 +71,8 @@ func (s *PostgresWriteAuditStore) Record(ctx context.Context, e WriteAuditEntry)
 		`INSERT INTO write_audit
 		   (signer, to_addr, value_wei, calldata_len, tx_hash, outcome, error)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		e.Signer, e.ToAddr, e.ValueWei, e.CalldataLen, e.TxHash, e.Outcome, e.Error)
+		strings.ToLower(e.Signer), e.ToAddr, e.ValueWei, e.CalldataLen,
+		e.TxHash, e.Outcome, e.Error)
 	if err != nil {
 		return fmt.Errorf("record write_audit: %w", err)
 	}
@@ -95,7 +98,7 @@ func (s *PostgresWriteAuditStore) Query(
 		    AND ($3::timestamptz IS NULL OR created_at <= $3)
 		  ORDER BY created_at DESC
 		  LIMIT $4`,
-		f.Signer, f.From, f.To, limit)
+		strings.ToLower(f.Signer), f.From, f.To, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query write_audit: %w", err)
 	}
