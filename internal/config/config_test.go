@@ -922,6 +922,38 @@ func TestLoad_KeylessPGDSN(t *testing.T) {
 	}
 }
 
+// Keyless writes without a shared-state audit DSN is not a supported mode
+// (logs-only would silently drop the mandatory write-audit control) -- Load
+// must fail fast rather than boot a degraded relay.
+func TestValidate_KeylessWritesRequiresDSN(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_WRITES", "true")
+	// MCP_KEYLESS_PG_DSN deliberately unset.
+
+	_, err := Load()
+	if !errors.Is(err, ErrKeylessWritesRequiresDSN) {
+		t.Fatalf("want ErrKeylessWritesRequiresDSN, got %v", err)
+	}
+}
+
+// With the DSN present, keyless writes validate and load cleanly.
+func TestValidate_KeylessWritesWithDSN(t *testing.T) {
+	clearEnv(t)
+	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_WRITES", "true")
+	t.Setenv("MCP_KEYLESS_PG_DSN", "postgres://x/y")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
+		t.Fatalf("keyless writes config not captured: writes=%v dsn=%q",
+			cfg.KeylessWrites, cfg.KeylessPGDSN)
+	}
+}
+
 // TestLoad_RejectsLegacyEnvVars is the Phase 8.9 hard-cut
 // regression. The server MUST fail loud at startup if any of the
 // three former INVENIAM_* env vars is still set, even when the

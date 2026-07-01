@@ -78,6 +78,10 @@ var (
 	ErrPepperRequired = errors.New(
 		"KEY_HMAC_PEPPER is required when KEY_STORE_BACKEND is \"postgres\" and " +
 			"AUTH_PROVIDER is \"apikey\" (a peppered Postgres store must not run unpeppered)")
+	ErrKeylessWritesRequiresDSN = errors.New(
+		"MCP_KEYLESS_PG_DSN is required when MCP_KEYLESS_WRITES is true " +
+			"(keyless writes without a shared-state audit backend is not a supported mode; " +
+			"the persisted write-audit is a security control, not optional)")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -539,7 +543,22 @@ func (c *Config) Validate() error {
 	if err := c.validateKeyStore(); err != nil {
 		return err
 	}
+	if err := c.validateKeyless(); err != nil {
+		return err
+	}
 	return c.validateResilience()
+}
+
+// validateKeyless enforces the authless-write bundle's prerequisites.
+// Keyless writes ship a mandatory shared-state audit trail (the persisted
+// write-audit is a security control, per the authless-writes design); running
+// keyless writes without MCP_KEYLESS_PG_DSN would silently degrade to
+// logs-only, which is not a supported posture -- fail fast instead.
+func (c *Config) validateKeyless() error {
+	if c.KeylessWrites && c.KeylessPGDSN == "" {
+		return ErrKeylessWritesRequiresDSN
+	}
+	return nil
 }
 
 // validateKeyStore checks the key-store backend selection and its
