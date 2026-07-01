@@ -199,7 +199,7 @@ func run() error {
 	srv := mcpserver.NewServer(
 		evmClient, anchorClient,
 		cfg,
-		middleware, writeAudit, logger,
+		middleware, writeAudit, tel.Metrics, logger,
 	)
 
 	// --- Phase 11 L3: public self-serve key-request endpoint (opt-in) ---

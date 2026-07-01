@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,6 +47,20 @@ func (c *captureClient) SendRawTransaction(_ context.Context, signedTxHex string
 	return c.txHash, nil
 }
 
+// fakeWriteMetrics is an in-memory WriteMetrics recorder for unit tests.
+type fakeWriteMetrics struct {
+	broadcasts []string
+	rejects    []string
+}
+
+func (f *fakeWriteMetrics) RecordBroadcast(_ context.Context, outcome string) {
+	f.broadcasts = append(f.broadcasts, outcome)
+}
+
+func (f *fakeWriteMetrics) RecordRelayReject(_ context.Context, cause string) {
+	f.rejects = append(f.rejects, cause)
+}
+
 // signedTxTo builds a signed dynamic-fee tx to `to` and returns its canonical hex.
 func signedTxTo(t *testing.T, key *wallet.PrivateKey, to defitypes.Address) string {
 	t.Helper()
@@ -68,7 +83,7 @@ func signedTxTo(t *testing.T, key *wallet.PrivateKey, to defitypes.Address) stri
 func callHandler(t *testing.T, c evm.Client, keyless bool, in sendRawTxInput) (sendRawTxOutput, error) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(c, anchorHex, keyless, nil, logger)
+	h := makeSendRawTxHandler(c, anchorHex, keyless, nil, nil, logger)
 	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, in)
 	return out, err
 }
@@ -142,7 +157,7 @@ func TestSendRawTx_RecordsWriteAuditOnSuccess(t *testing.T) {
 	raw := signedTxTo(t, key, anchor)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, fa, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, fa, nil, logger)
 	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -173,7 +188,7 @@ func TestSendRawTx_RecordsWriteAuditOnFailure(t *testing.T) {
 	raw := signedTxTo(t, key, anchor)
 
 	boom := errors.New("rpc down")
-	h := makeSendRawTxHandler(&captureClient{err: boom}, anchorHex, true, fa, logger)
+	h := makeSendRawTxHandler(&captureClient{err: boom}, anchorHex, true, fa, nil, logger)
 	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 	if err == nil {
 		t.Fatal("expected broadcast error to propagate")
@@ -199,7 +214,7 @@ func TestSendRawTx_NilWriteAuditNoPanic(t *testing.T) {
 	raw := signedTxTo(t, key, anchor)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, logger)
 	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("handler with nil store: %v", err)
 	}
@@ -214,7 +229,7 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 	// not client_id.
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, logger)
 	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("keyless broadcast err: %v", err)
 	}
@@ -230,7 +245,7 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 
 	// authed (keyless off): success audit log keeps client_id, no signer field.
 	buf.Reset()
-	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, nil, logger)
+	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, nil, nil, logger)
 	if _, _, err := h2(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("authed broadcast err: %v", err)
 	}
@@ -241,4 +256,84 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 	if !strings.Contains(authed, `"client_id"`) {
 		t.Errorf("authed audit log should contain client_id\nlog: %s", authed)
 	}
+}
+
+func TestSendRawTx_Metrics(t *testing.T) {
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex(anchorHex)
+	other := defitypes.MustAddressFromHex("0x00000000000000000000000000000000000000Ee")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	t.Run("broadcast ok records outcome=ok", func(t *testing.T) {
+		fm := &fakeWriteMetrics{}
+		raw := signedTxTo(t, key, anchor)
+		h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, fm, logger)
+		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if !slices.Equal(fm.broadcasts, []string{"ok"}) {
+			t.Errorf("broadcasts = %v, want [ok]", fm.broadcasts)
+		}
+		if len(fm.rejects) != 0 {
+			t.Errorf("rejects = %v, want none", fm.rejects)
+		}
+	})
+
+	t.Run("broadcast failure records outcome=failed", func(t *testing.T) {
+		fm := &fakeWriteMetrics{}
+		raw := signedTxTo(t, key, anchor)
+		h := makeSendRawTxHandler(&captureClient{err: errors.New("boom")}, anchorHex, true, nil, fm, logger)
+		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err == nil {
+			t.Fatal("expected broadcast error")
+		}
+		if !slices.Equal(fm.broadcasts, []string{"failed"}) {
+			t.Errorf("broadcasts = %v, want [failed]", fm.broadcasts)
+		}
+	})
+
+	t.Run("relay-scope reject records cause=relay_scope", func(t *testing.T) {
+		fm := &fakeWriteMetrics{}
+		raw := signedTxTo(t, key, other)
+		h := makeSendRawTxHandler(&captureClient{}, anchorHex, true, nil, fm, logger)
+		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err == nil {
+			t.Fatal("expected relay-scope rejection")
+		}
+		if !slices.Equal(fm.rejects, []string{"relay_scope"}) {
+			t.Errorf("rejects = %v, want [relay_scope]", fm.rejects)
+		}
+		if len(fm.broadcasts) != 0 {
+			t.Errorf("broadcasts = %v, want none", fm.broadcasts)
+		}
+	})
+
+	t.Run("decode failure records cause=decode", func(t *testing.T) {
+		fm := &fakeWriteMetrics{}
+		h := makeSendRawTxHandler(&captureClient{}, anchorHex, true, nil, fm, logger)
+		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: "0xzzzz"}); err == nil {
+			t.Fatal("expected decode error")
+		}
+		if !slices.Equal(fm.rejects, []string{"decode"}) {
+			t.Errorf("rejects = %v, want [decode]", fm.rejects)
+		}
+	})
+
+	t.Run("anchor misconfig records cause=anchor_misconfig", func(t *testing.T) {
+		fm := &fakeWriteMetrics{}
+		raw := signedTxTo(t, key, anchor)
+		h := makeSendRawTxHandler(&captureClient{}, "not-an-address", true, nil, fm, logger)
+		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err == nil {
+			t.Fatal("expected anchor misconfig error")
+		}
+		if !slices.Equal(fm.rejects, []string{"anchor_misconfig"}) {
+			t.Errorf("rejects = %v, want [anchor_misconfig]", fm.rejects)
+		}
+	})
+
+	t.Run("nil metrics does not panic", func(t *testing.T) {
+		raw := signedTxTo(t, key, anchor)
+		h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, logger)
+		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }
