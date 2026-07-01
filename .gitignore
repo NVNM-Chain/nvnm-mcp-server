@@ -87,3 +87,6 @@ docs/standards/CODE_REVIEW_AUDIT_2026_04_28.md
 
 # Claude Code agent worktrees (transient; never tracked)
 .claude/worktrees/
+
+# Transient log output (test/boot logs; never tracked)
+*.log
