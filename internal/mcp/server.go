@@ -84,6 +84,7 @@ func NewServer(
 	cfg *config.Config,
 	middleware []mcp.Middleware,
 	writeAudit WriteAuditStore,
+	metrics WriteMetrics,
 	logger *slog.Logger,
 ) *Server {
 	mcpSrv := mcp.NewServer(
@@ -133,7 +134,7 @@ func NewServer(
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, logger)
+		registerEVMWriteTools(mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, logger)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
 	}

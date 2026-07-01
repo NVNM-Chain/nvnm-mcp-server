@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 func testLogger() *slog.Logger {
@@ -38,7 +41,7 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 		},
 	}
 
-	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, testLogger())
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -60,6 +63,40 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 	t.Cleanup(func() { _ = session.Close() })
 
 	return session
+}
+
+// TestNewServer_AcceptsWriteMetrics guarantees NewServer's metrics
+// parameter compiles against the live *telemetry.Metrics recorder (not just
+// the fake used in tools_evm_write_test.go), so the production wiring in
+// cmd/nvnm-mcp-server/main.go type-checks end to end.
+func TestNewServer_AcceptsWriteMetrics(t *testing.T) {
+	mp := sdkmetric.NewMeterProvider()
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	m, err := telemetry.NewMetrics(mp)
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+
+	evmClient := &mockEVM{
+		chainInfo: &evm.ChainInfo{ChainID: 58887, LatestBlockNumber: 100},
+		balance:   &evm.NormalizedBalance{Address: testAddr, Wei: "0", Ether: "0"},
+		block:     &evm.NormalizedBlock{Number: 1, Hash: "0xabc"},
+	}
+	anchorClient := &mockAnchor{
+		info: anchor.PrecompileInfo{
+			Address:     testAddr,
+			ChainID:     58887,
+			ABILoaded:   true,
+			MethodCount: 5,
+		},
+	}
+
+	// Must compile and not panic: *telemetry.Metrics satisfies WriteMetrics
+	// and threads cleanly into NewServer.
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, m, testLogger())
+	if srv == nil {
+		t.Fatal("NewServer returned nil")
+	}
 }
 
 // TestE2E_Initialize_IncludesInstructions guarantees the MCP

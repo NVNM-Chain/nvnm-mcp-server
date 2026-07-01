@@ -490,7 +490,7 @@ func TestHandler_CallContract_InvalidFromRejected(t *testing.T) {
 
 func TestHandler_SendRawTx_Happy(t *testing.T) {
 	m := &mockEVM{sendTxHash: "0xdeadbeef"}
-	handler := makeSendRawTxHandler(m, testAddr, false, nil, testLogger())
+	handler := makeSendRawTxHandler(m, testAddr, false, nil, nil, testLogger())
 
 	stubReq := &mcp.CallToolRequest{}
 	_, out, err := handler(ctx, stubReq, sendRawTxInput{SignedTxHex: "0xf86c..."})
@@ -503,7 +503,7 @@ func TestHandler_SendRawTx_Happy(t *testing.T) {
 }
 
 func TestHandler_SendRawTx_Empty(t *testing.T) {
-	handler := makeSendRawTxHandler(&mockEVM{}, testAddr, false, nil, testLogger())
+	handler := makeSendRawTxHandler(&mockEVM{}, testAddr, false, nil, nil, testLogger())
 
 	_, _, err := handler(ctx, nil, sendRawTxInput{SignedTxHex: ""})
 	if err == nil {

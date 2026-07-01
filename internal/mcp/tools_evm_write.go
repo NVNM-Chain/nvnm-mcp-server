@@ -23,6 +23,7 @@ func registerEVMWriteTools(
 	anchorAddr string,
 	keylessWrites bool,
 	audit WriteAuditStore,
+	metrics WriteMetrics,
 	logger *slog.Logger,
 ) {
 	addTool(srv, &mcp.Tool{
@@ -38,7 +39,7 @@ func registerEVMWriteTools(
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
 		Annotations: newDestructiveWriteTool(),
-	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, audit, logger))
+	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, audit, metrics, logger))
 }
 
 // --- Input/output types ---
@@ -55,7 +56,7 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, anchorAddr string, keylessWrites bool, audit WriteAuditStore, logger *slog.Logger,
+	c evm.Client, anchorAddr string, keylessWrites bool, audit WriteAuditStore, metrics WriteMetrics, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context,
@@ -73,6 +74,17 @@ func makeSendRawTxHandler(
 				)
 		}
 
+		recordBroadcast := func(outcome string) {
+			if metrics != nil {
+				metrics.RecordBroadcast(ctx, outcome)
+			}
+		}
+		recordReject := func(cause string) {
+			if metrics != nil {
+				metrics.RecordRelayReject(ctx, cause)
+			}
+		}
+
 		// Broadcast bytes: today's raw passthrough (authed/self-host), or the
 		// scoped, canonical re-serialization under keyless writes (D9 / §5).
 		broadcastHex := input.SignedTxHex
@@ -80,10 +92,12 @@ func makeSendRawTxHandler(
 		if keylessWrites {
 			dtx, derr := evm.DecodeSignedTx(input.SignedTxHex)
 			if derr != nil {
+				recordReject("decode")
 				return nil, sendRawTxOutput{}, derr // ErrTxDecode (input class)
 			}
 			anchor, aerr := defitypes.AddressFromHex(anchorAddr)
 			if aerr != nil {
+				recordReject("anchor_misconfig")
 				return nil, sendRawTxOutput{},
 					fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
 			}
@@ -94,6 +108,7 @@ func makeSendRawTxHandler(
 					slog.String("signer", dtx.Signer.String()),
 					slog.String("to", addrString(dtx.To)),
 				}))
+				recordReject("relay_scope")
 				return nil, sendRawTxOutput{}, serr // ErrRelayScopeRejected (input class)
 			}
 			decoded = dtx
@@ -153,6 +168,7 @@ func makeSendRawTxHandler(
 			}, identityAttrs()...)
 			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup(failAttrs))
 			recordAudit("broadcast_failed", "", err.Error())
+			recordBroadcast("failed")
 			return nil, sendRawTxOutput{}, err
 		}
 
@@ -163,6 +179,7 @@ func makeSendRawTxHandler(
 		}, identityAttrs()...)
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit", auditGroup(okAttrs))
 		recordAudit("broadcast_ok", txHash, "")
+		recordBroadcast("ok")
 		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}
 }
