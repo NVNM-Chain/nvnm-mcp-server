@@ -31,15 +31,21 @@ import (
 
 const shutdownTimeout = 5 * time.Second
 
-// keylessPGBootTimeout bounds the keyless-bundle Postgres connect + migrate at
-// startup so an unreachable database cannot hang boot indefinitely.
-const keylessPGBootTimeout = 10 * time.Second
+// pgBootTimeout bounds a Postgres connect + migrate at startup so an
+// unreachable database cannot hang boot indefinitely. Shared by the key-store
+// and keyless-bundle pools.
+const pgBootTimeout = 10 * time.Second
 
-// errKeylessDSNInvalid is returned (never wrapped) when MCP_KEYLESS_PG_DSN
-// fails to parse: pgx's parse error can echo the raw connection string,
-// including the password, so it must not reach a log or a returned error.
-var errKeylessDSNInvalid = errors.New(
-	"invalid MCP_KEYLESS_PG_DSN: check the DSN format (value withheld from logs)")
+// errKeylessDSNInvalid / errKeyStoreDSNInvalid are returned (never wrapped)
+// when the respective DSN fails to parse: pgx's parse error can echo the raw
+// connection string, including the password, so it must not reach a log or a
+// returned error.
+var (
+	errKeylessDSNInvalid = errors.New(
+		"invalid MCP_KEYLESS_PG_DSN: check the DSN format (value withheld from logs)")
+	errKeyStoreDSNInvalid = errors.New(
+		"invalid KEY_STORE_DSN: check the DSN format (value withheld from logs)")
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -392,6 +398,62 @@ func loadFusionAuth(
 	return validator, nil, cleanup, nil
 }
 
+// loadPostgresKeyStore stands up the Postgres-backed API-key store with a
+// DSN-safe, bounded boot (mirrors loadWriteAudit). Extracted from loadAPIKeys
+// to keep that function within its cyclomatic-complexity budget.
+func loadPostgresKeyStore(
+	cfg *config.Config, hasher *auth.KeyHasher, logger *slog.Logger,
+) (auth.TokenValidator, mcpserver.KeyStoreBackend, func(), error) {
+	// Parse before connecting: a malformed DSN produces a pgx error that can
+	// echo the connection string (password included), so it must never be
+	// wrapped or logged -- return a fixed, credential-free error. The
+	// connect/migrate errors below are pgx connection errors (password
+	// redacted) and are safe to wrap.
+	poolCfg, err := pgxpool.ParseConfig(cfg.KeyStoreDSN)
+	if err != nil {
+		return nil, nil, nil, errKeyStoreDSNInvalid
+	}
+	// Bound the boot-time dial + migrate so an unreachable Postgres cannot hang
+	// startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
+	ctx, cancel := context.WithTimeout(context.Background(), pgBootTimeout)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("connect postgres key store: %w", err)
+	}
+	// pgxpool is lazy; Ping forces the initial dial under the bounded context
+	// so a down database fails boot fast instead of at first lookup.
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, nil, nil, fmt.Errorf("ping postgres key store: %w", err)
+	}
+	if err := mcpserver.RunMigrations(ctx, pool, logger); err != nil {
+		pool.Close()
+		return nil, nil, nil, fmt.Errorf("migrate postgres key store: %w", err)
+	}
+	if cfg.KeyHMACPepper == "" {
+		pool.Close()
+		return nil, nil, nil, config.ErrPepperRequired
+	}
+	pgStore := mcpserver.NewPostgresKeyStore(pool, hasher)
+	if pgStore.Empty() && cfg.Transport == "http" {
+		pool.Close()
+		return nil, nil, nil, fmt.Errorf("%w: postgres key store has no enabled keys",
+			config.ErrHTTPAuthRequired)
+	}
+	logger.Info("api-key store backend: postgres",
+		slog.Int("total", pgStore.TotalCount()),
+		slog.Int("enabled", pgStore.ActiveCount()))
+	adapter := mcpserver.NewKeyLookupAdapter(pgStore)
+	validator := auth.NewAPIKeyValidatorWithHasher(adapter, hasher)
+	cleanup := func() { pool.Close() }
+	var v auth.TokenValidator
+	if validator != nil {
+		v = validator
+	}
+	return v, pgStore, cleanup, nil
+}
+
 func loadAPIKeys(
 	cfg *config.Config,
 	logger *slog.Logger,
@@ -402,35 +464,7 @@ func loadAPIKeys(
 		slog.Bool("rotation_window", cfg.KeyHMACPepperPrevious != ""))
 
 	if cfg.KeyStoreBackend == "postgres" {
-		pool, err := pgxpool.New(context.Background(), cfg.KeyStoreDSN)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("connect postgres key store: %w", err)
-		}
-		if err := mcpserver.RunMigrations(context.Background(), pool, logger); err != nil {
-			pool.Close()
-			return nil, nil, nil, fmt.Errorf("migrate postgres key store: %w", err)
-		}
-		if cfg.KeyHMACPepper == "" {
-			pool.Close()
-			return nil, nil, nil, config.ErrPepperRequired
-		}
-		pgStore := mcpserver.NewPostgresKeyStore(pool, hasher)
-		if pgStore.Empty() && cfg.Transport == "http" {
-			pool.Close()
-			return nil, nil, nil, fmt.Errorf("%w: postgres key store has no enabled keys",
-				config.ErrHTTPAuthRequired)
-		}
-		logger.Info("api-key store backend: postgres",
-			slog.Int("total", pgStore.TotalCount()),
-			slog.Int("enabled", pgStore.ActiveCount()))
-		adapter := mcpserver.NewKeyLookupAdapter(pgStore)
-		validator := auth.NewAPIKeyValidatorWithHasher(adapter, hasher)
-		cleanup := func() { pool.Close() }
-		var v auth.TokenValidator
-		if validator != nil {
-			v = validator
-		}
-		return v, pgStore, cleanup, nil
+		return loadPostgresKeyStore(cfg, hasher, logger)
 	}
 
 	var managedKeys *mcpserver.ManagedKeyStore
@@ -526,7 +560,7 @@ func loadWriteAudit(
 	}
 	// Bound the boot-time dial + migrate so an unreachable Postgres cannot
 	// hang startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
-	ctx, cancel := context.WithTimeout(context.Background(), keylessPGBootTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), pgBootTimeout)
 	defer cancel()
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
