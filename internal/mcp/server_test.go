@@ -65,14 +65,6 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 	return session
 }
 
-// TestE2E_Initialize_IncludesInstructions guarantees the MCP
-// initialize-response carries a server-level instructions string.
-// The string is the protocol-level signpost to nvnm_overview and
-// the verbatim privacy-by-design caveat -- a defense-in-depth layer
-// for clients whose model never reads the full tools/list payload.
-// Asserting on substrings (not the whole text) keeps the test stable
-// against wording refinements; the two substrings checked are the
-// load-bearing parts.
 // TestNewServer_AcceptsWriteMetrics guarantees NewServer's metrics
 // parameter compiles against the live *telemetry.Metrics recorder (not just
 // the fake used in tools_evm_write_test.go), so the production wiring in
@@ -107,6 +99,14 @@ func TestNewServer_AcceptsWriteMetrics(t *testing.T) {
 	}
 }
 
+// TestE2E_Initialize_IncludesInstructions guarantees the MCP
+// initialize-response carries a server-level instructions string.
+// The string is the protocol-level signpost to nvnm_overview and
+// the verbatim privacy-by-design caveat -- a defense-in-depth layer
+// for clients whose model never reads the full tools/list payload.
+// Asserting on substrings (not the whole text) keeps the test stable
+// against wording refinements; the two substrings checked are the
+// load-bearing parts.
 func TestE2E_Initialize_IncludesInstructions(t *testing.T) {
 	session := startTestServer(t)
 
