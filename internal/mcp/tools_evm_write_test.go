@@ -31,11 +31,15 @@ type captureClient struct {
 	gotHex string
 	called bool
 	txHash string
+	err    error
 }
 
 func (c *captureClient) SendRawTransaction(_ context.Context, signedTxHex string) (string, error) {
 	c.called = true
 	c.gotHex = signedTxHex
+	if c.err != nil {
+		return "", c.err
+	}
 	if c.txHash == "" {
 		c.txHash = "0xhash"
 	}
@@ -155,6 +159,34 @@ func TestSendRawTx_RecordsWriteAuditOnSuccess(t *testing.T) {
 	}
 	if got.Signer == "" {
 		t.Error("signer is empty")
+	}
+	if got.Signer != key.Address().String() {
+		t.Errorf("signer = %q, want %q", got.Signer, key.Address().String())
+	}
+}
+
+func TestSendRawTx_RecordsWriteAuditOnFailure(t *testing.T) {
+	fa := &fakeWriteAudit{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	key := wallet.NewRandomKey()
+	anchor := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxTo(t, key, anchor)
+
+	boom := errors.New("rpc down")
+	h := makeSendRawTxHandler(&captureClient{err: boom}, anchorHex, true, fa, logger)
+	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
+	if err == nil {
+		t.Fatal("expected broadcast error to propagate")
+	}
+	if len(fa.recorded) != 1 {
+		t.Fatalf("want 1 audit row, got %d", len(fa.recorded))
+	}
+	got := fa.recorded[0]
+	if got.Outcome != "broadcast_failed" {
+		t.Errorf("outcome = %q, want broadcast_failed", got.Outcome)
+	}
+	if got.Error == "" {
+		t.Error("expected non-empty Error on failure row")
 	}
 	if got.Signer != key.Address().String() {
 		t.Errorf("signer = %q, want %q", got.Signer, key.Address().String())
