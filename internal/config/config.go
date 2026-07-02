@@ -212,12 +212,18 @@ type Config struct {
 	// guard middleware on the HTTP transport.
 	AllowedOrigins []string
 
-	// TrustProxyHeaders controls whether the pre-auth failure-rate
-	// limiter derives the source IP from X-Forwarded-For. Enable only
-	// when the server sits behind a reverse proxy that strips
-	// client-supplied XFF entries; otherwise an attacker can spoof the
-	// header to dodge the limiter. NVNM_TRUST_PROXY_HEADERS env var,
-	// default false.
+	// TrustProxyHeaders is the master gate for two defense-in-depth
+	// controls, both meaningless unless the server sits behind a
+	// reverse proxy that strips client-supplied header values: (1) the
+	// pre-auth failure-rate limiter and anon-read limiter derive the
+	// source IP from X-Forwarded-For (hop-count-aware; see
+	// TrustedProxyHops) instead of RemoteAddr; (2) the C5
+	// requireForwardedHTTPS middleware enforces X-Forwarded-Proto,
+	// rejecting an explicit non-https value. Enable only behind a
+	// proxy that overwrites/strips inbound XFF and sets XFP;
+	// otherwise an attacker can spoof either header to dodge the
+	// limiter or mask a plaintext downgrade. NVNM_TRUST_PROXY_HEADERS
+	// env var, default false.
 	TrustProxyHeaders bool
 
 	// TrustedProxyHops is the number of trusted proxy hops in front of
