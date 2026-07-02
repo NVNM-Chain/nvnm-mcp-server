@@ -21,6 +21,7 @@ import (
 
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 const anchorHex = "0x0000000000000000000000000000000000000A00"
@@ -57,8 +58,8 @@ func (f *fakeWriteMetrics) RecordBroadcast(_ context.Context, outcome string) {
 	f.broadcasts = append(f.broadcasts, outcome)
 }
 
-func (f *fakeWriteMetrics) RecordRelayReject(_ context.Context, cause string) {
-	f.rejects = append(f.rejects, cause)
+func (f *fakeWriteMetrics) RecordRelayReject(_ context.Context, cause telemetry.RelayRejectCause) {
+	f.rejects = append(f.rejects, string(cause))
 }
 
 // signedTxTo builds a signed dynamic-fee tx to `to` and returns its canonical hex.

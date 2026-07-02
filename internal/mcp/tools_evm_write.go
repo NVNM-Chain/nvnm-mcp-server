@@ -15,6 +15,7 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 func registerEVMWriteTools(
@@ -79,7 +80,7 @@ func makeSendRawTxHandler(
 				metrics.RecordBroadcast(ctx, outcome)
 			}
 		}
-		recordReject := func(cause string) {
+		recordReject := func(cause telemetry.RelayRejectCause) {
 			if metrics != nil {
 				metrics.RecordRelayReject(ctx, cause)
 			}
@@ -92,12 +93,12 @@ func makeSendRawTxHandler(
 		if keylessWrites {
 			dtx, derr := evm.DecodeSignedTx(input.SignedTxHex)
 			if derr != nil {
-				recordReject("decode")
+				recordReject(telemetry.CauseDecode)
 				return nil, sendRawTxOutput{}, derr // ErrTxDecode (input class)
 			}
 			anchor, aerr := defitypes.AddressFromHex(anchorAddr)
 			if aerr != nil {
-				recordReject("anchor_misconfig")
+				recordReject(telemetry.CauseAnchorMisconfig)
 				return nil, sendRawTxOutput{},
 					fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
 			}
@@ -108,7 +109,7 @@ func makeSendRawTxHandler(
 					slog.String("signer", dtx.Signer.String()),
 					slog.String("to", addrString(dtx.To)),
 				}))
-				recordReject("relay_scope")
+				recordReject(telemetry.CauseRelayScope)
 				return nil, sendRawTxOutput{}, serr // ErrRelayScopeRejected (input class)
 			}
 			decoded = dtx
