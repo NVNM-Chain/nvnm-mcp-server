@@ -118,7 +118,10 @@ func (l *IPFailRateLimiter) sweep(now time.Time) {
 // entry to its left was appended by the hop to its right, so a client-
 // forged left-prefix is never selected as long as hops matches real chain
 // depth. Short/absent XFF falls back to RemoteAddr (fail-safe: a real
-// proxy IP, never a forgeable value). hops is the NVNM_TRUSTED_PROXY_HOPS
+// proxy IP, never a forgeable value); the same fallback covers a
+// nonsensical hops beyond the sequence length (idx >= len(seq)), which
+// is only reachable if a caller hand-populates hops outside of
+// config.Load's `>= 1` validation. hops is the NVNM_TRUSTED_PROXY_HOPS
 // count (>= 1). Single source of truth shared by the fail-rate limiter,
 // the anon-read limiter, and the key-request handler.
 func clientIP(r *http.Request, trustProxy bool, hops int) string {
@@ -129,7 +132,7 @@ func clientIP(r *http.Request, trustProxy bool, hops int) string {
 	seq := parseXFF(r.Header.Get("X-Forwarded-For"))
 	seq = append(seq, remote) // client-most left -> server-most right
 	idx := len(seq) - hops - 1
-	if idx < 0 {
+	if idx < 0 || idx >= len(seq) {
 		return remote
 	}
 	return seq[idx]

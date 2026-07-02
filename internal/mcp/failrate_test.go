@@ -198,6 +198,7 @@ func TestClientIPHopCount(t *testing.T) {
 		{"cdn plus ingress prepend", "10.0.0.2:5555", "6.6.6.6, 203.0.113.7, 70.0.0.1", true, 2, "203.0.113.7"},
 		{"missing xff falls back to remote", "10.0.0.2:5555", "", true, 2, "10.0.0.2"},
 		{"hops exceeds chain falls back to remote", "10.0.0.2:5555", "203.0.113.7", true, 5, "10.0.0.2"},
+		{"negative hops falls back to remote (no panic)", "10.0.0.2:5555", "203.0.113.7", true, -1, "10.0.0.2"},
 		{"whitespace trimmed", "10.0.0.1:5555", " 203.0.113.7 , 70.0.0.1 ", true, 2, "203.0.113.7"},
 		{"ipv6 remote no port-split crash", "[2001:db8::1]:5555", "", true, 1, "2001:db8::1"},
 	}

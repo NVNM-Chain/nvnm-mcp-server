@@ -854,13 +854,14 @@ func (c *Config) loadFeatureFlags() error {
 }
 
 // loadTrustedProxyHops parses NVNM_TRUSTED_PROXY_HOPS (default 1). A value
-// < 1 is rejected loudly: 0/negative would mean "trust the raw client-
-// supplied X-Forwarded-For", which is the spoofing bug this guards against.
+// < 1 is rejected loudly: 0 (or negative) trusted hops is a meaningless
+// configuration when proxy-header trust is enabled -- there is always at
+// least the one proxy that set the headers -- so it is rejected at boot.
 func (c *Config) loadTrustedProxyHops() error {
 	s := envOrDefault("NVNM_TRUSTED_PROXY_HOPS", "1")
 	hops, err := strconv.Atoi(s)
 	if err != nil {
-		return fmt.Errorf("NVNM_TRUSTED_PROXY_HOPS: %w", ErrInvalidTrustedProxyHops)
+		return fmt.Errorf("invalid NVNM_TRUSTED_PROXY_HOPS %q: %w", s, err)
 	}
 	if hops < 1 {
 		return ErrInvalidTrustedProxyHops

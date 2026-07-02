@@ -239,8 +239,9 @@ its own rate-limit bucket. The hop count is
 trusted proxy hops in front of the server, including the direct
 socket peer. Set it to the real chain depth (`1` = single ingress,
 `2` = CDN + ingress); `config.Load()` rejects `< 1` at boot
-(`ErrInvalidTrustedProxyHops`) since `0` would mean "trust the raw
-client-supplied header" — the exact bug this guards against. If the
+(`ErrInvalidTrustedProxyHops`) since 0 (or negative) trusted hops is
+a meaningless configuration when proxy-header trust is enabled —
+there is always at least the one proxy that set the headers. If the
 computed index falls outside the observed chain (a missing or
 shorter-than-expected `X-Forwarded-For`), derivation falls back to
 `RemoteAddr` rather than ever trusting an unverified value. Rejected
