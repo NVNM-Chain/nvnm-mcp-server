@@ -34,8 +34,8 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	// on the next RunMigrations call; a plain TRUNCATE leaves the table empty
 	// which causes EnsureDBVersionContext to return ErrNoNextVersion.
 	if _, err := pool.Exec(context.Background(),
-		"TRUNCATE api_keys, write_audit; DROP TABLE goose_db_version"); err != nil {
-		t.Fatalf("truncate api_keys/write_audit, drop goose_db_version: %v", err)
+		"TRUNCATE api_keys, write_audit, signer_quota, signer_blacklist; DROP TABLE goose_db_version"); err != nil {
+		t.Fatalf("truncate api_keys/write_audit/signer_quota/signer_blacklist, drop goose_db_version: %v", err)
 	}
 	// Second pass: goose recreates goose_db_version with seed row + applies
 	// migrations, leaving the pool in a fully-migrated, data-clean state.
