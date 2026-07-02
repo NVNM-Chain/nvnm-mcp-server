@@ -166,6 +166,8 @@ const MaxRequestBodyBytes = 10 * 1024 * 1024
 // non-nil allowlist that includes the origins of trusted MCP clients.
 // renewalURL, when non-empty, is appended to the "key expired" rejection
 // message so clients know where to renew (KEY_RENEWAL_URL config field).
+// trustProxyHeaders, when true, enables requireForwardedHTTPS (C5): requests
+// a trusted proxy marks as plaintext via X-Forwarded-Proto are rejected.
 func (s *Server) RunHTTP(
 	ctx context.Context,
 	addr string,
@@ -177,6 +179,7 @@ func (s *Server) RunHTTP(
 	metrics *telemetry.Metrics,
 	keyRequestHandler http.Handler,
 	renewalURL string,
+	trustProxyHeaders bool,
 ) error {
 	if allowedOrigins == nil {
 		allowedOrigins = DefaultOriginAllowlist()
@@ -192,6 +195,7 @@ func (s *Server) RunHTTP(
 		slog.Bool("fail_rate_limiting", failLimiter != nil),
 		slog.Bool("key_request_endpoint", keyRequestHandler != nil),
 		slog.Any("allowed_origins", allowedOrigins.Resolved()),
+		slog.Bool("trust_proxy_headers", trustProxyHeaders),
 	)
 
 	// Stateless: true means the SDK mints no per-session id and keeps no
@@ -208,6 +212,9 @@ func (s *Server) RunHTTP(
 	//   CORSMiddleware       → browser preflight + cross-origin permission
 	//   responseMetrics      → Phase 10 RD3 SLI counter (class label)
 	//   originGuard          → cheap string lookup, DNS-rebinding defense
+	//   requireForwardedHTTPS → C5: rejects requests a trusted proxy marks as
+	//                          plaintext (X-Forwarded-Proto present and !=
+	//                          https); passthrough unless trustProxyHeaders
 	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
 	//   limitRequestBody     → cap body before any parser sees it
 	//   path mux             → branches the chain by URL path:
@@ -256,7 +263,10 @@ func (s *Server) RunHTTP(
 	if failLimiter != nil {
 		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
 	}
-	guarded := originGuard(failGuarded, allowedOrigins, s.logger)
+	guarded := originGuard(
+		requireForwardedHTTPS(failGuarded, trustProxyHeaders, s.logger),
+		allowedOrigins, s.logger,
+	)
 	// Response metrics sit just inside CORS so the Phase 10 SLI counter
 	// (mcp_http_responses_total{class=...}) sees every real-request
 	// response with its final status — including Origin-guard rejections

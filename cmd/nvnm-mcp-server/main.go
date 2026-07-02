@@ -238,6 +238,7 @@ func runTransport(
 			mcpLimiter, anonLimiter, failLimiter,
 			buildOriginAllowlist(cfg), metrics,
 			keyRequestHandler, renewalURL,
+			cfg.TrustProxyHeaders,
 		)
 	default:
 		return fmt.Errorf("unknown transport %q: %w",
