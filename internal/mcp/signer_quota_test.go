@@ -4,7 +4,6 @@
 package mcp
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -12,7 +11,6 @@ import (
 func TestSignerQuota_CountIncrement(t *testing.T) {
 	pool := testPool(t)
 	store := NewPostgresSignerQuotaStore(pool)
-	ctx := context.Background()
 	signer := "0xabc0000000000000000000000000000000000001"
 	ws := WindowStart(time.Date(2026, 7, 2, 13, 5, 0, 0, time.UTC), 24*time.Hour)
 
@@ -21,7 +19,7 @@ func TestSignerQuota_CountIncrement(t *testing.T) {
 		t.Fatalf("initial Count = %d, %v; want 0, nil", got, err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := store.Increment(ctx, signer, ws); err != nil {
+		if err = store.Increment(ctx, signer, ws); err != nil {
 			t.Fatalf("Increment: %v", err)
 		}
 	}
@@ -31,8 +29,8 @@ func TestSignerQuota_CountIncrement(t *testing.T) {
 	}
 	// Different window is independent.
 	ws2 := WindowStart(time.Date(2026, 7, 3, 13, 5, 0, 0, time.UTC), 24*time.Hour)
-	if got, _ := store.Count(ctx, signer, ws2); got != 0 {
-		t.Fatalf("next-window Count = %d; want 0", got)
+	if n, _ := store.Count(ctx, signer, ws2); n != 0 {
+		t.Fatalf("next-window Count = %d; want 0", n)
 	}
 }
 

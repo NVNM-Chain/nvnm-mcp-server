@@ -4,14 +4,12 @@
 package mcp
 
 import (
-	"context"
 	"testing"
 )
 
 func TestSignerBlacklist_AddIsRemove(t *testing.T) {
 	pool := testPool(t)
 	store := NewPostgresSignerBlacklistStore(pool)
-	ctx := context.Background()
 	signer := "0xDEAD000000000000000000000000000000000001" // mixed case on purpose
 
 	if bl, _ := store.IsBlacklisted(ctx, signer); bl {
