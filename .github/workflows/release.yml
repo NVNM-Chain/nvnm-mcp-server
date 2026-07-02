@@ -26,9 +26,9 @@ jobs:
           - os: darwin
             arch: arm64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
 
@@ -52,7 +52,7 @@ jobs:
           echo "bin=$BIN" >> "$GITHUB_ENV"
 
       - name: Generate SBOM for binary
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           file: ${{ env.bin }}
           format: cyclonedx-json
@@ -61,7 +61,7 @@ jobs:
           upload-artifact: false
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Sign binary
         run: |
@@ -73,7 +73,7 @@ jobs:
           shasum -a 256 "$(basename "${{ env.bin }}")" > "$(basename "${{ env.bin }}").sha256"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: build-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
@@ -84,12 +84,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
 
@@ -162,7 +162,7 @@ jobs:
       #   2. Flip the draft to published via `gh release edit
       #      --draft=false` as a follow-up step.
       - name: Create GitHub Release (draft, with assets attached)
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
