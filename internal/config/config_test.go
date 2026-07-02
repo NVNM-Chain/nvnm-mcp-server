@@ -937,10 +937,14 @@ func TestValidate_KeylessWritesRequiresDSN(t *testing.T) {
 	}
 }
 
-// With the DSN present, keyless writes validate and load cleanly.
+// With the DSN present and MCP_KEYLESS_READS enabled, keyless writes
+// validate and load cleanly. MCP_KEYLESS_READS is required alongside
+// MCP_KEYLESS_WRITES as of Phase 5 (ErrKeylessWritesRequiresReads):
+// anonymous writes need the anonymous HTTP path enabled to be reachable.
 func TestValidate_KeylessWritesWithDSN(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)
+	t.Setenv("MCP_KEYLESS_READS", "true")
 	t.Setenv("MCP_KEYLESS_WRITES", "true")
 	t.Setenv("MCP_KEYLESS_PG_DSN", "postgres://x/y")
 
