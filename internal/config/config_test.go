@@ -1147,3 +1147,43 @@ func TestParseRoleList(t *testing.T) {
 		t.Fatalf("empty string must yield nil")
 	}
 }
+
+func TestTrustedProxyHops(t *testing.T) {
+	tests := []struct {
+		name    string
+		val     string // "" = unset
+		want    int
+		wantErr bool
+	}{
+		{"default when unset", "", 1, false},
+		{"explicit 1", "1", 1, false},
+		{"explicit 3", "3", 3, false},
+		{"zero rejected", "0", 0, true},
+		{"negative rejected", "-2", 0, true},
+		{"non-int rejected", "two", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.val == "" {
+				t.Setenv("NVNM_TRUSTED_PROXY_HOPS", "") // ensure unset-ish
+				os.Unsetenv("NVNM_TRUSTED_PROXY_HOPS")
+			} else {
+				t.Setenv("NVNM_TRUSTED_PROXY_HOPS", tt.val)
+			}
+			var c Config
+			err := c.loadTrustedProxyHops()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (hops=%d)", c.TrustedProxyHops)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if c.TrustedProxyHops != tt.want {
+				t.Fatalf("hops = %d, want %d", c.TrustedProxyHops, tt.want)
+			}
+		})
+	}
+}

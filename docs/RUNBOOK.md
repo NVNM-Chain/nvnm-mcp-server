@@ -358,6 +358,18 @@ CORS sits **outermost** in the middleware chain so it can answer `OPTIONS` prefl
 
 No configuration beyond `NVNM_ALLOWED_ORIGINS` is required; the same production override shown above enables CORS for those origins. CORS rejections are not separately metered (same cardinality concern as the Origin guard).
 
+### Trusted-proxy header invariants (C3/C5)
+
+`NVNM_TRUST_PROXY_HEADERS` (default `false`) is the master gate for two defense-in-depth controls that only make sense when the server sits behind a reverse proxy: hop-count-aware client-IP derivation for the fail-rate and anon-read limiters (C3), and `X-Forwarded-Proto` https enforcement (C5). Both are **operator-configured, deploy-time invariants** — get them wrong and the controls either do nothing or actively re-open the vulnerability they exist to close. The env var and hop-count semantics are documented canonically in [`docs/DATA_HANDLING.md`](DATA_HANDLING.md#5-source-ip-failure-rate-limiter) § 5 and § 10/11; this section is the operator checklist.
+
+When `NVNM_TRUST_PROXY_HEADERS=true`:
+
+- **The reverse proxy MUST overwrite/strip any client-supplied `X-Forwarded-For`** so only infrastructure-appended hops remain. If the proxy passes through an inbound `XFF` unchanged, a caller can prepend an arbitrary forged value and the server has no way to distinguish it from a real hop.
+- **Set `NVNM_TRUSTED_PROXY_HOPS` to the real number of proxy hops in front of the server** (`1` = single ingress; `2` = CDN + ingress). A value that is too *high* is safe (falls back to `RemoteAddr`), given the XFF-strip invariant above — if the proxy does not strip inbound `XFF`, an over-set hop count can instead land on a forged entry; a value that is too *low* under-collapses but never trusts a forged value. A value that does not match reality either fails to protect (too high, effectively collapsing everyone to a proxy IP) or, if it matches an attacker-controlled hop, defeats the control — see `DATA_HANDLING.md` § 5 for the failure-mode discussion.
+- **The ingress MUST terminate TLS and set `X-Forwarded-Proto`** to the scheme the client actually used, so the server's C5 check has a real signal to enforce against.
+
+**Intentional fail-open (do not "fix" without review):** the C5 middleware allows a request when `X-Forwarded-Proto` is **absent** — it rejects only an explicit non-`https` value. The ingress is the primary, fail-closed TLS gate; this middleware is defense-in-depth for an *explicit* downgrade signal, not the boundary itself. Rejecting on an absent header would turn any proxy configuration that omits `X-Forwarded-Proto` into a total outage, trading a real availability risk for a security gain already covered at the ingress. **A security scan flagging "fails open on absent `X-Forwarded-Proto`" is observing intended behavior, not a bug** — do not "harden" it to reject-on-absent without a design review.
+
 ### Authentication (HTTP transport)
 
 | Variable | Default | Purpose |

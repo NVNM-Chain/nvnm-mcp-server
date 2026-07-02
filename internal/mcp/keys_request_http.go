@@ -89,7 +89,11 @@ type KeyRequestHandlerConfig struct {
 	RateLimiter  *KeyRequestRateLimiter
 	MaxBodyBytes int64
 	TrustProxy   bool
-	Logger       *slog.Logger
+
+	// TrustedProxyHops mirrors Config.TrustedProxyHops; number of trusted
+	// proxy hops for clientIP derivation. Only used when TrustProxy is true.
+	TrustedProxyHops int
+	Logger           *slog.Logger
 }
 
 // NewKeyRequestHandler returns an http.Handler that accepts
@@ -118,7 +122,7 @@ func NewKeyRequestHandler(cfg KeyRequestHandlerConfig) http.Handler {
 			return
 		}
 
-		ip := clientIP(r, cfg.TrustProxy)
+		ip := clientIP(r, cfg.TrustProxy, cfg.TrustedProxyHops)
 
 		if cfg.RateLimiter != nil && !cfg.RateLimiter.allowIP(ip) {
 			cfg.Logger.Warn("key request rate limited",

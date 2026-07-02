@@ -10,6 +10,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Trusted-proxy header hardening (C3/C5).** Two defense-in-depth
+  controls, both gated on the existing `NVNM_TRUST_PROXY_HEADERS`
+  (default `false`, unchanged): (C3) the fail-rate and anon-read
+  limiters' client-IP derivation now walks a configurable number of
+  trusted hops in from the right of `X-Forwarded-For ++ RemoteAddr`
+  instead of trusting the leftmost (client-forgeable) `XFF` entry, so
+  a forged left-prefix can no longer mint its own rate-limit bucket;
+  (C5) a new `requireForwardedHTTPS` middleware rejects a request
+  carrying an explicit non-`https` `X-Forwarded-Proto` with `403`,
+  catching a plaintext-downgrade path inside the trust boundary — it
+  is deliberately lenient when `X-Forwarded-Proto` is *absent* (the
+  ingress remains the primary, fail-closed TLS gate; see
+  `docs/RUNBOOK.md` § "Trusted-proxy header invariants (C3/C5)" for
+  the fail-open rationale). New env var `NVNM_TRUSTED_PROXY_HOPS`
+  (int, default `1`, must be `>= 1`; boot fails loud otherwise) sets
+  the trusted chain depth (`1` = single ingress, `2` = CDN +
+  ingress); documented canonically in `docs/DATA_HANDLING.md` § 5.
+  Both controls are defense-in-depth behind the deploy-side
+  invariants (proxy strips inbound `XFF`; ingress sets `XFP` and
+  terminates TLS), which remain operator-owned.
 - API-key hashing now supports HMAC-SHA256 under a server-held pepper
   (`KEY_HMAC_PEPPER`, optional; `KEY_HMAC_PEPPER_PREVIOUS` for one
   rotation window). Keys carry a `hash_version`; legacy SHA-256 keys

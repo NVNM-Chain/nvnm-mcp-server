@@ -82,6 +82,7 @@ var (
 		"MCP_KEYLESS_PG_DSN is required when MCP_KEYLESS_WRITES is true " +
 			"(keyless writes without a shared-state audit backend is not a supported mode; " +
 			"the persisted write-audit is a security control, not optional)")
+	ErrInvalidTrustedProxyHops = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -211,13 +212,28 @@ type Config struct {
 	// guard middleware on the HTTP transport.
 	AllowedOrigins []string
 
-	// TrustProxyHeaders controls whether the pre-auth failure-rate
-	// limiter derives the source IP from X-Forwarded-For. Enable only
-	// when the server sits behind a reverse proxy that strips
-	// client-supplied XFF entries; otherwise an attacker can spoof the
-	// header to dodge the limiter. NVNM_TRUST_PROXY_HEADERS env var,
-	// default false.
+	// TrustProxyHeaders is the master gate for two defense-in-depth
+	// controls, both meaningless unless the server sits behind a
+	// reverse proxy that strips client-supplied header values: (1) the
+	// pre-auth failure-rate limiter and anon-read limiter derive the
+	// source IP from X-Forwarded-For (hop-count-aware; see
+	// TrustedProxyHops) instead of RemoteAddr; (2) the C5
+	// requireForwardedHTTPS middleware enforces X-Forwarded-Proto,
+	// rejecting an explicit non-https value. Enable only behind a
+	// proxy that overwrites/strips inbound XFF and sets XFP;
+	// otherwise an attacker can spoof either header to dodge the
+	// limiter or mask a plaintext downgrade. NVNM_TRUST_PROXY_HEADERS
+	// env var, default false.
 	TrustProxyHeaders bool
+
+	// TrustedProxyHops is the number of trusted proxy hops in front of
+	// the server (including the direct socket peer). Only meaningful when
+	// TrustProxyHeaders is true. clientIP walks this many hops in from the
+	// right of (X-Forwarded-For ++ RemoteAddr) to find the real client,
+	// so a forged left-prefix cannot mint its own rate-limit bucket. Set
+	// to the real chain depth (1 = single ingress; 2 = CDN + ingress).
+	// NVNM_TRUSTED_PROXY_HOPS env var, default 1, must be >= 1.
+	TrustedProxyHops int
 
 	// Phase 11 L3: self-serve API-key request endpoint (POST
 	// /api/v1/keys/request). Opt-in; the endpoint is not registered
@@ -313,6 +329,11 @@ func Load() (*Config, error) {
 	if loadErr := cfg.loadFeatureFlags(); loadErr != nil {
 		return nil, loadErr
 	}
+
+	if loadErr := cfg.loadTrustedProxyHops(); loadErr != nil {
+		return nil, loadErr
+	}
+
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeyRoles = parseRoleList(os.Getenv("MCP_API_KEY_ROLES"))
 	if loadErr := cfg.loadKeyStoreConfig(); loadErr != nil {
@@ -829,6 +850,23 @@ func (c *Config) loadFeatureFlags() error {
 		}
 		*f.dst = v
 	}
+	return nil
+}
+
+// loadTrustedProxyHops parses NVNM_TRUSTED_PROXY_HOPS (default 1). A value
+// < 1 is rejected loudly: 0 (or negative) trusted hops is a meaningless
+// configuration when proxy-header trust is enabled -- there is always at
+// least the one proxy that set the headers -- so it is rejected at boot.
+func (c *Config) loadTrustedProxyHops() error {
+	s := envOrDefault("NVNM_TRUSTED_PROXY_HOPS", "1")
+	hops, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("invalid NVNM_TRUSTED_PROXY_HOPS %q: %w", s, err)
+	}
+	if hops < 1 {
+		return ErrInvalidTrustedProxyHops
+	}
+	c.TrustedProxyHops = hops
 	return nil
 }
 

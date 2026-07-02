@@ -228,12 +228,32 @@ Used to throttle credential stuffing. Entries expire after
 **15 minutes** of inactivity. Never persisted to disk.
 
 Source-IP derivation: `X-Forwarded-For` is honored only when
-`$NVNM_TRUST_PROXY_HEADERS=true`; otherwise the socket peer. Rejected
+`$NVNM_TRUST_PROXY_HEADERS=true`; otherwise the socket peer
+(`RemoteAddr`) is used directly. When header-trust is enabled, the
+server does **not** take the leftmost `X-Forwarded-For` entry — that
+value is client-supplied and forgeable. Instead it walks a
+configured number of trusted hops in from the right of
+`X-Forwarded-For ++ RemoteAddr`, so a forged left-prefix cannot mint
+its own rate-limit bucket. The hop count is
+**`$NVNM_TRUSTED_PROXY_HOPS`** (int, default `1`): the number of
+trusted proxy hops in front of the server, including the direct
+socket peer. Set it to the real chain depth (`1` = single ingress,
+`2` = CDN + ingress); `config.Load()` rejects `< 1` at boot
+(`ErrInvalidTrustedProxyHops`) since 0 (or negative) trusted hops is
+a meaningless configuration when proxy-header trust is enabled —
+there is always at least the one proxy that set the headers. If the
+computed index falls outside the observed chain (a missing or
+shorter-than-expected `X-Forwarded-For`), derivation falls back to
+`RemoteAddr` rather than ever trusting an unverified value. Rejected
 requests emit a WARN log line containing the derived source IP and
 (for missing-Authorization rejections) the request method; the
 request path, token bytes, and request body are never logged
 ([internal/mcp/auth.go:49-84](../internal/mcp/auth.go#L49-L84) and
 [internal/mcp/failrate.go:150-153](../internal/mcp/failrate.go#L150-L153)).
+Deploy-side invariants for this control (proxy strips inbound `XFF`;
+setting `NVNM_TRUSTED_PROXY_HOPS` to match real topology) are
+documented in `docs/RUNBOOK.md` § "Trusted-proxy header invariants
+(C3/C5)".
 
 ## 6. Logging
 
@@ -370,7 +390,9 @@ No analytics, advertising, or third-party tracking destinations.
 ## 10. HTTP headers and cookies
 
 **Read:** `Authorization` (parsed; never logged), `Origin` (CORS),
-`X-Forwarded-For` (only when `$NVNM_TRUST_PROXY_HEADERS=true`).
+`X-Forwarded-For` (only when `$NVNM_TRUST_PROXY_HEADERS=true`; see
+§5), `X-Forwarded-Proto` (only when `$NVNM_TRUST_PROXY_HEADERS=true`;
+used by the https-enforcement check, see §11).
 
 **Set:** `Content-Type: application/json`, `Retry-After: 60` on 429.
 
@@ -388,6 +410,16 @@ managed certificates, internal CA, mTLS) and lives at a different
 layer than this binary. The Helm chart in `deploy/helm/` shows the
 Kubernetes ingress pattern; operators running outside Kubernetes
 should terminate at nginx, Caddy, an AWS ALB, or equivalent.
+
+When `$NVNM_TRUST_PROXY_HEADERS=true`, the server additionally
+performs an app-layer defense-in-depth check: it reads
+`X-Forwarded-Proto` (see §10) and rejects a request carrying an
+explicit non-`https` value with `403`, catching a plaintext-downgrade
+path inside the trust boundary that the ingress alone might miss.
+This check is deliberately lenient when `X-Forwarded-Proto` is
+**absent** — the ingress remains the primary, fail-closed TLS gate;
+see `docs/RUNBOOK.md` § "Trusted-proxy header invariants (C3/C5)" for
+the fail-open rationale.
 
 Data at rest is covered above: API-key entries are stored as a
 versioned hash digest (§2.1 — `v0` = plain SHA-256, `v1` = HMAC-SHA256
