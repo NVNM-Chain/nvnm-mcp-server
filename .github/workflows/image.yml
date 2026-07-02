@@ -59,7 +59,7 @@ jobs:
     name: Build & sign multi-arch image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up QEMU
         # QEMU emulates the non-native arch (arm64 on amd64 runners) so
@@ -68,13 +68,13 @@ jobs:
         # v4 (2026-03-04) defaults to Node.js 24, dropping Node.js 20
         # ahead of the 2026-09-16 runner cutover. Bare invocation here,
         # so no input-shape change to worry about.
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
         # v4 (2026-03-05) defaults to Node.js 24 and removes some
         # deprecated inputs/outputs (none used here -- this is a bare
         # invocation, so the bump is drop-in).
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
       - name: Detect Docker Hub mirror
         # The mirror is OPT-IN: enabled only when the repo variable
@@ -103,7 +103,7 @@ jobs:
         # change called out is that `#` inside list-input values is now
         # preserved (full-line `#` still comments). Our `tags` list
         # has no `#` chars, so this is a no-op for us.
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -125,7 +125,7 @@ jobs:
         if: github.event_name != 'pull_request'
         # v4 (2026-03-04) defaults to Node.js 24. No input-shape change
         # for the registry/username/password inputs we use.
-        uses: docker/login-action@v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -137,7 +137,7 @@ jobs:
         # called out: removal of the deprecated `DOCKER_BUILD_NO_SUMMARY`
         # and `DOCKER_BUILD_EXPORT_RETENTION_DAYS` env vars. We set
         # neither (no `env:` on this step), so the bump is drop-in.
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -155,7 +155,7 @@ jobs:
 
       - name: Install Cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Sign image manifest (GHCR)
         # Sign the multi-arch manifest at its content-addressable digest.
@@ -183,7 +183,7 @@ jobs:
       - name: Login to Docker Hub (mirror)
         if: github.event_name != 'pull_request' && steps.mirror.outputs.enabled == 'true'
         continue-on-error: true
-        uses: docker/login-action@v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
