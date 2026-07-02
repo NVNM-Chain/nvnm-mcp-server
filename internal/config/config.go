@@ -183,8 +183,10 @@ type Config struct {
 	// single signer may submit within SignerWriteWindow. MCP_SIGNER_WRITE_RATE
 	// env var, default 500.
 	SignerWriteRate int
-	// SignerWriteWindow is the rolling window SignerWriteRate is measured
-	// over. MCP_SIGNER_WRITE_WINDOW env var, default 24h.
+	// SignerWriteWindow is the fixed window SignerWriteRate is measured
+	// over. It is a discrete, boundary-aligned bucket (the quota counter
+	// truncates now to this window via WindowStart), not a sliding window.
+	// MCP_SIGNER_WRITE_WINDOW env var, default 24h.
 	SignerWriteWindow time.Duration
 	// SignerQuotaFailOpen controls what happens when the per-signer quota
 	// check itself fails (e.g. the keyless Postgres pool is unreachable).
