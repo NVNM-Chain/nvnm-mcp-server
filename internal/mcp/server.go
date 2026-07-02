@@ -134,7 +134,11 @@ func NewServer(
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, logger)
+		// Phase-5 blacklist/quota gates are wired in Task 7; today's zero
+		// value disables them (nil stores => no enforcement).
+		registerEVMWriteTools(
+			mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, signerGates{}, logger,
+		)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
 	}

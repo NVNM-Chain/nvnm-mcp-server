@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"time"
 
 	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -18,6 +19,20 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
+// signerGates bundles the Phase-5 per-signer enforcement dependencies +
+// policy for the keyless write path (blacklist + quota). Zero value (nil
+// stores) disables the gates -- used by non-keyless/self-host call sites and
+// tests, where the handler never consults them.
+type signerGates struct {
+	blacklist         SignerBlacklistStore
+	quota             SignerQuotaStore
+	rate              int
+	window            time.Duration
+	quotaFailOpen     bool
+	blacklistFailOpen bool
+	now               func() time.Time // nil -> time.Now
+}
+
 func registerEVMWriteTools(
 	srv *mcp.Server,
 	evmClient evm.Client,
@@ -25,6 +40,7 @@ func registerEVMWriteTools(
 	keylessWrites bool,
 	audit WriteAuditStore,
 	metrics WriteMetrics,
+	gates signerGates,
 	logger *slog.Logger,
 ) {
 	addTool(srv, &mcp.Tool{
@@ -40,7 +56,7 @@ func registerEVMWriteTools(
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
 		Annotations: newDestructiveWriteTool(),
-	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, audit, metrics, logger))
+	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, audit, metrics, gates, logger))
 }
 
 // --- Input/output types ---
@@ -57,7 +73,8 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, anchorAddr string, keylessWrites bool, audit WriteAuditStore, metrics WriteMetrics, logger *slog.Logger,
+	c evm.Client, anchorAddr string, keylessWrites bool, audit WriteAuditStore, metrics WriteMetrics,
+	gates signerGates, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
 		ctx context.Context,
@@ -90,30 +107,17 @@ func makeSendRawTxHandler(
 		// scoped, canonical re-serialization under keyless writes (D9 / §5).
 		broadcastHex := input.SignedTxHex
 		var decoded *evm.DecodedTx // populated under keyless writes; drives signer-keyed audit
+		var quotaWindowStart time.Time
 		if keylessWrites {
-			dtx, derr := evm.DecodeSignedTx(input.SignedTxHex)
-			if derr != nil {
-				recordReject(telemetry.CauseDecode)
-				return nil, sendRawTxOutput{}, derr // ErrTxDecode (input class)
-			}
-			anchor, aerr := defitypes.AddressFromHex(anchorAddr)
-			if aerr != nil {
-				recordReject(telemetry.CauseAnchorMisconfig)
-				return nil, sendRawTxOutput{},
-					fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
-			}
-			if serr := checkRelayScope(dtx.To, anchor); serr != nil {
-				logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
-					slog.String("tool", "evm_send_raw_transaction"),
-					slog.String("phase", "relay_scope_rejected"),
-					slog.String("signer", dtx.Signer.String()),
-					slog.String("to", addrString(dtx.To)),
-				}))
-				recordReject(telemetry.CauseRelayScope)
-				return nil, sendRawTxOutput{}, serr // ErrRelayScopeRejected (input class)
+			dtx, ws, bh, perr := prepareKeylessBroadcast(
+				ctx, input.SignedTxHex, anchorAddr, gates, logger, recordReject,
+			)
+			if perr != nil {
+				return nil, sendRawTxOutput{}, perr
 			}
 			decoded = dtx
-			broadcastHex = "0x" + hex.EncodeToString(dtx.CanonicalRaw)
+			quotaWindowStart = ws
+			broadcastHex = bh
 		}
 
 		clientID := auth.ClientIDFromContext(ctx)
@@ -181,8 +185,136 @@ func makeSendRawTxHandler(
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit", auditGroup(okAttrs))
 		recordAudit("broadcast_ok", txHash, "")
 		recordBroadcast("ok")
+
+		// Increment the per-signer quota only on a successful broadcast; a
+		// failed/errored broadcast (handled above, which returns early)
+		// must never consume quota.
+		if decoded != nil && gates.quota != nil {
+			if ierr := gates.quota.Increment(ctx, decoded.Signer.String(), quotaWindowStart); ierr != nil {
+				logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+					slog.String("tool", "evm_send_raw_transaction"),
+					slog.String("phase", "quota_increment_failed"),
+					slog.String("signer", decoded.Signer.String()),
+					slog.String("error", ierr.Error()),
+				}))
+			}
+		}
+
 		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}
+}
+
+// prepareKeylessBroadcast runs the keyless-write pre-broadcast pipeline:
+// decode, anchor-scope check, and the Phase-5 blacklist/quota gates. It
+// returns the decoded tx, the quota window start (for the caller's later
+// increment-on-success call), and the canonical broadcast hex, or a non-nil
+// error if any check rejects the request. Split out of makeSendRawTxHandler
+// to keep that function's cyclomatic complexity within the package's lint
+// budget.
+func prepareKeylessBroadcast(
+	ctx context.Context,
+	signedTxHex, anchorAddr string,
+	gates signerGates,
+	logger *slog.Logger,
+	recordReject func(telemetry.RelayRejectCause),
+) (*evm.DecodedTx, time.Time, string, error) {
+	dtx, derr := evm.DecodeSignedTx(signedTxHex)
+	if derr != nil {
+		recordReject(telemetry.CauseDecode)
+		return nil, time.Time{}, "", derr // ErrTxDecode (input class)
+	}
+	anchor, aerr := defitypes.AddressFromHex(anchorAddr)
+	if aerr != nil {
+		recordReject(telemetry.CauseAnchorMisconfig)
+		return nil, time.Time{}, "",
+			fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
+	}
+	if serr := checkRelayScope(dtx.To, anchor); serr != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+			slog.String("tool", "evm_send_raw_transaction"),
+			slog.String("phase", "relay_scope_rejected"),
+			slog.String("signer", dtx.Signer.String()),
+			slog.String("to", addrString(dtx.To)),
+		}))
+		recordReject(telemetry.CauseRelayScope)
+		return nil, time.Time{}, "", serr // ErrRelayScopeRejected (input class)
+	}
+
+	// Blacklist + quota gates (Phase 5, keyless writes only). Blacklist is
+	// consulted first: a banned signer is rejected outright and never
+	// consults/consumes quota.
+	ws, gerr := checkSignerGates(ctx, gates, dtx.Signer.String(), logger, recordReject)
+	if gerr != nil {
+		return nil, time.Time{}, "", gerr
+	}
+
+	return dtx, ws, "0x" + hex.EncodeToString(dtx.CanonicalRaw), nil
+}
+
+// checkSignerGates enforces the Phase-5 per-signer blacklist and quota gates
+// for signer, blacklist first. It returns the quota window start (valid even
+// when gates.quota is nil, so the caller can reuse it for the post-broadcast
+// increment) and a non-nil error when the request must be rejected.
+// recordReject is invoked for every metrics-visible rejection; it must never
+// be called with caller-derived data (the signer belongs only in the audit
+// log lines here, never in a metric label).
+func checkSignerGates(
+	ctx context.Context,
+	gates signerGates,
+	signer string,
+	logger *slog.Logger,
+	recordReject func(telemetry.RelayRejectCause),
+) (time.Time, error) {
+	nowFn := gates.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	ws := WindowStart(nowFn(), gates.window)
+
+	if gates.blacklist != nil {
+		banned, berr := gates.blacklist.IsBlacklisted(ctx, signer)
+		switch {
+		case berr != nil && !gates.blacklistFailOpen:
+			recordReject(telemetry.CauseBlacklistStoreErr)
+			return ws, fmt.Errorf("blacklist store unavailable: %w", berr)
+		case berr != nil: // fail-open: allow, log loudly
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+				slog.String("tool", "evm_send_raw_transaction"),
+				slog.String("phase", "blacklist_fail_open"),
+				slog.String("signer", signer),
+				slog.String("error", berr.Error()),
+			}))
+		case banned:
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+				slog.String("tool", "evm_send_raw_transaction"),
+				slog.String("phase", "signer_blacklisted"),
+				slog.String("signer", signer),
+			}))
+			recordReject(telemetry.CauseSignerBlacklist)
+			return ws, ErrSignerBlacklisted
+		}
+	}
+
+	if gates.quota != nil {
+		n, qerr := gates.quota.Count(ctx, signer, ws)
+		switch {
+		case qerr != nil && !gates.quotaFailOpen:
+			recordReject(telemetry.CauseQuotaStoreErr)
+			return ws, fmt.Errorf("quota store unavailable: %w", qerr)
+		case qerr != nil: // fail-open: allow, log loudly
+			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
+				slog.String("tool", "evm_send_raw_transaction"),
+				slog.String("phase", "quota_fail_open"),
+				slog.String("signer", signer),
+				slog.String("error", qerr.Error()),
+			}))
+		case n >= gates.rate:
+			recordReject(telemetry.CauseSignerQuota)
+			return ws, ErrSignerQuotaExceeded
+		}
+	}
+
+	return ws, nil
 }
 
 // auditGroup builds the "audit" slog group from a dynamic attribute set.
