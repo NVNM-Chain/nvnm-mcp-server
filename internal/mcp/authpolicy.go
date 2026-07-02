@@ -55,26 +55,40 @@ var authExemptTools = map[string]bool{
 	"wallet_status":               true,
 }
 
+// writeToolName is the sole precompile-only relay write tool. Its
+// auth-exemption is conditional on keylessWrites and is deliberately kept
+// out of authExemptTools -- see the MAINTENANCE note above.
+const writeToolName = "evm_send_raw_transaction"
+
 // RequiresAuth reports whether the named tool must be authenticated.
-// Unknown tools require auth (fail closed).
-func RequiresAuth(tool string) bool {
+// Unknown tools require auth (fail closed). evm_send_raw_transaction is
+// exempt ONLY when keylessWrites is enabled -- it is deliberately NOT in
+// authExemptTools (which stays reads-only) so a keyless-READS-but-not-
+// WRITES deployment does not expose anonymous writes.
+func RequiresAuth(tool string, keylessWrites bool) bool {
+	if tool == writeToolName {
+		return !keylessWrites
+	}
 	return !authExemptTools[tool]
 }
 
 // NewAuthEnforcementMiddleware returns MCP receiving middleware that
 // rejects anonymous calls to auth-required tools when keyless reads are
-// enabled. When keylessEnabled is false it is a no-op: AuthMiddleware
+// enabled. When keylessReads is false it is a no-op: AuthMiddleware
 // guarantees every HTTP request is authenticated, so claims are always
 // present. Only tools/call is gated; discovery methods (initialize,
 // tools/list, ...) always pass so anonymous clients can find the tools.
-func NewAuthEnforcementMiddleware(keylessEnabled bool, logger *slog.Logger) mcp.Middleware {
+// keylessWrites is threaded through to RequiresAuth to conditionally
+// exempt evm_send_raw_transaction; it has no effect unless keylessReads
+// is also true (the middleware is a no-op otherwise).
+func NewAuthEnforcementMiddleware(keylessReads, keylessWrites bool, logger *slog.Logger) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			if !keylessEnabled || method != "tools/call" {
+			if !keylessReads || method != "tools/call" {
 				return next(ctx, method, req)
 			}
 			tool := ToolNameFromRequest(req)
-			if RequiresAuth(tool) && auth.ClaimsFromContext(ctx) == nil {
+			if RequiresAuth(tool, keylessWrites) && auth.ClaimsFromContext(ctx) == nil {
 				logger.Warn("rejected anonymous call to auth-required tool",
 					slog.String("tool", tool),
 				)

@@ -111,7 +111,7 @@ func NewServer(
 	// wraps this layer and still observes anonymous-write rejections.
 	// No-op when keyless is off (AuthMiddleware then guarantees claims
 	// are present for every tools/call).
-	mcpSrv.AddReceivingMiddleware(NewAuthEnforcementMiddleware(keyless, logger))
+	mcpSrv.AddReceivingMiddleware(NewAuthEnforcementMiddleware(keyless, cfg.KeylessWrites, logger))
 
 	for _, mw := range middleware {
 		mcpSrv.AddReceivingMiddleware(mw)
