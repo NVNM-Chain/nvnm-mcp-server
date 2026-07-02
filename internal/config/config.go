@@ -82,6 +82,7 @@ var (
 		"MCP_KEYLESS_PG_DSN is required when MCP_KEYLESS_WRITES is true " +
 			"(keyless writes without a shared-state audit backend is not a supported mode; " +
 			"the persisted write-audit is a security control, not optional)")
+	ErrInvalidTrustedProxyHops = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -219,6 +220,15 @@ type Config struct {
 	// default false.
 	TrustProxyHeaders bool
 
+	// TrustedProxyHops is the number of trusted proxy hops in front of
+	// the server (including the direct socket peer). Only meaningful when
+	// TrustProxyHeaders is true. clientIP walks this many hops in from the
+	// right of (X-Forwarded-For ++ RemoteAddr) to find the real client,
+	// so a forged left-prefix cannot mint its own rate-limit bucket. Set
+	// to the real chain depth (1 = single ingress; 2 = CDN + ingress).
+	// NVNM_TRUSTED_PROXY_HOPS env var, default 1, must be >= 1.
+	TrustedProxyHops int
+
 	// Phase 11 L3: self-serve API-key request endpoint (POST
 	// /api/v1/keys/request). Opt-in; the endpoint is not registered
 	// unless KeyRequestEnabled is true. When enabled, KeyPendingFile
@@ -313,6 +323,11 @@ func Load() (*Config, error) {
 	if loadErr := cfg.loadFeatureFlags(); loadErr != nil {
 		return nil, loadErr
 	}
+
+	if loadErr := cfg.loadTrustedProxyHops(); loadErr != nil {
+		return nil, loadErr
+	}
+
 	cfg.APIKey = os.Getenv("MCP_API_KEY")
 	cfg.APIKeyRoles = parseRoleList(os.Getenv("MCP_API_KEY_ROLES"))
 	if loadErr := cfg.loadKeyStoreConfig(); loadErr != nil {
@@ -829,6 +844,22 @@ func (c *Config) loadFeatureFlags() error {
 		}
 		*f.dst = v
 	}
+	return nil
+}
+
+// loadTrustedProxyHops parses NVNM_TRUSTED_PROXY_HOPS (default 1). A value
+// < 1 is rejected loudly: 0/negative would mean "trust the raw client-
+// supplied X-Forwarded-For", which is the spoofing bug this guards against.
+func (c *Config) loadTrustedProxyHops() error {
+	s := envOrDefault("NVNM_TRUSTED_PROXY_HOPS", "1")
+	hops, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("NVNM_TRUSTED_PROXY_HOPS: %w", ErrInvalidTrustedProxyHops)
+	}
+	if hops < 1 {
+		return ErrInvalidTrustedProxyHops
+	}
+	c.TrustedProxyHops = hops
 	return nil
 }
 
