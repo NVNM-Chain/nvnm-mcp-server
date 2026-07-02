@@ -84,6 +84,8 @@ func NewServer(
 	cfg *config.Config,
 	middleware []mcp.Middleware,
 	writeAudit WriteAuditStore,
+	quota SignerQuotaStore,
+	blacklist SignerBlacklistStore,
 	metrics WriteMetrics,
 	logger *slog.Logger,
 ) *Server {
@@ -134,10 +136,19 @@ func NewServer(
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {
-		// Phase-5 blacklist/quota gates are wired in Task 7; today's zero
-		// value disables them (nil stores => no enforcement).
+		// Phase-5 blacklist/quota gates: nil stores (self-host / non-keyless
+		// call sites, and most tests) disable enforcement entirely.
+		gates := signerGates{
+			blacklist:         blacklist,
+			quota:             quota,
+			rate:              cfg.SignerWriteRate,
+			window:            cfg.SignerWriteWindow,
+			quotaFailOpen:     cfg.SignerQuotaFailOpen,
+			blacklistFailOpen: cfg.SignerBlacklistFailOpen,
+			// now left nil -> time.Now in production
+		}
 		registerEVMWriteTools(
-			mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, signerGates{}, logger,
+			mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, gates, logger,
 		)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")

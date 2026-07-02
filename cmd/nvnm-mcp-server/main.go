@@ -172,8 +172,9 @@ func run() error {
 		return err
 	}
 
-	// --- Write-audit store + Admin API Server ---
-	writeAudit, adminCleanup, err := startAuditAndAdmin(cfg, managedKeys, pendingStore, emailSender, logger)
+	// --- Write-audit store + signer quota/blacklist stores + Admin API Server ---
+	writeAudit, signerQuota, signerBlacklist, adminCleanup, err := startAuditAndAdmin(
+		cfg, managedKeys, pendingStore, emailSender, logger)
 	if err != nil {
 		return err
 	}
@@ -199,7 +200,7 @@ func run() error {
 	srv := mcpserver.NewServer(
 		evmClient, anchorClient,
 		cfg,
-		middleware, writeAudit, tel.Metrics, logger,
+		middleware, writeAudit, signerQuota, signerBlacklist, tel.Metrics, logger,
 	)
 
 	// --- Phase 11 L3: public self-serve key-request endpoint (opt-in) ---
@@ -529,17 +530,17 @@ func startAuditAndAdmin(
 	pendingStore *mcpserver.PendingKeyStore,
 	email mcpserver.EmailSender,
 	logger *slog.Logger,
-) (mcpserver.WriteAuditStore, func(), error) {
-	writeAudit, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
+) (mcpserver.WriteAuditStore, mcpserver.SignerQuotaStore, mcpserver.SignerBlacklistStore, func(), error) {
+	writeAudit, quota, blacklist, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
 	if err != nil {
-		return nil, func() {}, err
+		return nil, nil, nil, func() {}, err
 	}
 	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, logger)
 	if err != nil {
 		writeAuditCleanup()
-		return nil, func() {}, err
+		return nil, nil, nil, func() {}, err
 	}
-	return writeAudit, func() {
+	return writeAudit, quota, blacklist, func() {
 		if adminShutdown != nil {
 			adminShutdown()
 		}
@@ -547,14 +548,16 @@ func startAuditAndAdmin(
 	}, nil
 }
 
-// loadWriteAudit stands up the dedicated authless-bundle Postgres pool +
-// write-audit store. Returns (nil, noop, nil) when persistence is not
-// configured (logs-only). Gated on keyless writes + a DSN.
+// loadWriteAudit stands up the dedicated authless-bundle Postgres pool and
+// the three keyless-bundle stores it backs: write-audit, per-signer quota,
+// and per-signer blacklist. Returns (nil, nil, nil, noop, nil) when
+// persistence is not configured (logs-only). Gated on keyless writes + a
+// DSN.
 func loadWriteAudit(
 	cfg *config.Config, logger *slog.Logger,
-) (mcpserver.WriteAuditStore, func(), error) {
+) (mcpserver.WriteAuditStore, mcpserver.SignerQuotaStore, mcpserver.SignerBlacklistStore, func(), error) {
 	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
-		return nil, func() {}, nil
+		return nil, nil, nil, func() {}, nil
 	}
 	// Parse the DSN before connecting: a malformed DSN produces a pgx error
 	// that can echo the connection string (password included), so it must
@@ -563,7 +566,7 @@ func loadWriteAudit(
 	// redact the password, and are safe to wrap.
 	poolCfg, err := pgxpool.ParseConfig(cfg.KeylessPGDSN)
 	if err != nil {
-		return nil, nil, errKeylessDSNInvalid
+		return nil, nil, nil, nil, errKeylessDSNInvalid
 	}
 	// Bound the boot-time dial + migrate so an unreachable Postgres cannot
 	// hang startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
@@ -571,20 +574,23 @@ func loadWriteAudit(
 	defer cancel()
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("connect keyless pg: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("connect keyless pg: %w", err)
 	}
 	// pgxpool is lazy; Ping forces the initial dial under the bounded context
 	// so a down database fails boot fast instead of at first write.
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, nil, fmt.Errorf("ping keyless pg: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("ping keyless pg: %w", err)
 	}
 	if err := mcpserver.RunMigrations(ctx, pool, logger); err != nil {
 		pool.Close()
-		return nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
 	}
 	logger.Info("write-audit backend: postgres (keyless bundle)")
-	return mcpserver.NewPostgresWriteAuditStore(pool), func() { pool.Close() }, nil
+	return mcpserver.NewPostgresWriteAuditStore(pool),
+		mcpserver.NewPostgresSignerQuotaStore(pool),
+		mcpserver.NewPostgresSignerBlacklistStore(pool),
+		func() { pool.Close() }, nil
 }
 
 func startAdminServer(

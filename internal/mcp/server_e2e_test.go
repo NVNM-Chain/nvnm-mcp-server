@@ -82,7 +82,7 @@ func startTestServerWithConfig(
 		},
 	}
 
-	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true), nil, nil, nil, testLogger())
+	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true), nil, nil, nil, nil, nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -280,7 +280,7 @@ func startAuthTestServer(
 		serverCfg.KeylessReads = true
 		serverCfg.Transport = "http"
 	}
-	srv := NewServer(evmClient, anchorClient, serverCfg, nil, nil, nil, logger)
+	srv := NewServer(evmClient, anchorClient, serverCfg, nil, nil, nil, nil, nil, logger)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -329,7 +329,7 @@ func TestE2E_StatelessHandler_ServesUnknownSession(t *testing.T) {
 	anchorClient := &mockAnchor{info: anchor.PrecompileInfo{
 		Address: testAddr, ChainID: 58887, ABILoaded: true, MethodCount: 5,
 	}}
-	srv := NewServer(evmClient, anchorClient, testServerConfig(false), nil, nil, nil, logger)
+	srv := NewServer(evmClient, anchorClient, testServerConfig(false), nil, nil, nil, nil, nil, logger)
 
 	handler := func(stateless bool) http.Handler {
 		return mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
