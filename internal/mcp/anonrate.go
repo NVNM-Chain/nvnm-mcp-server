@@ -14,23 +14,27 @@ import (
 // anonymous requests (no claims on context). Authenticated requests pass
 // through untouched -- the per-client ClientRateLimiter owns them. The
 // limits are expected to be tighter than the per-client limits
-// (documented invariant). IP derivation honors the same trust-proxy
-// setting as the fail-rate limiter (NVNM_TRUST_PROXY_HEADERS).
+// (documented invariant). IP derivation honors the same trust-proxy and
+// hop-count settings as the fail-rate limiter (NVNM_TRUST_PROXY_HEADERS,
+// NVNM_TRUSTED_PROXY_HOPS).
 type AnonReadRateLimiter struct {
 	inner      *keyedRateLimiter
 	trustProxy bool
+	hops       int
 }
 
 // NewAnonReadRateLimiter creates a per-source-IP anon limiter with the
 // given requests-per-second and burst. trustProxy controls IP derivation:
-// when true, the source IP is taken from the leftmost X-Forwarded-For
-// entry (set only behind a reverse proxy that strips client-supplied
-// values); when false, the socket RemoteAddr host is used. Fed by
-// NVNM_TRUST_PROXY_HEADERS, matching the fail-rate limiter.
-func NewAnonReadRateLimiter(rps float64, burst int, trustProxy bool) *AnonReadRateLimiter {
+// when true, the source IP is derived by walking `hops` trusted proxies
+// in from the right of (X-Forwarded-For ++ RemoteAddr) -- see clientIP;
+// when false, the socket RemoteAddr host is used. Fed by
+// NVNM_TRUST_PROXY_HEADERS / NVNM_TRUSTED_PROXY_HOPS, matching the
+// fail-rate limiter.
+func NewAnonReadRateLimiter(rps float64, burst int, trustProxy bool, hops int) *AnonReadRateLimiter {
 	return &AnonReadRateLimiter{
 		inner:      newKeyedRateLimiter(rps, burst),
 		trustProxy: trustProxy,
+		hops:       hops,
 	}
 }
 
@@ -50,7 +54,7 @@ func (l *AnonReadRateLimiter) Middleware(next http.Handler, logger *slog.Logger)
 			next.ServeHTTP(w, r) // authenticated: not this limiter's concern
 			return
 		}
-		ip := clientIP(r, l.trustProxy)
+		ip := clientIP(r, l.trustProxy, l.hops)
 		if !l.inner.allow(ip) {
 			logger.Warn("anonymous read rate limit exceeded",
 				slog.String("ip", ip),

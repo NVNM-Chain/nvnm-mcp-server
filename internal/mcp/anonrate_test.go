@@ -22,7 +22,7 @@ func newAnonTestHandler(l *AnonReadRateLimiter) http.Handler {
 }
 
 func TestAnonReadRateLimiter_BlocksOverBurstPerIP(t *testing.T) {
-	limiter := NewAnonReadRateLimiter(0.0001, 1, false) // burst=1
+	limiter := NewAnonReadRateLimiter(0.0001, 1, false, 1) // burst=1
 	handler := newAnonTestHandler(limiter)
 
 	req1 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
@@ -43,7 +43,7 @@ func TestAnonReadRateLimiter_BlocksOverBurstPerIP(t *testing.T) {
 }
 
 func TestAnonReadRateLimiter_PerIPIsolation(t *testing.T) {
-	limiter := NewAnonReadRateLimiter(0.0001, 1, false)
+	limiter := NewAnonReadRateLimiter(0.0001, 1, false, 1)
 	handler := newAnonTestHandler(limiter)
 
 	makeReq := func(ip string) int {
@@ -62,15 +62,17 @@ func TestAnonReadRateLimiter_PerIPIsolation(t *testing.T) {
 }
 
 func TestAnonReadRateLimiter_TrustProxyKeysOnXFF(t *testing.T) {
-	limiter := NewAnonReadRateLimiter(0.0001, 1, true) // trustProxy on, burst=1
+	limiter := NewAnonReadRateLimiter(0.0001, 1, true, 1) // trustProxy on, single hop, burst=1
 	handler := newAnonTestHandler(limiter)
 
-	// Two requests with DIFFERENT RemoteAddr but the SAME leftmost XFF IP:
-	// if keying used RemoteAddr they'd be separate buckets (both 200);
-	// keying on XFF means the second is throttled.
+	// Same trusted proxy (RemoteAddr host) forwards for the same real
+	// client (the XFF entry immediately to the proxy's left); an
+	// attacker-controlled forged prefix must not mint a separate bucket
+	// -- both requests key on the same hop-derived IP, not the forgeable
+	// leftmost entry.
 	req1 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
 	req1.RemoteAddr = "10.0.0.1:1111"
-	req1.Header.Set("X-Forwarded-For", "203.0.113.9, 5.6.7.8")
+	req1.Header.Set("X-Forwarded-For", "1.1.1.1, 203.0.113.9")
 	w1 := httptest.NewRecorder()
 	handler.ServeHTTP(w1, req1)
 	if w1.Code != http.StatusOK {
@@ -78,17 +80,17 @@ func TestAnonReadRateLimiter_TrustProxyKeysOnXFF(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodPost, "/mcp", http.NoBody)
-	req2.RemoteAddr = "10.0.0.2:2222"                          // different socket addr
-	req2.Header.Set("X-Forwarded-For", "203.0.113.9, 9.9.9.9") // same leftmost XFF IP
+	req2.RemoteAddr = "10.0.0.1:2222"                          // same proxy, different port
+	req2.Header.Set("X-Forwarded-For", "2.2.2.2, 203.0.113.9") // forged prefix differs, real client same
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusTooManyRequests {
-		t.Errorf("second request (same XFF IP, different RemoteAddr) got %d, want 429", w2.Code)
+		t.Errorf("second request (same real client, forged prefix differs) got %d, want 429", w2.Code)
 	}
 }
 
 func TestAnonReadRateLimiter_AuthenticatedPassesThrough(t *testing.T) {
-	limiter := NewAnonReadRateLimiter(0.0001, 1, false) // burst=1
+	limiter := NewAnonReadRateLimiter(0.0001, 1, false, 1) // burst=1
 	handler := newAnonTestHandler(limiter)
 	authCtx := auth.ContextWithClaims(t.Context(), &auth.Claims{ClientID: "client-x"})
 

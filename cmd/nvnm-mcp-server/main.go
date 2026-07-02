@@ -274,7 +274,7 @@ func newHTTPLimiters(cfg *config.Config, logger *slog.Logger) (
 	// anonymous traffic upstream and the limiter never sees a request;
 	// the goroutine is idle but observable in the startup log below.
 	anonLimiter := mcpserver.NewAnonReadRateLimiter(
-		cfg.AnonRateLimit, cfg.AnonRateBurst, cfg.TrustProxyHeaders,
+		cfg.AnonRateLimit, cfg.AnonRateBurst, cfg.TrustProxyHeaders, cfg.TrustedProxyHops,
 	)
 	anonLimiter.Start()
 	logger.Info("MCP anonymous per-IP read limiter started",
@@ -287,13 +287,18 @@ func newHTTPLimiters(cfg *config.Config, logger *slog.Logger) (
 		mcpserver.DefaultFailRatePerSec,
 		mcpserver.DefaultFailBurst,
 		cfg.TrustProxyHeaders,
+		cfg.TrustedProxyHops,
 	)
 	failLimiter.Start()
 	logger.Info("MCP pre-auth IP failure-rate limiter enabled",
 		slog.Float64("rps", mcpserver.DefaultFailRatePerSec),
 		slog.Int("burst", mcpserver.DefaultFailBurst),
 		slog.Bool("trust_proxy_headers", cfg.TrustProxyHeaders),
+		slog.Int("trusted_proxy_hops", cfg.TrustedProxyHops),
 	)
+	if _, set := os.LookupEnv("NVNM_TRUSTED_PROXY_HOPS"); set && !cfg.TrustProxyHeaders {
+		logger.Warn("NVNM_TRUSTED_PROXY_HOPS set but NVNM_TRUST_PROXY_HEADERS is false; hop count ignored")
+	}
 
 	stop := func() {
 		mcpLimiter.Stop()
@@ -326,11 +331,12 @@ func newKeyRequestHandler(cfg *config.Config, logger *slog.Logger) (http.Handler
 	)
 	krLimiter.Start()
 	handler := mcpserver.NewKeyRequestHandler(mcpserver.KeyRequestHandlerConfig{
-		Store:        pendingStore,
-		RateLimiter:  krLimiter,
-		MaxBodyBytes: cfg.KeyRequestMaxBodyBytes,
-		TrustProxy:   cfg.TrustProxyHeaders,
-		Logger:       logger,
+		Store:            pendingStore,
+		RateLimiter:      krLimiter,
+		MaxBodyBytes:     cfg.KeyRequestMaxBodyBytes,
+		TrustProxy:       cfg.TrustProxyHeaders,
+		TrustedProxyHops: cfg.TrustedProxyHops,
+		Logger:           logger,
 	})
 	logger.Info("self-serve key-request endpoint enabled",
 		slog.String("path", mcpserver.KeyRequestPath),

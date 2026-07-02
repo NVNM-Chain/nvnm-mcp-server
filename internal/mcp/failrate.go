@@ -49,12 +49,15 @@ type IPFailRateLimiter struct {
 	stopCh     chan struct{}
 	stopWG     sync.WaitGroup
 	trustProxy bool
+	hops       int
 }
 
 // NewIPFailRateLimiter creates a limiter with the given per-IP rate and
 // burst budget. trustProxy=true honors X-Forwarded-For (deploy behind
-// a reverse proxy that rewrites it); false uses r.RemoteAddr only.
-func NewIPFailRateLimiter(rps float64, burst int, trustProxy bool) *IPFailRateLimiter {
+// a reverse proxy that rewrites it); false uses r.RemoteAddr only. hops
+// is the number of trusted proxy hops clientIP walks in from the right
+// of the forwarded chain; only consulted when trustProxy is true.
+func NewIPFailRateLimiter(rps float64, burst int, trustProxy bool, hops int) *IPFailRateLimiter {
 	return &IPFailRateLimiter{
 		ips:        make(map[string]*clientBucket),
 		rps:        rps,
@@ -63,6 +66,7 @@ func NewIPFailRateLimiter(rps float64, burst int, trustProxy bool) *IPFailRateLi
 		maxIPs:     DefaultFailMaxIPs,
 		stopCh:     make(chan struct{}),
 		trustProxy: trustProxy,
+		hops:       hops,
 	}
 }
 
@@ -107,34 +111,79 @@ func (l *IPFailRateLimiter) sweep(now time.Time) {
 	}
 }
 
-// clientIP derives the source IP for rate-limiting. trustProxy=true
-// honors the leftmost X-Forwarded-For entry (deploy behind a reverse
-// proxy that strips client-supplied entries); false uses r.RemoteAddr.
-// Single source of truth shared by the fail-rate limiter and the
-// anonymous-read limiter, fed by NVNM_TRUST_PROXY_HEADERS.
-func clientIP(r *http.Request, trustProxy bool) string {
-	if trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			for i, c := range xff {
-				if c == ',' {
-					return trimSpace(xff[:i])
-				}
-			}
-			return trimSpace(xff)
-		}
+// clientIP derives the source IP for rate-limiting. When trustProxy is
+// false, only the socket peer (RemoteAddr) is used. When true, it walks
+// `hops` trusted proxies in from the right of (X-Forwarded-For ++
+// RemoteAddr): RemoteAddr is always the trustworthy socket peer, and each
+// entry to its left was appended by the hop to its right, so a client-
+// forged left-prefix is never selected as long as hops matches real chain
+// depth. Short/absent XFF falls back to RemoteAddr (fail-safe: a real
+// proxy IP, never a forgeable value). hops is the NVNM_TRUSTED_PROXY_HOPS
+// count (>= 1). Single source of truth shared by the fail-rate limiter,
+// the anon-read limiter, and the key-request handler.
+func clientIP(r *http.Request, trustProxy bool, hops int) string {
+	remote := remoteHost(r.RemoteAddr)
+	if !trustProxy {
+		return remote
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	seq := parseXFF(r.Header.Get("X-Forwarded-For"))
+	seq = append(seq, remote) // client-most left -> server-most right
+	idx := len(seq) - hops - 1
+	if idx < 0 {
+		return remote
+	}
+	return seq[idx]
+}
+
+// remoteHost strips the port from a host:port RemoteAddr, tolerating a
+// bare host (returns it unchanged).
+func remoteHost(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		return remoteAddr
 	}
 	return host
 }
 
+// parseXFF splits an X-Forwarded-For value into trimmed, non-empty
+// entries in header order (client-most first).
+func parseXFF(xff string) []string {
+	if xff == "" {
+		return nil
+	}
+	var out []string
+	for xff != "" {
+		i := indexByte(xff, ',')
+		var part string
+		if i < 0 {
+			part, xff = xff, ""
+		} else {
+			part, xff = xff[:i], xff[i+1:]
+		}
+		if p := trimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// indexByte returns the index of the first occurrence of b in s, or -1
+// if not present. Hand-rolled (rather than importing strings) to keep
+// this file dependency-free, consistent with trimSpace below.
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
+}
+
 // IPFromRequest extracts the source IP per the limiter's trust-proxy
-// setting. Exported so the inner auth middleware can use the same
-// derivation when calling Penalize.
+// and hop-count settings. Exported so the inner auth middleware can use
+// the same derivation when calling Penalize.
 func (l *IPFailRateLimiter) IPFromRequest(r *http.Request) string {
-	return clientIP(r, l.trustProxy)
+	return clientIP(r, l.trustProxy, l.hops)
 }
 
 func trimSpace(s string) string {
