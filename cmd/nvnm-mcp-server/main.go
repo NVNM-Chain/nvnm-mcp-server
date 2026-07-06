@@ -535,7 +535,7 @@ func startAuditAndAdmin(
 	if err != nil {
 		return nil, nil, nil, func() {}, err
 	}
-	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, logger)
+	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, blacklist, logger)
 	if err != nil {
 		writeAuditCleanup()
 		return nil, nil, nil, func() {}, err
@@ -599,6 +599,7 @@ func startAdminServer(
 	pendingStore *mcpserver.PendingKeyStore,
 	email mcpserver.EmailSender,
 	writeAudit mcpserver.WriteAuditStore,
+	blacklist mcpserver.SignerBlacklistStore,
 	logger *slog.Logger,
 ) (shutdown func(), err error) {
 	if cfg.AdminAPIKey == "" {
@@ -618,7 +619,7 @@ func startAdminServer(
 
 	adminSrv := mcpserver.NewAdminServer(
 		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, cfg.KeyDefaultTTL, logger,
-	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit)
+	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit).WithSignerBlacklistStore(blacklist)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {
 			logger.Error("admin API server error", slog.String("error", aErr.Error()))
