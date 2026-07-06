@@ -53,11 +53,11 @@ func (a *AdminServer) handleAddBlacklist(w http.ResponseWriter, r *http.Request)
 	}
 	var req addBlacklistRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid JSON body")
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 	if _, err := defitypes.AddressFromHex(req.Signer); err != nil {
-		a.writeError(w, http.StatusBadRequest, "signer is not a valid address")
+		http.Error(w, "signer is not a valid address", http.StatusBadRequest)
 		return
 	}
 	if err := a.blacklist.Add(r.Context(), req.Signer, req.Reason); err != nil {
@@ -80,7 +80,7 @@ func (a *AdminServer) handleDeleteBlacklist(w http.ResponseWriter, r *http.Reque
 	}
 	signer := r.PathValue("signer")
 	if signer == "" {
-		a.writeError(w, http.StatusBadRequest, "signer is required in path")
+		http.Error(w, "signer is required in path", http.StatusBadRequest)
 		return
 	}
 	if err := a.blacklist.Remove(r.Context(), signer); err != nil {
