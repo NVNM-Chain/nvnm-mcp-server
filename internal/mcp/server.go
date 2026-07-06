@@ -273,27 +273,7 @@ func (s *Server) RunHTTP(
 	// and abandon a valid static Bearer token. See wellknown.go.
 	routed = wellKnownGuard(routed)
 
-	bodyLimited := limitRequestBody(routed)
-	failGuarded := bodyLimited
-	if failLimiter != nil {
-		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
-	}
-	guarded := originGuard(
-		requireForwardedHTTPS(failGuarded, trustProxyHeaders, s.logger),
-		allowedOrigins, s.logger,
-	)
-	// Response metrics sit just inside CORS so the Phase 10 SLI counter
-	// (mcp_http_responses_total{class=...}) sees every real-request
-	// response with its final status — including Origin-guard rejections
-	// (intentionally; a spike of 403s is a misconfiguration signal) —
-	// but does not record OPTIONS preflight noise that CORS handles
-	// before delegating downward. nil metrics is a passthrough; tests
-	// and stdio-only callers pass nil.
-	metered := responseMetricsMiddleware(guarded, metrics)
-	// CORS sits outermost so it answers browser OPTIONS preflight before
-	// the Origin guard or any parser. It shares the same allowlist but
-	// grants cross-origin permission rather than rejecting (see cors.go).
-	handler := CORSMiddleware(metered, allowedOrigins, s.logger)
+	handler := s.wrapSecurityChain(routed, failLimiter, allowedOrigins, trustProxyHeaders, metrics)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -322,6 +302,41 @@ func (s *Server) RunHTTP(
 	case err := <-errCh:
 		return err
 	}
+}
+
+// wrapSecurityChain assembles the outer security-guard chain around
+// routed (the auth/rate-limit/path-mux stack). Extracted from RunHTTP
+// so the ordering -- CORS outermost, then response metrics, then
+// originGuard, then requireForwardedHTTPS (C5), then IPFailRateLimiter,
+// then body-size limiting -- is directly testable.
+func (s *Server) wrapSecurityChain(
+	routed http.Handler,
+	failLimiter *IPFailRateLimiter,
+	allowedOrigins *OriginAllowlist,
+	trustProxyHeaders bool,
+	metrics *telemetry.Metrics,
+) http.Handler {
+	bodyLimited := limitRequestBody(routed)
+	failGuarded := bodyLimited
+	if failLimiter != nil {
+		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
+	}
+	guarded := originGuard(
+		requireForwardedHTTPS(failGuarded, trustProxyHeaders, s.logger),
+		allowedOrigins, s.logger,
+	)
+	// Response metrics sit just inside CORS so the Phase 10 SLI counter
+	// (mcp_http_responses_total{class=...}) sees every real-request
+	// response with its final status — including Origin-guard rejections
+	// (intentionally; a spike of 403s is a misconfiguration signal) —
+	// but does not record OPTIONS preflight noise that CORS handles
+	// before delegating downward. nil metrics is a passthrough; tests
+	// and stdio-only callers pass nil.
+	metered := responseMetricsMiddleware(guarded, metrics)
+	// CORS sits outermost so it answers browser OPTIONS preflight before
+	// the Origin guard or any parser. It shares the same allowlist but
+	// grants cross-origin permission rather than rejecting (see cors.go).
+	return CORSMiddleware(metered, allowedOrigins, s.logger)
 }
 
 func limitRequestBody(next http.Handler) http.Handler {
