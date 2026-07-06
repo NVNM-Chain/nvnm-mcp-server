@@ -224,28 +224,28 @@ func (s *Server) RunHTTP(
 	}, &mcp.StreamableHTTPOptions{Stateless: true})
 
 	// Chain (outermost first):
-	//   CORSMiddleware       → browser preflight + cross-origin permission
-	//   responseMetrics      → Phase 10 RD3 SLI counter (class label)
-	//   originGuard          → cheap string lookup, DNS-rebinding defense
+	//   CORSMiddleware        → browser preflight + cross-origin permission
+	//   responseMetrics       → Phase 10 RD3 SLI counter (class label)
+	//   originGuard           → cheap string lookup, DNS-rebinding defense
 	//   requireForwardedHTTPS → C5: rejects requests a trusted proxy marks as
-	//                          plaintext (X-Forwarded-Proto present and !=
-	//                          https); passthrough unless trustProxyHeaders
-	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
-	//   limitRequestBody     → cap body before any parser sees it
-	//   path mux             → branches the chain by URL path:
+	//                           plaintext (X-Forwarded-Proto present and !=
+	//                           https); passthrough unless trustProxyHeaders
+	//   IPFailRateLimiter     → pre-auth: blocks credential-stuffing per source IP
+	//   limitRequestBody      → cap body before any parser sees it
+	//   path mux              → branches the chain by URL path:
 	//     /api/v1/keys/request → public key-request handler (Phase 11 L3)
 	//                            (NO AuthMiddleware; bring-your-own rate limit
 	//                            inside the handler)
 	//     default              → AuthMiddleware → AnonReadRateLimiter →
 	//                            ClientRateLimiter → mcpHandler
-	//   AuthMiddleware       → validates bearer (penalizes failLimiter on miss);
-	//                          under keyless mode admits anonymous when the
-	//                          Authorization header is absent
-	//   AnonReadRateLimiter  → per-IP throttle for anonymous traffic; bypasses
-	//                          authed requests (they pay ClientRateLimiter)
-	//   ClientRateLimiter    → per-client bucket; requires identity from Auth,
-	//                          passes anonymous through
-	//   mcpHandler           → MCP SDK
+	//   AuthMiddleware        → validates bearer (penalizes failLimiter on miss);
+	//                           under keyless mode admits anonymous when the
+	//                           Authorization header is absent
+	//   AnonReadRateLimiter   → per-IP throttle for anonymous traffic; bypasses
+	//                           authed requests (they pay ClientRateLimiter)
+	//   ClientRateLimiter     → per-client bucket; requires identity from Auth,
+	//                           passes anonymous through
+	//   mcpHandler            → MCP SDK
 	var mcpChain http.Handler = mcpHandler
 	if limiter != nil {
 		mcpChain = limiter.Middleware(mcpChain, s.logger)

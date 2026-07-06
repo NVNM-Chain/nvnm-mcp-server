@@ -79,10 +79,10 @@ type KeyRequestResponse struct {
 
 // KeyRequestHandlerConfig wires the handler's dependencies. Store is
 // required; RateLimiter is optional (nil = no per-IP throttle, useful
-// in tests). MaxBodyBytes defaults to 16 KiB if zero. TrustProxy
-// mirrors the project-wide NVNM_TRUST_PROXY_HEADERS gating; when
-// RateLimiter is non-nil it carries its own trustProxy from
-// construction and this field is only used for the audit-trail IP
+// in tests). MaxBodyBytes defaults to 16 KiB if zero. TrustProxy mirrors
+// the project-wide NVNM_TRUST_PROXY_HEADERS gating for the IP the
+// handler derives via clientIP: that single derived IP gates BOTH
+// cfg.RateLimiter.allowIP (the per-IP throttle) and the audit-trail IP
 // captured on the PendingKeyRequest.
 type KeyRequestHandlerConfig struct {
 	Store        *PendingKeyStore

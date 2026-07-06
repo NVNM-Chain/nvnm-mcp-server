@@ -365,7 +365,7 @@ No configuration beyond `NVNM_ALLOWED_ORIGINS` is required; the same production 
 When `NVNM_TRUST_PROXY_HEADERS=true`:
 
 - **The reverse proxy MUST overwrite/strip any client-supplied `X-Forwarded-For`** so only infrastructure-appended hops remain. If the proxy passes through an inbound `XFF` unchanged, a caller can prepend an arbitrary forged value and the server has no way to distinguish it from a real hop.
-- **Set `NVNM_TRUSTED_PROXY_HOPS` to the real number of proxy hops in front of the server** (`1` = single ingress; `2` = CDN + ingress). A value that is too *high* is safe (falls back to `RemoteAddr`), given the XFF-strip invariant above — if the proxy does not strip inbound `XFF`, an over-set hop count can instead land on a forged entry; a value that is too *low* under-collapses but never trusts a forged value. A value that does not match reality either fails to protect (too high, effectively collapsing everyone to a proxy IP) or, if it matches an attacker-controlled hop, defeats the control — see `DATA_HANDLING.md` § 5 for the failure-mode discussion.
+- **Set `NVNM_TRUSTED_PROXY_HOPS` to the real number of proxy hops in front of the server** (`1` = single ingress; `2` = CDN + ingress). A value that is too *high* is safe (falls back to `RemoteAddr`), given the XFF-strip invariant above — if the proxy does not strip inbound `XFF`, an over-set hop count can instead land on a forged entry; a value that is too *low* under-collapses relative to the too-high case (it coarsens distinct clients into fewer buckets) but is still forgery-safe — it never selects an attacker-controlled hop. A value that does not match reality either fails to protect (too high, effectively collapsing everyone to a proxy IP) or, if it matches an attacker-controlled hop, defeats the control — see `DATA_HANDLING.md` § 5 for the failure-mode discussion.
 - **The ingress MUST terminate TLS and set `X-Forwarded-Proto`** to the scheme the client actually used, so the server's C5 check has a real signal to enforce against.
 
 **Intentional fail-open (do not "fix" without review):** the C5 middleware allows a request when `X-Forwarded-Proto` is **absent** — it rejects only an explicit non-`https` value. The ingress is the primary, fail-closed TLS gate; this middleware is defense-in-depth for an *explicit* downgrade signal, not the boundary itself. Rejecting on an absent header would turn any proxy configuration that omits `X-Forwarded-Proto` into a total outage, trading a real availability risk for a security gain already covered at the ingress. **A security scan flagging "fails open on absent `X-Forwarded-Proto`" is observing intended behavior, not a bug** — do not "harden" it to reject-on-absent without a design review.
@@ -428,6 +428,23 @@ The Postgres key-store backend lets multiple server replicas share a single auth
 
 **File backend is unchanged.** Setting `KEY_STORE_BACKEND=file` (or leaving it unset) uses `MCP_API_KEYS_FILE` exactly as before. No existing deployment is affected by Phase 3.
 
+### Anonymous writes (Phase 5: `MCP_KEYLESS_WRITES`)
+
+`MCP_KEYLESS_WRITES` lets an operator run the authless-bundle hosted mode, where `evm_send_raw_transaction` accepts a signed transaction with **no** `Authorization` header at all, provided its destination is the anchor precompile. This is a deploy-time posture decision for the operator, not something a caller opts into — self-hosters wanting the traditional authed relay simply leave it `false` (the default). Because the flip removes the identity check entirely, the boot sequence enforces a chain of prerequisites below rather than trusting the operator to have wired every dependency; misconfiguring any one of them fails the server at startup, not at first request.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MCP_KEYLESS_WRITES` | `false` | When `true`, `evm_send_raw_transaction` restricts the relay to the anchor precompile (precompile-only scope, D9) and broadcasts the canonical re-serialization instead of the caller's raw bytes. Requires every prerequisite below; the server refuses to boot otherwise. |
+| `MCP_KEYLESS_PG_DSN` | _(empty)_ | Dedicated Postgres DSN for the authless bundle's shared state: `write_audit` (Phase 4a), `signer_quota`, and `signer_blacklist` (Phase 5 — see `docs/DATA_HANDLING.md` § 8.2). Separate from `KEY_STORE_DSN`; a hosted authless deployment runs no key store at all. **Required** when `MCP_KEYLESS_WRITES=true` — boot fails with `ErrKeylessWritesRequiresDSN` otherwise, since an authless write path with logs-only (non-persisted) audit is not a supported posture. |
+| `MCP_SIGNER_WRITE_RATE` | `500` | Max anonymous-write broadcasts a single signer may make within `MCP_SIGNER_WRITE_WINDOW`. Boot fails with `ErrSignerWriteRateInvalid` if set `< 1`. |
+| `MCP_SIGNER_WRITE_WINDOW` | `24h` | The counting window `MCP_SIGNER_WRITE_RATE` is measured over. **Fixed (boundary-aligned), not sliding** — the quota counter truncates `time.Now()` to this window via `WindowStart`, so the budget resets at the window boundary rather than rolling continuously. Boot fails with `ErrSignerWriteWindowInvalid` if set `<= 0`. |
+| `MCP_SIGNER_QUOTA_FAIL_OPEN` | `false` | What happens when the `signer_quota` store itself is unreachable (not what happens on a legitimate quota hit). Default fail-closed: a store error rejects the write. See `docs/DATA_HANDLING.md` § 8.2 and `docs/INCIDENT_RUNBOOK.md` § "Relay-scope rejections spiking" for the fail-open tradeoff. |
+| `MCP_SIGNER_BLACKLIST_FAIL_OPEN` | `false` | Same fail-open/fail-closed knob for the `signer_blacklist` store. Default fail-closed. |
+
+**Boot guard chain.** When `MCP_KEYLESS_WRITES=true`, `config.Validate()` (`validateKeylessWrites`) enforces, in order: (1) `MCP_KEYLESS_PG_DSN` is set (`ErrKeylessWritesRequiresDSN`); (2) `MCP_KEYLESS_READS=true` — an anonymous write path is unreachable without the anonymous HTTP read path also being enabled (`ErrKeylessWritesRequiresReads`); (3) `ANCHOR_ADDRESS` parses as a valid address via the same `defitypes.AddressFromHex` the runtime relay handler uses (`ErrAnchorAddressInvalid`); (4) `MCP_SIGNER_WRITE_RATE >= 1`; (5) `MCP_SIGNER_WRITE_WINDOW > 0`.
+
+Guard (3) is the reason `mcp_write_relay_scope_rejected_total{cause="anchor_misconfig"}` (see `docs/DATA_HANDLING.md` § 7.1 and `docs/INCIDENT_RUNBOOK.md` § "Relay-scope rejections spiking") **should never fire at runtime** in a healthy deployment: the boot-time check parses the anchor address with the identical function the request-time relay-scope check uses, so any address that would fail at request time already failed at boot. A nonzero rate on that cause is always a page.
+
 ### Admin Key Management API
 
 | Variable | Default | Purpose |
@@ -469,6 +486,28 @@ curl -X PATCH http://localhost:8081/admin/keys/new-agent \
 ```
 
 **Security:** The admin port should be restricted via firewall or Kubernetes NetworkPolicy to ops tooling only. The admin token is separate from client keys.
+
+#### Signer blacklist (Phase 5)
+
+Operator-facing CRUD for the `signer_blacklist` table (§ "Anonymous writes" above; schema in `docs/DATA_HANDLING.md` § 8.2), on the same admin server, so an on-call operator can ban an abusive signer without a deploy. Behind the same `ADMIN_API_KEY` bearer auth as the endpoints above; all three routes return `404` if the server booted without a signer-blacklist store wired (self-host / no `MCP_KEYLESS_PG_DSN`).
+
+```sh
+# List current bans
+curl -H "Authorization: Bearer $ADMIN_API_KEY" \
+  http://localhost:8081/admin/signer-blacklist
+
+# Ban a signer
+curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"signer": "0xabc...", "reason": "relay abuse"}' \
+  http://localhost:8081/admin/signer-blacklist
+
+# Lift a ban
+curl -X DELETE -H "Authorization: Bearer $ADMIN_API_KEY" \
+  http://localhost:8081/admin/signer-blacklist/0xabc...
+```
+
+`signer` must parse as a hex address (`POST` rejects otherwise with `400`); the store normalizes case. There is no equivalent admin surface for `signer_quota` — it is auto-managed counter state, not an operator-edited list.
 
 ### Key lifecycle — revocation vs expiry
 

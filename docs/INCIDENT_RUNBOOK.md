@@ -540,8 +540,15 @@ Callers are submitting signed transactions whose `to` is not the
 anchor precompile — the relay-scope guard is rejecting off-target
 broadcasts. A sustained spike on `cause="relay_scope"` is the primary
 relay-abuse signal. `cause="decode"` indicates malformed-input
-probing; `cause="anchor_misconfig"` is a server misconfiguration
-(should never fire — page immediately).
+probing; `cause="anchor_misconfig"` is a server misconfiguration that
+boot-time validation makes **provably unreachable** at runtime (see
+`docs/RUNBOOK.md` § "Anonymous writes" for the guard) — treat any
+nonzero rate as a page regardless of how the metric's doc-comment
+phrases the guarantee. The remaining four causes are the Phase 5
+per-signer gates (`docs/DATA_HANDLING.md` § 8.2): `signer_blacklist`
+and `signer_quota` are legitimate-hit rejections; `quota_store_error`
+and `blacklist_store_error` mean the gate's own backing store was
+unreachable.
 
 ### Likely causes
 
@@ -553,6 +560,21 @@ probing; `cause="anchor_misconfig"` is a server misconfiguration
 3. **Server misconfiguration** (`cause="anchor_misconfig"`) — the
    configured anchor address is missing or invalid. This should never
    fire in a healthy deployment; treat any nonzero rate as a page.
+4. **Signer ban hit** (`cause="signer_blacklist"`) — an
+   operator-banned signer is still attempting writes. Expected
+   background noise if the signer keeps retrying; not itself an
+   incident.
+5. **Signer quota exhaustion** (`cause="signer_quota"`) — a signer (or
+   a sybil cluster of signers) is broadcasting at volume, hitting
+   `MCP_SIGNER_WRITE_RATE` within `MCP_SIGNER_WRITE_WINDOW`. Correlate
+   with `write_audit` per-signer volume (see "Investigate" below) to
+   distinguish one noisy legitimate signer from a coordinated flood.
+6. **Quota store unavailable** (`cause="quota_store_error"`) — the
+   keyless Postgres pool backing `signer_quota` is unreachable; every
+   keyless write is being rejected under the fail-closed default
+   (`MCP_SIGNER_QUOTA_FAIL_OPEN=false`).
+7. **Blacklist store unavailable** (`cause="blacklist_store_error"`) —
+   same failure mode against `signer_blacklist`.
 
 ### First-look queries
 
@@ -562,6 +584,9 @@ sum by (cause) (rate(mcp_write_relay_scope_rejected_total[5m]))
 
 # Relay-abuse signal specifically
 increase(mcp_write_relay_scope_rejected_total{cause="relay_scope"}[5m])
+
+# Phase 5 per-signer causes specifically
+sum by (cause) (rate(mcp_write_relay_scope_rejected_total{cause=~"signer_blacklist|signer_quota|quota_store_error|blacklist_store_error"}[5m]))
 ```
 
 ### Investigate
@@ -571,12 +596,32 @@ Correlate with the `write_audit` table (per-signer — see
 to identify offending signers; check whether keyless writes are
 enabled and the anchor address is correct.
 
+**The fail-open operational lever.** `quota_store_error` /
+`blacklist_store_error` spikes mean the keyless Postgres pool is down
+or unreachable, and — under the default fail-closed posture — every
+keyless write is being rejected along with it (an availability
+incident dressed as a rejection spike). If the pool outage is
+confirmed and prolonged, an operator can set
+`MCP_SIGNER_QUOTA_FAIL_OPEN=true` and/or
+`MCP_SIGNER_BLACKLIST_FAIL_OPEN=true` (boot-time config — this
+requires a restart, it is not hot-reloadable) to trade the per-signer
+safety check for availability until the store recovers. This is a
+deliberate safety-for-uptime tradeoff, not a fix: restore the
+Postgres pool and revert to the fail-closed default (`false`) as soon
+as possible. See `docs/RUNBOOK.md` § "Anonymous writes" for the
+env-var reference and `docs/DATA_HANDLING.md` § 8.2 for what fail-open
+actually admits.
+
 ### Escalation
 
 Any sustained `cause="anchor_misconfig"` rate is a page regardless of
 volume — it means the server is rejecting all legitimate writes.
 Sustained `cause="relay_scope"` growth without a corresponding traffic
-explanation should be treated as active relay abuse.
+explanation should be treated as active relay abuse. Any nonzero
+`cause="quota_store_error"` or `cause="blacklist_store_error"` under
+the fail-closed default is also a page — it is functionally the same
+failure mode as `anchor_misconfig` (all keyless writes rejected), just
+triggered by a store outage rather than a config error.
 
 ---
 
