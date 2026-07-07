@@ -28,7 +28,7 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	}
 
 	// No DSN: nothing is provisioned, in either mode.
-	a, q, b, cleanup, err := loadWriteAudit(&config.Config{KeylessPGDSN: ""}, discardLogger())
+	a, q, b, adminAudit, cleanup, err := loadWriteAudit(&config.Config{KeylessPGDSN: ""}, discardLogger())
 	if err != nil {
 		t.Fatalf("loadWriteAudit (no dsn): %v", err)
 	}
@@ -36,10 +36,15 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	if a != nil || q != nil || b != nil {
 		t.Error("no DSN must provision nothing")
 	}
+	if adminAudit != nil {
+		t.Error("no DSN must not provision the admin-audit store")
+	}
 
 	// Authed mode (keyless writes off) + DSN: audit store provisioned so
-	// authed broadcasts persist (F1); the keyless gates stay nil.
-	a, q, b, cleanup, err = loadWriteAudit(
+	// authed broadcasts persist (F1); the keyless gates stay nil. The
+	// admin-audit store is also provisioned here (F2/F5 parallel to F1):
+	// it must not be gated on KeylessWrites.
+	a, q, b, adminAudit, cleanup, err = loadWriteAudit(
 		&config.Config{KeylessWrites: false, KeylessPGDSN: dsn}, discardLogger())
 	if err != nil {
 		t.Fatalf("loadWriteAudit (authed): %v", err)
@@ -51,9 +56,13 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	if q != nil || b != nil {
 		t.Error("authed mode must NOT provision the keyless quota/blacklist gates")
 	}
+	if adminAudit == nil {
+		t.Error("authed mode with a DSN must provision the admin-audit store, got nil")
+	}
 
-	// Keyless mode + DSN: audit + quota + blacklist all provisioned.
-	a2, q2, b2, cleanup2, err := loadWriteAudit(
+	// Keyless mode + DSN: audit + quota + blacklist + admin-audit all
+	// provisioned.
+	a2, q2, b2, adminAudit2, cleanup2, err := loadWriteAudit(
 		&config.Config{KeylessWrites: true, KeylessPGDSN: dsn}, discardLogger())
 	if err != nil {
 		t.Fatalf("loadWriteAudit (keyless): %v", err)
@@ -61,6 +70,9 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	defer cleanup2()
 	if a2 == nil || q2 == nil || b2 == nil {
 		t.Error("keyless mode with a DSN must provision audit + quota + blacklist")
+	}
+	if adminAudit2 == nil {
+		t.Error("keyless mode with a DSN must provision the admin-audit store, got nil")
 	}
 }
 

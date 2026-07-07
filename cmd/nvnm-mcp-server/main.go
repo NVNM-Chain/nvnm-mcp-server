@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -532,11 +531,11 @@ func startAuditAndAdmin(
 	email mcpserver.EmailSender,
 	logger *slog.Logger,
 ) (mcpserver.WriteAuditStore, mcpserver.SignerQuotaStore, mcpserver.SignerBlacklistStore, func(), error) {
-	writeAudit, quota, blacklist, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
+	writeAudit, quota, blacklist, adminAudit, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
 	if err != nil {
 		return nil, nil, nil, func() {}, err
 	}
-	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, blacklist, logger)
+	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, blacklist, adminAudit, logger)
 	if err != nil {
 		writeAuditCleanup()
 		return nil, nil, nil, func() {}, err
@@ -550,19 +549,32 @@ func startAuditAndAdmin(
 }
 
 // loadWriteAudit stands up the dedicated authless-bundle Postgres pool and
-// the three keyless-bundle stores it backs: write-audit, per-signer quota,
-// and per-signer blacklist. Returns (nil, nil, nil, noop, nil) when
-// persistence is not configured (logs-only). Gated on keyless writes + a
-// DSN.
+// the stores it backs: write-audit, per-signer quota, per-signer blacklist,
+// and the per-admin mutation audit store. Returns
+// (nil, nil, nil, nil, noop, nil) when persistence is not configured
+// (logs-only). The four stores are the boot-time products of one shared
+// pool + migration; splitting them into a struct return would obscure the
+// individual nil-vs-non-nil provisioning rules this function documents and
+// the tests assert against.
+//
+//nolint:gocritic // tooManyResultsChecker: see comment above
 func loadWriteAudit(
 	cfg *config.Config, logger *slog.Logger,
-) (mcpserver.WriteAuditStore, mcpserver.SignerQuotaStore, mcpserver.SignerBlacklistStore, func(), error) {
-	// The write-audit store is provisioned whenever a DSN is set, in ANY
-	// mode (F1): authed/self-host broadcasts are audited too, not just
-	// keyless ones. The per-signer quota + blacklist gates are keyless-only
+) (
+	mcpserver.WriteAuditStore,
+	mcpserver.SignerQuotaStore,
+	mcpserver.SignerBlacklistStore,
+	mcpserver.AdminAuditStore,
+	func(),
+	error,
+) {
+	// The write-audit store and the admin-audit store are both provisioned
+	// whenever a DSN is set, in ANY mode (F1 / F2-F5): authed/self-host
+	// broadcasts and admin mutations are audited too, not just keyless
+	// writes. The per-signer quota + blacklist gates are keyless-only
 	// concepts, so they are provisioned only under keyless writes (below).
 	if cfg.KeylessPGDSN == "" {
-		return nil, nil, nil, func() {}, nil
+		return nil, nil, nil, nil, func() {}, nil
 	}
 	// Parse the DSN before connecting: a malformed DSN produces a pgx error
 	// that can echo the connection string (password included), so it must
@@ -571,7 +583,7 @@ func loadWriteAudit(
 	// redact the password, and are safe to wrap.
 	poolCfg, err := pgxpool.ParseConfig(cfg.KeylessPGDSN)
 	if err != nil {
-		return nil, nil, nil, nil, errKeylessDSNInvalid
+		return nil, nil, nil, nil, nil, errKeylessDSNInvalid
 	}
 	// Bound the boot-time dial + migrate so an unreachable Postgres cannot
 	// hang startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
@@ -579,30 +591,33 @@ func loadWriteAudit(
 	defer cancel()
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("connect keyless pg: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("connect keyless pg: %w", err)
 	}
 	// pgxpool is lazy; Ping forces the initial dial under the bounded context
 	// so a down database fails boot fast instead of at first write.
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, nil, nil, nil, fmt.Errorf("ping keyless pg: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("ping keyless pg: %w", err)
 	}
 	if err := mcpserver.RunMigrations(ctx, pool, logger); err != nil {
 		pool.Close()
-		return nil, nil, nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
 	}
 	audit := mcpserver.NewPostgresWriteAuditStore(pool)
+	adminAudit := mcpserver.NewPostgresAdminAuditStore(pool)
 	closeFn := func() { pool.Close() }
 	if !cfg.KeylessWrites {
-		// Authed/self-host audit-only: write_audit persists every broadcast
-		// (F1), but the keyless per-signer quota/blacklist gates are inactive.
+		// Authed/self-host audit-only: write_audit and admin_audit persist
+		// every broadcast / admin mutation (F1 / F2-F5), but the keyless
+		// per-signer quota/blacklist gates are inactive.
 		logger.Info("write-audit backend: postgres (audit-only; keyless writes off)")
-		return audit, nil, nil, closeFn, nil
+		return audit, nil, nil, adminAudit, closeFn, nil
 	}
 	logger.Info("write-audit backend: postgres (keyless bundle)")
 	return audit,
 		mcpserver.NewPostgresSignerQuotaStore(pool),
 		mcpserver.NewPostgresSignerBlacklistStore(pool),
+		adminAudit,
 		closeFn, nil
 }
 
@@ -613,9 +628,10 @@ func startAdminServer(
 	email mcpserver.EmailSender,
 	writeAudit mcpserver.WriteAuditStore,
 	blacklist mcpserver.SignerBlacklistStore,
+	adminAudit mcpserver.AdminAuditStore,
 	logger *slog.Logger,
 ) (shutdown func(), err error) {
-	if cfg.AdminAPIKey == "" {
+	if cfg.AdminAPIKey == "" && cfg.AdminAPIKeysFile == "" {
 		return nil, nil
 	}
 	if cfg.Transport != "http" {
@@ -630,11 +646,14 @@ func startAdminServer(
 		return nil, config.ErrAdminKeyWithoutFile
 	}
 
-	// Task 7 replaces this with loadAdminKeys(cfg)
-	adminKeys := map[[32]byte]string{sha256.Sum256([]byte(cfg.AdminAPIKey)): "admin"}
+	adminKeys, err := loadAdminKeys(cfg)
+	if err != nil {
+		return nil, err
+	}
 	adminSrv := mcpserver.NewAdminServer(
 		cfg.AdminAPIAddr, adminKeys, keys, cfg.KeyDefaultTTL, logger,
-	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit).WithSignerBlacklistStore(blacklist)
+	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit).
+		WithSignerBlacklistStore(blacklist).WithAdminAuditStore(adminAudit)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {
 			logger.Error("admin API server error", slog.String("error", aErr.Error()))
