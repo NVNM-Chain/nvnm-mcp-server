@@ -145,7 +145,14 @@ type Config struct {
 	KeyRenewalURL string
 	APIKeysFile   string
 	AdminAPIKey   string
-	AdminAPIAddr  string
+	// AdminAPIKeysFile (ADMIN_API_KEYS_FILE) names a JSON file of per-admin
+	// identities (`[{"id":"alice","key":"..."}]`) so admin-API callers can
+	// be attributed to an individual instead of collapsing to the single
+	// shared "admin" identity from AdminAPIKey. Loaded by loadAdminKeys
+	// (cmd/nvnm-mcp-server/admin_keys.go) into a sha256(key) -> id map;
+	// empty means no per-admin file is configured.
+	AdminAPIKeysFile string
+	AdminAPIAddr     string
 
 	// Telemetry
 	OTELEndpoint     string
@@ -395,6 +402,7 @@ func Load() (*Config, error) {
 	}
 	cfg.APIKeysFile = os.Getenv("MCP_API_KEYS_FILE")
 	cfg.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
+	cfg.AdminAPIKeysFile = os.Getenv("ADMIN_API_KEYS_FILE")
 	// Default to loopback-only. The admin key is the master key (creates
 	// API keys, assigns admin roles), so exposing :8081 cluster-wide is
 	// a privilege-escalation foot-gun.

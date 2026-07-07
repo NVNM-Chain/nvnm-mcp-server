@@ -78,6 +78,8 @@ func clearEnv(t *testing.T) {
 		"NVNM_SMTP_FROM_NAME",
 		"KEY_DEFAULT_TTL",
 		"KEY_RENEWAL_URL",
+		"ADMIN_API_KEY",
+		"ADMIN_API_KEYS_FILE",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -1141,6 +1143,32 @@ func TestLoad_KeyExpiryConfig(t *testing.T) {
 		t.Setenv("KEY_DEFAULT_TTL", "not-a-duration")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error for invalid KEY_DEFAULT_TTL, got nil")
+		}
+	})
+}
+
+func TestLoad_AdminAPIKeysFile(t *testing.T) {
+	t.Run("unset defaults empty", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.AdminAPIKeysFile != "" {
+			t.Errorf("AdminAPIKeysFile = %q, want empty", cfg.AdminAPIKeysFile)
+		}
+	})
+	t.Run("env value parses through", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		t.Setenv("ADMIN_API_KEYS_FILE", "/etc/nvnm/admins.json")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.AdminAPIKeysFile != "/etc/nvnm/admins.json" {
+			t.Errorf("AdminAPIKeysFile = %q, want %q", cfg.AdminAPIKeysFile, "/etc/nvnm/admins.json")
 		}
 	})
 }
