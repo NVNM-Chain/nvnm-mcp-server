@@ -651,23 +651,34 @@ func newPendingAndEmail(cfg *config.Config, logger *slog.Logger) (
 		}
 		store = s
 	}
-	return store, buildEmailSender(cfg, logger), nil
+	sender, err := buildEmailSender(cfg, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	return store, sender, nil
 }
 
 // buildEmailSender returns the EmailSender used by the admin pending-
 // request approval/rejection flow. When NVNM_SMTP_HOST is set, builds
-// an SMTPEmailSender against the configured relay; otherwise falls
-// back to a log-only sender so the approval flow still completes (the
-// operator copies the freshly-minted key out of structured logs).
-// Config-validation already failed loud if SMTP_HOST was set but
-// SMTP_PORT or SMTP_FROM were missing, so the SMTPEmailSender
-// constructor here cannot return ErrEmailNotConfigured in practice.
-func buildEmailSender(cfg *config.Config, logger *slog.Logger) mcpserver.EmailSender {
+// an SMTPEmailSender against the configured relay; otherwise falls back
+// to a log-only sender (the operator copies the freshly-minted key out
+// of structured logs). The no-SMTP path is reachable only when the
+// operator acknowledged NVNM_ALLOW_KEY_IN_LOGS — config.Validate rejects
+// KeyRequestEnabled+no-SMTP otherwise (F4).
+//
+// F4: if SMTP was configured but the sender fails to construct, we do
+// NOT silently fall back to logging keys — that would betray the
+// operator's intent to deliver by email. We fall back to log-only only
+// when NVNM_ALLOW_KEY_IN_LOGS is set; otherwise we return an error and
+// fail the boot.
+func buildEmailSender(cfg *config.Config, logger *slog.Logger) (mcpserver.EmailSender, error) {
 	if cfg.SMTPHost == "" {
-		logger.Info("SMTP not configured; admin approvals will use log-only email sender",
-			slog.String("hint", "set NVNM_SMTP_HOST / NVNM_SMTP_PORT / NVNM_SMTP_FROM to enable delivery"),
+		// Warn loudly because minted API keys will land in the log pipeline.
+		logger.Warn("log-only email sender active (no SMTP): minted API keys WILL be written to logs",
+			slog.String("ack", "NVNM_ALLOW_KEY_IN_LOGS"),
+			slog.String("hint", "configure NVNM_SMTP_HOST / NVNM_SMTP_PORT / NVNM_SMTP_FROM for secure delivery"),
 		)
-		return mcpserver.NewLogOnlyEmailSender(logger)
+		return mcpserver.NewLogOnlyEmailSender(logger), nil
 	}
 	sender, err := mcpserver.NewSMTPEmailSender(&mcpserver.SMTPConfig{
 		Host:     cfg.SMTPHost,
@@ -678,13 +689,19 @@ func buildEmailSender(cfg *config.Config, logger *slog.Logger) mcpserver.EmailSe
 		FromName: cfg.SMTPFromName,
 	}, logger)
 	if err != nil {
-		// Should be unreachable -- config.Load already gates on the
-		// required fields. Fall back to log-only so the server still
-		// starts and the operator can fix the config.
-		logger.Error("SMTP sender construction failed; falling back to log-only",
+		// SMTP was requested but could not be built (should be
+		// unreachable -- config.Load gates the required fields). Do not
+		// silently downgrade to logging keys unless the operator opted
+		// in; otherwise fail the boot.
+		if !cfg.AllowKeyInLogs {
+			return nil, fmt.Errorf(
+				"SMTP sender construction failed and NVNM_ALLOW_KEY_IN_LOGS is not set "+
+					"(refusing to fall back to logging minted keys): %w", err)
+		}
+		logger.Error("SMTP sender construction failed; falling back to log-only (NVNM_ALLOW_KEY_IN_LOGS acknowledged)",
 			slog.String("error", err.Error()),
 		)
-		return mcpserver.NewLogOnlyEmailSender(logger)
+		return mcpserver.NewLogOnlyEmailSender(logger), nil
 	}
 	logger.Info("SMTP email sender configured",
 		slog.String("host", cfg.SMTPHost),
@@ -692,7 +709,7 @@ func buildEmailSender(cfg *config.Config, logger *slog.Logger) mcpserver.EmailSe
 		slog.String("from", cfg.SMTPFrom),
 		slog.Bool("auth", cfg.SMTPUsername != ""),
 	)
-	return sender
+	return sender, nil
 }
 
 func extractHost(rawURL string) string {

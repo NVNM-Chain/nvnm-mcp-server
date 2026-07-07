@@ -217,7 +217,8 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 | `NVNM_KEY_REQUEST_RATE_LIMIT` | `0.5` | Per-source-IP token-bucket rate (requests/sec) on the public key-request endpoint. Default deliberately tight — the endpoint produces durable side effects (a queue row + a reviewer ping) and is not a hot path. |
 | `NVNM_KEY_REQUEST_RATE_BURST` | `3` | Per-source-IP burst capacity. |
 | `NVNM_KEY_REQUEST_MAX_BODY_BYTES` | `16384` | JSON body cap for the public key-request endpoint (tighter than the global `MaxRequestBodyBytes` outer cap). |
-| `NVNM_SMTP_HOST` | _(empty)_ | SMTP relay hostname used by the admin approve/reject flow to email customers. Empty -> approvals fall back to a log-only sender (key material lands in structured logs for the operator to copy out). Phase 11 RD2. |
+| `NVNM_SMTP_HOST` | _(empty)_ | SMTP relay hostname used by the admin approve/reject flow to email customers. Empty -> approvals fall back to a log-only sender (key material lands in structured logs for the operator to copy out). **F4:** with the key-request flow enabled and no SMTP, the server refuses to boot unless `NVNM_ALLOW_KEY_IN_LOGS=true` is set — the log-only path is no longer a silent default. Phase 11 RD2. |
+| `NVNM_ALLOW_KEY_IN_LOGS` | `false` | Explicit acknowledgement (F4) that the log-only email sender may write freshly-minted API keys to structured logs. Required to boot when `NVNM_KEY_REQUEST_ENABLED=true` and `NVNM_SMTP_HOST` is empty; otherwise boot fails with `ErrKeyInLogsNotAllowed`. Leave `false` and configure SMTP for any deployment where the log store is not an acceptable secret store. When `true`, each approval logs the key-bearing email body at **WARN**. |
 | `NVNM_SMTP_PORT` | _(empty)_ | SMTP port. **Required** when `NVNM_SMTP_HOST` is set; startup fails loud otherwise. |
 | `NVNM_SMTP_USERNAME` | _(empty)_ | SMTP PlainAuth username. Optional; when both username and password are empty, no AUTH is attempted (useful for in-network relays). |
 | `NVNM_SMTP_PASSWORD` | _(empty)_ | SMTP PlainAuth password. |
@@ -309,9 +310,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
 | Mode | Trigger | What happens on approve |
 |---|---|---|
 | SMTP relay | `NVNM_SMTP_HOST` set + `NVNM_SMTP_PORT` + `NVNM_SMTP_FROM` | Email delivered via `net/smtp`; `email_delivered: true` on success |
-| Log-only fallback | `NVNM_SMTP_HOST` unset | Email body (including the raw key) written to structured logs at INFO with `msg=email (log-only, no SMTP configured)`; `email_delivered: true` in the response (the structured-log pipeline is the delivery) |
+| Log-only fallback | `NVNM_SMTP_HOST` unset **and** `NVNM_ALLOW_KEY_IN_LOGS=true` (F4) | Email body (including the raw key) written to structured logs at **WARN** with `msg=email (log-only, no SMTP configured) — body contains the minted API key`; `email_delivered: true` in the response (the structured-log pipeline is the delivery) |
 
-The log-only mode is intended for OSS evaluators, dev / test deployments, and any operator who hasn't wired SMTP yet. Operators using this path are accepting that their log-shipping pipeline is the de-facto secret store for the duration the key sits there. For production-grade deployments, configure SMTP.
+**F4 — log-only is no longer a silent default.** With the key-request flow enabled and no SMTP, the server **refuses to boot** (`ErrKeyInLogsNotAllowed`) unless the operator explicitly sets `NVNM_ALLOW_KEY_IN_LOGS=true` (see the env-var table above). The log-only mode is intended for OSS evaluators, dev / test deployments, and any operator who hasn't wired SMTP yet. Operators who set the flag are accepting that their log-shipping pipeline is the de-facto secret store for the duration the key sits there — and each approval is logged at WARN so the exposure is visible in log review. For production-grade deployments, configure SMTP.
 
 #### Double-approve and double-reject guards
 

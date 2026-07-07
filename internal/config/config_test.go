@@ -1034,6 +1034,10 @@ func TestLoad_KeyRequestEnabledLoadsFields(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)
 	t.Setenv("NVNM_KEY_REQUEST_ENABLED", "true")
+	// F4: key-request without SMTP now requires the explicit key-in-logs
+	// acknowledgement or Load() fails closed (ErrKeyInLogsNotAllowed). This
+	// test pins field round-tripping, not the guard, so opt in here.
+	t.Setenv("NVNM_ALLOW_KEY_IN_LOGS", "true")
 	t.Setenv("NVNM_KEY_PENDING_FILE", "/var/lib/nvnm/keys_pending.json")
 	t.Setenv("NVNM_KEY_REQUEST_RATE_LIMIT", "0.25")
 	t.Setenv("NVNM_KEY_REQUEST_RATE_BURST", "5")

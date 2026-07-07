@@ -51,8 +51,17 @@ var (
 	ErrInvalidKeyRequestMaxBody   = errors.New("NVNM_KEY_REQUEST_MAX_BODY_BYTES must be positive")
 	ErrMissingSMTPPort            = errors.New("NVNM_SMTP_PORT is required when NVNM_SMTP_HOST is set")
 	ErrMissingSMTPFrom            = errors.New("NVNM_SMTP_FROM is required when NVNM_SMTP_HOST is set")
-	ErrAdminKeyWithoutFile        = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
-	ErrHTTPAuthRequired           = errors.New(
+	// ErrKeyInLogsNotAllowed (F4) is returned when the self-serve key-request
+	// flow is enabled without SMTP and without the explicit
+	// NVNM_ALLOW_KEY_IN_LOGS acknowledgement: the approval path would fall
+	// back to writing minted API keys to logs, which must be a deliberate
+	// operator choice, not a silent default.
+	ErrKeyInLogsNotAllowed = errors.New(
+		"NVNM_KEY_REQUEST_ENABLED without NVNM_SMTP_HOST would log minted API " +
+			"keys via the log-only email sender; configure SMTP or set " +
+			"NVNM_ALLOW_KEY_IN_LOGS=true to accept logging keys")
+	ErrAdminKeyWithoutFile = errors.New("ADMIN_API_KEY requires MCP_API_KEYS_FILE")
+	ErrHTTPAuthRequired    = errors.New(
 		"HTTP transport requires an authentication provider; " +
 			"set MCP_API_KEYS_FILE, MCP_API_KEY, or AUTH_PROVIDER=fusionauth",
 	)
@@ -312,6 +321,15 @@ type Config struct {
 	SMTPPassword string
 	SMTPFrom     string
 	SMTPFromName string
+
+	// AllowKeyInLogs is the explicit operator acknowledgement (F4) that,
+	// when the self-serve key-request flow is enabled without SMTP, the
+	// approval path may write freshly-minted API keys to structured logs
+	// (the log-only email sender). It is deliberately opt-in: without it,
+	// KeyRequestEnabled+no-SMTP fails Validate() rather than silently
+	// turning the log pipeline into a secret store. NVNM_ALLOW_KEY_IN_LOGS
+	// env var (default false).
+	AllowKeyInLogs bool
 }
 
 // detectLegacyEnvVars returns the names of any pre-Phase-8.9
@@ -603,7 +621,25 @@ func (c *Config) Validate() error {
 	if err := c.validateKeyless(); err != nil {
 		return err
 	}
+	if err := c.validateKeyRequestEmail(); err != nil {
+		return err
+	}
 	return c.validateResilience()
+}
+
+// validateKeyRequestEmail enforces the F4 fail-closed guard on the
+// self-serve key-request approval flow. When KeyRequestEnabled is on but
+// no SMTP relay is configured, the approval path falls back to the
+// log-only email sender, which writes freshly-minted API keys to
+// structured logs. That exposure must be an explicit operator opt-in
+// (AllowKeyInLogs), never a silent default. The guard is scoped to
+// KeyRequestEnabled: with the feature off, the log-only sender is never
+// constructed to mint or log a key, so there is nothing to guard.
+func (c *Config) validateKeyRequestEmail() error {
+	if c.KeyRequestEnabled && c.SMTPHost == "" && !c.AllowKeyInLogs {
+		return ErrKeyInLogsNotAllowed
+	}
+	return nil
 }
 
 // validateKeyless enforces the authless-write bundle's prerequisites.
@@ -831,6 +867,12 @@ func (c *Config) loadKeyRequestConfig() error {
 	}
 	c.KeyRequestEnabled = enabled
 	c.KeyPendingFile = os.Getenv("NVNM_KEY_PENDING_FILE")
+
+	allowKeyInLogs, err := envBool("NVNM_ALLOW_KEY_IN_LOGS", false)
+	if err != nil {
+		return err
+	}
+	c.AllowKeyInLogs = allowKeyInLogs
 
 	limitStr := envOrDefault("NVNM_KEY_REQUEST_RATE_LIMIT", "0.5")
 	limit, err := strconv.ParseFloat(limitStr, 64)
