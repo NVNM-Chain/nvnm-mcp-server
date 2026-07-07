@@ -19,9 +19,10 @@ type WriteMetrics interface {
 	// RecordBroadcast counts a broadcast attempt that passed relay scope.
 	// outcome is "ok" or "failed".
 	RecordBroadcast(ctx context.Context, outcome string)
-	// RecordRelayReject counts a pre-broadcast rejection. cause is
-	// "relay_scope", "decode", or "anchor_misconfig".
-	RecordRelayReject(ctx context.Context, cause string)
+	// RecordRelayReject counts a pre-broadcast rejection. cause is a
+	// telemetry.RelayRejectCause value from the closed enum -- a distinct
+	// type (not string) so caller-derived data cannot compile into a label.
+	RecordRelayReject(ctx context.Context, cause telemetry.RelayRejectCause)
 }
 
 // Compile-time guard: the concrete telemetry recorder satisfies WriteMetrics

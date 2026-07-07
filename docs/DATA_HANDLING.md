@@ -8,9 +8,9 @@ lives.
 
 **Audience:** engineers, security reviewers, operators deploying the
 OSS, and counsel pairing the policy with auditable technical detail.
-**Currency:** reflects the code as of commit `5927adb` (Phase 8
-close-out, 2026-05-15). Revise alongside any change to the surfaces
-described.
+**Currency:** reflects the code as of commit `b5e1895` (Phase 5
+anonymous-write bundle close-out, 2026-07-06). Revise alongside any
+change to the surfaces described.
 
 ## 1. Scope
 
@@ -307,8 +307,30 @@ Optional. Enabled via `$OTEL_EXPORTER_OTLP_ENDPOINT` (OTLP gRPC),
 | `evm.rpc.retries`                 | counter   | —                     |
 | `evm.rpc.circuit_breaker.state`   | gauge     | —                     |
 | `evm.rpc.rate_limited`            | counter   | —                     |
+| `mcp.write.broadcasts`            | counter   | outcome               |
+| `mcp.write.relay_scope_rejected`  | counter   | cause                 |
 
-No per-caller labels in metrics.
+No per-caller labels in metrics. `mcp.write.broadcasts`'s `outcome`
+label is `ok` or `failed`. `mcp.write.relay_scope_rejected`'s `cause`
+label is a closed, typed enum
+([`internal/telemetry.RelayRejectCause`](../internal/telemetry/metrics.go)) —
+never a free string — so a signer address or other caller-derived
+value cannot compile into a metric label; this is the structural
+defense against label-cardinality abuse and signer-address leakage on
+the unauthenticated `/metrics` endpoint. The seven values:
+
+| `cause` | Meaning |
+|---------|---------|
+| `decode` | The signed-tx hex failed to decode. |
+| `anchor_misconfig` | Server misconfiguration (invalid `ANCHOR_ADDRESS`). Boot-time validation makes this **provably unreachable** at runtime — see `docs/RUNBOOK.md` § "Anonymous writes" for the guard chain. |
+| `relay_scope` | The transaction's destination is not the anchor precompile. |
+| `signer_blacklist` | The recovered signer is on the per-signer ban list (§ 8.2). |
+| `signer_quota` | The recovered signer exceeded `MCP_SIGNER_WRITE_RATE` within `MCP_SIGNER_WRITE_WINDOW` (§ 8.2). |
+| `quota_store_error` | The `signer_quota` Postgres store was unreachable and the fail-closed default rejected the write (§ 8.2). |
+| `blacklist_store_error` | The `signer_blacklist` Postgres store was unreachable and the fail-closed default rejected the write (§ 8.2). |
+
+Investigation playbooks for each cause live in
+[`docs/INCIDENT_RUNBOOK.md`](INCIDENT_RUNBOOK.md#relay-scope-rejections-spiking).
 
 ### 7.2 Span attributes
 
@@ -332,6 +354,8 @@ span.
 | Failed-auth IP buckets              | Process memory                                                         | 15-min inactivity TTL           |
 | JWKS public keys                    | Process memory (`keyfunc` cache)                                       | Process lifetime                |
 | Write-audit log (keyless writes, Phase 4a) | `write_audit` Postgres table (opt-in via `MCP_KEYLESS_PG_DSN`) | Per Privacy Policy §8: **90 days** (write-path structured logs); `grantRole` broadcasts map to **12-month administrative audit-trail window**. Retention mechanism (time-partitioning, archival) is DevOps-owned. |
+| Per-signer quota counters (Phase 5) | `signer_quota` Postgres table (same `MCP_KEYLESS_PG_DSN`)               | Effectively transient — superseded every `MCP_SIGNER_WRITE_WINDOW`; see § 8.2 |
+| Per-signer blacklist (Phase 5)      | `signer_blacklist` Postgres table (same `MCP_KEYLESS_PG_DSN`)           | Until an admin removes the entry; see § 8.2 |
 | Logs                                | stderr (operator-routed)                                               | Operator-defined                |
 | Metrics / traces                    | OTLP / Prometheus sink                                                 | Sink-defined                    |
 
@@ -347,6 +371,15 @@ Retention is scoped by Privacy Policy §8 (cross-reference; do not duplicate):
 - **Administrative broadcasts** (`grantRole` signer-keyed actions): **12 months** per Privacy Policy §8 administrative audit-trail window.
 
 Retention/partitioning mechanism is operator-owned (see `.env.example`, `MCP_KEYLESS_PG_DSN` documentation).
+
+### Audit-trail scope and known limitations
+
+`write_audit` is not a complete record of every write-adjacent action this server performs — it covers exactly one thing: broadcasts made while keyless writes are on. Know the boundary before relying on it for compliance or forensics:
+
+- **Covered:** `evm_send_raw_transaction` calls made under `MCP_KEYLESS_WRITES=true`. The keyless path decodes the signed transaction and recovers the signer address before broadcast ([`internal/mcp/tools_evm_write.go:111`](../internal/mcp/tools_evm_write.go#L111)); that recovered signer is what keys the audit row.
+- **Not covered — structured logs only, never this table:** admin mutations (API-key CRUD, § 2.1; signer-blacklist CRUD, § 8.2) and any `evm_send_raw_transaction` broadcast made with keyless writes **off** (authed/self-host mode). In authed mode there is no recovered signer to key a row on, so `recordAudit` returns immediately without writing one ([`internal/mcp/tools_evm_write.go:144`](../internal/mcp/tools_evm_write.go#L144)); `client_id` is still logged per § 6, just not persisted to `write_audit`.
+
+This is a known, tracked scope gap (deferred security findings F1/F2), documented here so the audit trail is not overclaimed to auditors or counsel. An operator who needs a persisted record of admin actions or authed-mode broadcasts must rely on their log-shipping pipeline (§ 6), not `write_audit`.
 
 ### Per-signer write analysis (query `write_audit`, not Prometheus) <a id="per-signer-write-analysis-query-write_audit-not-prometheus"></a>
 
@@ -374,8 +407,39 @@ SELECT date_trunc('day', first_seen) AS day, count(*) AS new_signers
  GROUP BY day ORDER BY day;
 ```
 
-New-signer flooding becomes a meaningful sybil signal once anonymous
-writes flip (Phase 5); until then these are ad-hoc forensic queries.
+Anonymous writes are live as of Phase 5 (gated by `MCP_KEYLESS_WRITES`;
+§ 8.2), so new-signer flooding is now a meaningful sybil signal —
+correlate a rising new-signer rate here with
+`mcp_write_relay_scope_rejected_total{cause="signer_quota"}` (§ 7.1) to
+distinguish routine onboarding from a coordinated flood.
+
+### 8.2 Signer quota and blacklist (Phase 5)
+
+Two additional Postgres tables enforce per-signer abuse limits on the keyless (`MCP_KEYLESS_WRITES=true`) write path: `signer_quota` throttles broadcast volume per signer, and `signer_blacklist` lets an operator permanently ban a signer address. Both live in the same database as `write_audit` (`MCP_KEYLESS_PG_DSN`) and are consulted before every keyless broadcast — blacklist first, since a banned signer is rejected outright and never consults or consumes quota. Neither table is consulted, or exists as a meaningful gate, when keyless writes are off.
+
+**`signer_quota`** ([`internal/mcp/migrations/0003_init_signer_quota_blacklist.sql`](../internal/mcp/migrations/0003_init_signer_quota_blacklist.sql)):
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `signer` | `TEXT` | Recovered signer address. Part of the composite primary key. |
+| `window_start` | `TIMESTAMPTZ` | Start of the fixed counting window this row belongs to (`WindowStart(now, MCP_SIGNER_WRITE_WINDOW)` — a boundary-aligned bucket, not a sliding window). Part of the composite primary key. |
+| `count` | `INTEGER` | Broadcasts by this signer within the window. Incremented only after a **successful** broadcast — a failed or errored broadcast never consumes quota. |
+
+A signer's writes are permitted while `count < MCP_SIGNER_WRITE_RATE` (default `500`) within the current `MCP_SIGNER_WRITE_WINDOW` (default `24h`). Exceeding it rejects the broadcast (`ErrSignerQuotaExceeded`, `cause="signer_quota"` — § 7.1). Env-var reference: `docs/RUNBOOK.md` § "Anonymous writes."
+
+**`signer_blacklist`:**
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `signer` | `TEXT` (primary key) | Banned signer address. |
+| `reason` | `TEXT` | Operator-supplied free-text reason; defaults to empty string. |
+| `created_at` | `TIMESTAMPTZ` | Ban timestamp; defaults to `now()`. |
+
+Managed exclusively via the admin API (`GET`/`POST /admin/signer-blacklist`, `DELETE /admin/signer-blacklist/{signer}` — see `docs/RUNBOOK.md` § "Signer blacklist (Phase 5)"). There is no equivalent admin surface for `signer_quota`: it is auto-managed counter state, never operator-edited directly.
+
+**Fail-open knobs and default-closed posture.** `MCP_SIGNER_QUOTA_FAIL_OPEN` and `MCP_SIGNER_BLACKLIST_FAIL_OPEN` (both default `false`) govern what happens when the respective store itself is unreachable (e.g. the keyless Postgres pool is down) — **not** what happens on a legitimate quota/blacklist hit, which always rejects. Default fail-closed: a store error rejects the write (`cause="quota_store_error"` / `cause="blacklist_store_error"` — § 7.1) rather than silently admitting a signer the server could not actually check. Flipping either to `true` trades that safety check for availability during a store outage; see [`docs/INCIDENT_RUNBOOK.md`](INCIDENT_RUNBOOK.md#relay-scope-rejections-spiking) for when an operator might reach for that lever, and `docs/RUNBOOK.md` § "Anonymous writes" for the canonical env-var reference.
+
+Retention: neither table is covered by the Privacy Policy §8 write-audit windows above (those apply to `write_audit`). `signer_quota` rows are effectively transient, superseded every window; `signer_blacklist` rows persist until an admin removes them. Partitioning/pruning is operator-owned, same as `write_audit`.
 
 ## 9. Outbound network destinations
 

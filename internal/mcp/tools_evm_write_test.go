@@ -21,6 +21,7 @@ import (
 
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 const anchorHex = "0x0000000000000000000000000000000000000A00"
@@ -57,8 +58,8 @@ func (f *fakeWriteMetrics) RecordBroadcast(_ context.Context, outcome string) {
 	f.broadcasts = append(f.broadcasts, outcome)
 }
 
-func (f *fakeWriteMetrics) RecordRelayReject(_ context.Context, cause string) {
-	f.rejects = append(f.rejects, cause)
+func (f *fakeWriteMetrics) RecordRelayReject(_ context.Context, cause telemetry.RelayRejectCause) {
+	f.rejects = append(f.rejects, string(cause))
 }
 
 // signedTxTo builds a signed dynamic-fee tx to `to` and returns its canonical hex.
@@ -83,7 +84,7 @@ func signedTxTo(t *testing.T, key *wallet.PrivateKey, to defitypes.Address) stri
 func callHandler(t *testing.T, c evm.Client, keyless bool, in sendRawTxInput) (sendRawTxOutput, error) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(c, anchorHex, keyless, nil, nil, logger)
+	h := makeSendRawTxHandler(c, anchorHex, keyless, nil, nil, signerGates{}, logger)
 	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, in)
 	return out, err
 }
@@ -157,7 +158,7 @@ func TestSendRawTx_RecordsWriteAuditOnSuccess(t *testing.T) {
 	raw := signedTxTo(t, key, anchor)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, fa, nil, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, fa, nil, signerGates{}, logger)
 	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -188,7 +189,7 @@ func TestSendRawTx_RecordsWriteAuditOnFailure(t *testing.T) {
 	raw := signedTxTo(t, key, anchor)
 
 	boom := errors.New("rpc down")
-	h := makeSendRawTxHandler(&captureClient{err: boom}, anchorHex, true, fa, nil, logger)
+	h := makeSendRawTxHandler(&captureClient{err: boom}, anchorHex, true, fa, nil, signerGates{}, logger)
 	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 	if err == nil {
 		t.Fatal("expected broadcast error to propagate")
@@ -214,7 +215,7 @@ func TestSendRawTx_NilWriteAuditNoPanic(t *testing.T) {
 	raw := signedTxTo(t, key, anchor)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, signerGates{}, logger)
 	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("handler with nil store: %v", err)
 	}
@@ -229,7 +230,7 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 	// not client_id.
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, signerGates{}, logger)
 	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("keyless broadcast err: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 
 	// authed (keyless off): success audit log keeps client_id, no signer field.
 	buf.Reset()
-	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, nil, nil, logger)
+	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, nil, nil, signerGates{}, logger)
 	if _, _, err := h2(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("authed broadcast err: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestSendRawTx_Metrics(t *testing.T) {
 	t.Run("broadcast ok records outcome=ok", func(t *testing.T) {
 		fm := &fakeWriteMetrics{}
 		raw := signedTxTo(t, key, anchor)
-		h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, fm, logger)
+		h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, fm, signerGates{}, logger)
 		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -282,7 +283,7 @@ func TestSendRawTx_Metrics(t *testing.T) {
 	t.Run("broadcast failure records outcome=failed", func(t *testing.T) {
 		fm := &fakeWriteMetrics{}
 		raw := signedTxTo(t, key, anchor)
-		h := makeSendRawTxHandler(&captureClient{err: errors.New("boom")}, anchorHex, true, nil, fm, logger)
+		h := makeSendRawTxHandler(&captureClient{err: errors.New("boom")}, anchorHex, true, nil, fm, signerGates{}, logger)
 		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err == nil {
 			t.Fatal("expected broadcast error")
 		}
@@ -294,7 +295,7 @@ func TestSendRawTx_Metrics(t *testing.T) {
 	t.Run("relay-scope reject records cause=relay_scope", func(t *testing.T) {
 		fm := &fakeWriteMetrics{}
 		raw := signedTxTo(t, key, other)
-		h := makeSendRawTxHandler(&captureClient{}, anchorHex, true, nil, fm, logger)
+		h := makeSendRawTxHandler(&captureClient{}, anchorHex, true, nil, fm, signerGates{}, logger)
 		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err == nil {
 			t.Fatal("expected relay-scope rejection")
 		}
@@ -308,7 +309,7 @@ func TestSendRawTx_Metrics(t *testing.T) {
 
 	t.Run("decode failure records cause=decode", func(t *testing.T) {
 		fm := &fakeWriteMetrics{}
-		h := makeSendRawTxHandler(&captureClient{}, anchorHex, true, nil, fm, logger)
+		h := makeSendRawTxHandler(&captureClient{}, anchorHex, true, nil, fm, signerGates{}, logger)
 		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: "0xzzzz"}); err == nil {
 			t.Fatal("expected decode error")
 		}
@@ -320,7 +321,7 @@ func TestSendRawTx_Metrics(t *testing.T) {
 	t.Run("anchor misconfig records cause=anchor_misconfig", func(t *testing.T) {
 		fm := &fakeWriteMetrics{}
 		raw := signedTxTo(t, key, anchor)
-		h := makeSendRawTxHandler(&captureClient{}, "not-an-address", true, nil, fm, logger)
+		h := makeSendRawTxHandler(&captureClient{}, "not-an-address", true, nil, fm, signerGates{}, logger)
 		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err == nil {
 			t.Fatal("expected anchor misconfig error")
 		}
@@ -331,7 +332,7 @@ func TestSendRawTx_Metrics(t *testing.T) {
 
 	t.Run("nil metrics does not panic", func(t *testing.T) {
 		raw := signedTxTo(t, key, anchor)
-		h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, logger)
+		h := makeSendRawTxHandler(&captureClient{txHash: "0xabc"}, anchorHex, true, nil, nil, signerGates{}, logger)
 		if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 			t.Fatalf("err = %v", err)
 		}

@@ -84,6 +84,8 @@ func NewServer(
 	cfg *config.Config,
 	middleware []mcp.Middleware,
 	writeAudit WriteAuditStore,
+	quota SignerQuotaStore,
+	blacklist SignerBlacklistStore,
 	metrics WriteMetrics,
 	logger *slog.Logger,
 ) *Server {
@@ -109,7 +111,7 @@ func NewServer(
 	// wraps this layer and still observes anonymous-write rejections.
 	// No-op when keyless is off (AuthMiddleware then guarantees claims
 	// are present for every tools/call).
-	mcpSrv.AddReceivingMiddleware(NewAuthEnforcementMiddleware(keyless, logger))
+	mcpSrv.AddReceivingMiddleware(NewAuthEnforcementMiddleware(keyless, cfg.KeylessWrites, logger))
 
 	for _, mw := range middleware {
 		mcpSrv.AddReceivingMiddleware(mw)
@@ -134,7 +136,20 @@ func NewServer(
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {
-		registerEVMWriteTools(mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, logger)
+		// Phase-5 blacklist/quota gates: nil stores (self-host / non-keyless
+		// call sites, and most tests) disable enforcement entirely.
+		gates := signerGates{
+			blacklist:         blacklist,
+			quota:             quota,
+			rate:              cfg.SignerWriteRate,
+			window:            cfg.SignerWriteWindow,
+			quotaFailOpen:     cfg.SignerQuotaFailOpen,
+			blacklistFailOpen: cfg.SignerBlacklistFailOpen,
+			// now left nil -> time.Now in production
+		}
+		registerEVMWriteTools(
+			mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, gates, logger,
+		)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")
 	}
@@ -209,28 +224,28 @@ func (s *Server) RunHTTP(
 	}, &mcp.StreamableHTTPOptions{Stateless: true})
 
 	// Chain (outermost first):
-	//   CORSMiddleware       → browser preflight + cross-origin permission
-	//   responseMetrics      → Phase 10 RD3 SLI counter (class label)
-	//   originGuard          → cheap string lookup, DNS-rebinding defense
+	//   CORSMiddleware        → browser preflight + cross-origin permission
+	//   responseMetrics       → Phase 10 RD3 SLI counter (class label)
+	//   originGuard           → cheap string lookup, DNS-rebinding defense
 	//   requireForwardedHTTPS → C5: rejects requests a trusted proxy marks as
-	//                          plaintext (X-Forwarded-Proto present and !=
-	//                          https); passthrough unless trustProxyHeaders
-	//   IPFailRateLimiter    → pre-auth: blocks credential-stuffing per source IP
-	//   limitRequestBody     → cap body before any parser sees it
-	//   path mux             → branches the chain by URL path:
+	//                           plaintext (X-Forwarded-Proto present and !=
+	//                           https); passthrough unless trustProxyHeaders
+	//   IPFailRateLimiter     → pre-auth: blocks credential-stuffing per source IP
+	//   limitRequestBody      → cap body before any parser sees it
+	//   path mux              → branches the chain by URL path:
 	//     /api/v1/keys/request → public key-request handler (Phase 11 L3)
 	//                            (NO AuthMiddleware; bring-your-own rate limit
 	//                            inside the handler)
 	//     default              → AuthMiddleware → AnonReadRateLimiter →
 	//                            ClientRateLimiter → mcpHandler
-	//   AuthMiddleware       → validates bearer (penalizes failLimiter on miss);
-	//                          under keyless mode admits anonymous when the
-	//                          Authorization header is absent
-	//   AnonReadRateLimiter  → per-IP throttle for anonymous traffic; bypasses
-	//                          authed requests (they pay ClientRateLimiter)
-	//   ClientRateLimiter    → per-client bucket; requires identity from Auth,
-	//                          passes anonymous through
-	//   mcpHandler           → MCP SDK
+	//   AuthMiddleware        → validates bearer (penalizes failLimiter on miss);
+	//                           under keyless mode admits anonymous when the
+	//                           Authorization header is absent
+	//   AnonReadRateLimiter   → per-IP throttle for anonymous traffic; bypasses
+	//                           authed requests (they pay ClientRateLimiter)
+	//   ClientRateLimiter     → per-client bucket; requires identity from Auth,
+	//                           passes anonymous through
+	//   mcpHandler            → MCP SDK
 	var mcpChain http.Handler = mcpHandler
 	if limiter != nil {
 		mcpChain = limiter.Middleware(mcpChain, s.logger)
@@ -258,27 +273,7 @@ func (s *Server) RunHTTP(
 	// and abandon a valid static Bearer token. See wellknown.go.
 	routed = wellKnownGuard(routed)
 
-	bodyLimited := limitRequestBody(routed)
-	failGuarded := bodyLimited
-	if failLimiter != nil {
-		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
-	}
-	guarded := originGuard(
-		requireForwardedHTTPS(failGuarded, trustProxyHeaders, s.logger),
-		allowedOrigins, s.logger,
-	)
-	// Response metrics sit just inside CORS so the Phase 10 SLI counter
-	// (mcp_http_responses_total{class=...}) sees every real-request
-	// response with its final status — including Origin-guard rejections
-	// (intentionally; a spike of 403s is a misconfiguration signal) —
-	// but does not record OPTIONS preflight noise that CORS handles
-	// before delegating downward. nil metrics is a passthrough; tests
-	// and stdio-only callers pass nil.
-	metered := responseMetricsMiddleware(guarded, metrics)
-	// CORS sits outermost so it answers browser OPTIONS preflight before
-	// the Origin guard or any parser. It shares the same allowlist but
-	// grants cross-origin permission rather than rejecting (see cors.go).
-	handler := CORSMiddleware(metered, allowedOrigins, s.logger)
+	handler := s.wrapSecurityChain(routed, failLimiter, allowedOrigins, trustProxyHeaders, metrics)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -307,6 +302,41 @@ func (s *Server) RunHTTP(
 	case err := <-errCh:
 		return err
 	}
+}
+
+// wrapSecurityChain assembles the outer security-guard chain around
+// routed (the auth/rate-limit/path-mux stack). Extracted from RunHTTP
+// so the ordering -- CORS outermost, then response metrics, then
+// originGuard, then requireForwardedHTTPS (C5), then IPFailRateLimiter,
+// then body-size limiting -- is directly testable.
+func (s *Server) wrapSecurityChain(
+	routed http.Handler,
+	failLimiter *IPFailRateLimiter,
+	allowedOrigins *OriginAllowlist,
+	trustProxyHeaders bool,
+	metrics *telemetry.Metrics,
+) http.Handler {
+	bodyLimited := limitRequestBody(routed)
+	failGuarded := bodyLimited
+	if failLimiter != nil {
+		failGuarded = failLimiter.Wrap(bodyLimited, s.logger)
+	}
+	guarded := originGuard(
+		requireForwardedHTTPS(failGuarded, trustProxyHeaders, s.logger),
+		allowedOrigins, s.logger,
+	)
+	// Response metrics sit just inside CORS so the Phase 10 SLI counter
+	// (mcp_http_responses_total{class=...}) sees every real-request
+	// response with its final status — including Origin-guard rejections
+	// (intentionally; a spike of 403s is a misconfiguration signal) —
+	// but does not record OPTIONS preflight noise that CORS handles
+	// before delegating downward. nil metrics is a passthrough; tests
+	// and stdio-only callers pass nil.
+	metered := responseMetricsMiddleware(guarded, metrics)
+	// CORS sits outermost so it answers browser OPTIONS preflight before
+	// the Origin guard or any parser. It shares the same allowlist but
+	// grants cross-origin permission rather than rejecting (see cors.go).
+	return CORSMiddleware(metered, allowedOrigins, s.logger)
 }
 
 func limitRequestBody(next http.Handler) http.Handler {

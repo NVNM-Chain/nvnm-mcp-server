@@ -41,7 +41,7 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 		},
 	}
 
-	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, nil, testLogger())
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, nil, nil, nil, testLogger())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv.mcpServer
@@ -93,7 +93,7 @@ func TestNewServer_AcceptsWriteMetrics(t *testing.T) {
 
 	// Must compile and not panic: *telemetry.Metrics satisfies WriteMetrics
 	// and threads cleanly into NewServer.
-	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, m, testLogger())
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, nil, nil, m, testLogger())
 	if srv == nil {
 		t.Fatal("NewServer returned nil")
 	}

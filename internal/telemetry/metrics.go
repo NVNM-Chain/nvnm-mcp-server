@@ -42,7 +42,9 @@ type Metrics struct {
 	// labeled outcome=ok|failed. No signer/address label (bounded cardinality).
 	WriteBroadcasts metric.Int64Counter
 	// WriteRelayScopeRejected counts pre-broadcast write rejections, labeled
-	// cause=relay_scope|decode|anchor_misconfig. No signer/address label.
+	// cause=decode|anchor_misconfig|relay_scope|signer_blacklist|
+	// signer_quota|quota_store_error|blacklist_store_error. No
+	// signer/address label.
 	WriteRelayScopeRejected metric.Int64Counter
 }
 
@@ -144,7 +146,11 @@ func NewMetrics(provider *sdkmetric.MeterProvider) (*Metrics, error) {
 
 	writeRelayRejected, err := meter.Int64Counter(
 		"mcp.write.relay_scope_rejected",
-		metric.WithDescription("Pre-broadcast write rejections, by cause (relay_scope|decode|anchor_misconfig)"),
+		metric.WithDescription(
+			"Pre-broadcast write rejections, by cause "+
+				"(decode|anchor_misconfig|relay_scope|signer_blacklist|"+
+				"signer_quota|quota_store_error|blacklist_store_error)",
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("write relay-scope rejected counter: %w", err)
@@ -176,12 +182,28 @@ func (m *Metrics) RecordBroadcast(ctx context.Context, outcome string) {
 	m.WriteBroadcasts.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
-// RecordRelayReject increments the pre-broadcast rejection counter for the
-// given cause ("relay_scope", "decode", or "anchor_misconfig"). Safe to call
-// on a nil *Metrics (no-op).
-func (m *Metrics) RecordRelayReject(ctx context.Context, cause string) {
+// RelayRejectCause is the closed set of pre-broadcast rejection reasons used
+// as the "cause" metric label. It is a distinct type (not a string) so that
+// caller-derived data -- e.g. a signer address -- CANNOT compile into a
+// /metrics label value. This is the C2 leak + cardinality-DoS defense, made
+// structural.
+type RelayRejectCause string
+
+const (
+	CauseDecode            RelayRejectCause = "decode"
+	CauseAnchorMisconfig   RelayRejectCause = "anchor_misconfig"
+	CauseRelayScope        RelayRejectCause = "relay_scope"
+	CauseSignerBlacklist   RelayRejectCause = "signer_blacklist"
+	CauseSignerQuota       RelayRejectCause = "signer_quota"
+	CauseQuotaStoreErr     RelayRejectCause = "quota_store_error"
+	CauseBlacklistStoreErr RelayRejectCause = "blacklist_store_error"
+)
+
+// RecordRelayReject increments the pre-broadcast rejection counter for
+// cause. Safe to call on a nil *Metrics (no-op).
+func (m *Metrics) RecordRelayReject(ctx context.Context, cause RelayRejectCause) {
 	if m == nil || m.WriteRelayScopeRejected == nil {
 		return
 	}
-	m.WriteRelayScopeRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("cause", cause)))
+	m.WriteRelayScopeRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("cause", string(cause))))
 }

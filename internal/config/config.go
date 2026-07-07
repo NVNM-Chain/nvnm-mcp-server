@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	defitypes "github.com/defiweb/go-eth/types"
+
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
@@ -82,7 +84,21 @@ var (
 		"MCP_KEYLESS_PG_DSN is required when MCP_KEYLESS_WRITES is true " +
 			"(keyless writes without a shared-state audit backend is not a supported mode; " +
 			"the persisted write-audit is a security control, not optional)")
-	ErrInvalidTrustedProxyHops = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
+	// ErrKeylessWritesRequiresReads is returned when MCP_KEYLESS_WRITES is
+	// true but MCP_KEYLESS_READS is not: anonymous writes need the
+	// anonymous HTTP path enabled to be reachable at all.
+	ErrKeylessWritesRequiresReads = errors.New(
+		"MCP_KEYLESS_WRITES=true requires MCP_KEYLESS_READS=true " +
+			"(anonymous writes need the anonymous HTTP path enabled)")
+	// ErrAnchorAddressInvalid is returned when ANCHOR_ADDRESS does not parse
+	// as a valid address while MCP_KEYLESS_WRITES is true. Parsed with the
+	// same defitypes.AddressFromHex the runtime relay handler uses, so this
+	// boot guard is exactly as strict as the runtime parse.
+	ErrAnchorAddressInvalid = errors.New(
+		"ANCHOR_ADDRESS is not a valid address (required when MCP_KEYLESS_WRITES=true)")
+	ErrSignerWriteRateInvalid   = errors.New("MCP_SIGNER_WRITE_RATE must be >= 1")
+	ErrSignerWriteWindowInvalid = errors.New("MCP_SIGNER_WRITE_WINDOW must be > 0")
+	ErrInvalidTrustedProxyHops  = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -162,6 +178,26 @@ type Config struct {
 	// Separate from KEY_STORE_DSN: hosted authless runs no key store.
 	// Empty => logs-only audit, no persistence. MCP_KEYLESS_PG_DSN.
 	KeylessPGDSN string
+
+	// SignerWriteRate is the max number of anonymous-write transactions a
+	// single signer may submit within SignerWriteWindow. MCP_SIGNER_WRITE_RATE
+	// env var, default 500.
+	SignerWriteRate int
+	// SignerWriteWindow is the fixed window SignerWriteRate is measured
+	// over. It is a discrete, boundary-aligned bucket (the quota counter
+	// truncates now to this window via WindowStart), not a sliding window.
+	// MCP_SIGNER_WRITE_WINDOW env var, default 24h.
+	SignerWriteWindow time.Duration
+	// SignerQuotaFailOpen controls what happens when the per-signer quota
+	// check itself fails (e.g. the keyless Postgres pool is unreachable).
+	// Default false: fail closed (reject the write) rather than silently
+	// admitting unbounded writes. MCP_SIGNER_QUOTA_FAIL_OPEN env var.
+	SignerQuotaFailOpen bool
+	// SignerBlacklistFailOpen controls what happens when the per-signer
+	// blacklist check itself fails. Default false: fail closed (reject the
+	// write) rather than silently admitting a blacklisted signer.
+	// MCP_SIGNER_BLACKLIST_FAIL_OPEN env var.
+	SignerBlacklistFailOpen bool
 
 	// Per-IP rate limit for anonymous reads. Must be tighter than the
 	// per-client limits above (documented invariant; not enforced here).
@@ -579,6 +615,34 @@ func (c *Config) validateKeyless() error {
 	if c.KeylessWrites && c.KeylessPGDSN == "" {
 		return ErrKeylessWritesRequiresDSN
 	}
+	return c.validateKeylessWrites()
+}
+
+// validateKeylessWrites enforces the remaining anonymous-write
+// prerequisites once KeylessWrites is on: the anonymous HTTP read path
+// must also be enabled (an anonymous write with no anonymous read path is
+// unreachable), the anchor address must parse with the same
+// defitypes.AddressFromHex the runtime relay handler uses (so this boot
+// guard is exactly as strict as the runtime parse -- "anchor_misconfig
+// should never fire" genuinely holds), and the signer-quota knobs must be
+// sane. Extracted from validateKeyless to keep Validate's cyclomatic
+// complexity below the gocyclo threshold.
+func (c *Config) validateKeylessWrites() error {
+	if !c.KeylessWrites {
+		return nil
+	}
+	if !c.KeylessReads {
+		return ErrKeylessWritesRequiresReads
+	}
+	if _, err := defitypes.AddressFromHex(c.AnchorAddress); err != nil {
+		return ErrAnchorAddressInvalid
+	}
+	if c.SignerWriteRate < 1 {
+		return ErrSignerWriteRateInvalid
+	}
+	if c.SignerWriteWindow <= 0 {
+		return ErrSignerWriteWindowInvalid
+	}
 	return nil
 }
 
@@ -718,6 +782,40 @@ func (c *Config) loadKeylessConfig() error {
 		return fmt.Errorf("invalid MCP_ANON_RATE_BURST %q: %w", anonBurstStr, err)
 	}
 	c.AnonRateBurst = anonBurst
+
+	return c.loadSignerQuotaConfig()
+}
+
+// loadSignerQuotaConfig parses the per-signer write-quota and blacklist
+// fail-mode env vars. Extracted from loadKeylessConfig to keep it (and by
+// extension Load's call graph) below the gocyclo threshold; these four
+// vars cluster naturally as the Phase 5 signer-quota/blacklist knobs.
+func (c *Config) loadSignerQuotaConfig() error {
+	rateStr := envOrDefault("MCP_SIGNER_WRITE_RATE", "500")
+	rate, err := strconv.Atoi(rateStr)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_SIGNER_WRITE_RATE %q: %w", rateStr, err)
+	}
+	c.SignerWriteRate = rate
+
+	windowStr := envOrDefault("MCP_SIGNER_WRITE_WINDOW", "24h")
+	window, err := time.ParseDuration(windowStr)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_SIGNER_WRITE_WINDOW %q: %w", windowStr, err)
+	}
+	c.SignerWriteWindow = window
+
+	quotaFailOpen, err := envBool("MCP_SIGNER_QUOTA_FAIL_OPEN", false)
+	if err != nil {
+		return err
+	}
+	c.SignerQuotaFailOpen = quotaFailOpen
+
+	blacklistFailOpen, err := envBool("MCP_SIGNER_BLACKLIST_FAIL_OPEN", false)
+	if err != nil {
+		return err
+	}
+	c.SignerBlacklistFailOpen = blacklistFailOpen
 	return nil
 }
 

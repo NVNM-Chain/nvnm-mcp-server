@@ -5,6 +5,7 @@ package telemetry
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -66,5 +67,26 @@ func TestNewMetrics_WriteDetectionInstruments(t *testing.T) {
 func TestMetrics_RecordersNilSafe(_ *testing.T) {
 	var m *Metrics // nil receiver must not panic
 	m.RecordBroadcast(context.Background(), "ok")
-	m.RecordRelayReject(context.Background(), "relay_scope")
+	m.RecordRelayReject(context.Background(), CauseRelayScope)
+}
+
+// TestRelayRejectCause_ClosedSet documents the closed set of relay-reject
+// causes as a fixed, lowercase token vocabulary. RelayRejectCause is a
+// distinct type (not string) precisely so that caller-derived data -- e.g. a
+// signer address -- cannot compile into a /metrics label value; this test
+// exists to keep that closed set enumerated and reviewed on change.
+func TestRelayRejectCause_ClosedSet(t *testing.T) {
+	want := map[RelayRejectCause]bool{
+		CauseDecode: true, CauseAnchorMisconfig: true, CauseRelayScope: true,
+		CauseSignerBlacklist: true, CauseSignerQuota: true,
+		CauseQuotaStoreErr: true, CauseBlacklistStoreErr: true,
+	}
+	// Every cause value is a fixed, non-empty, lowercase token.
+	for c := range want {
+		if string(c) == "" || strings.ToLower(string(c)) != string(c) {
+			t.Errorf("cause %q must be a fixed lowercase token", c)
+		}
+	}
+	// Compile-time guarantee check: RecordRelayReject must not accept a string.
+	// (This is asserted by the signature; the test documents intent.)
 }
