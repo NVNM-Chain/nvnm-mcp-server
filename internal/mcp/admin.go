@@ -243,6 +243,7 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.logger.Error("admin: create key failed", slog.String("error", err.Error()))
+		a.recordAdminAudit(r.Context(), AdminActionKeyCreate, req.ClientID, "", "error")
 		a.writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -251,6 +252,10 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		slog.String("client_id", req.ClientID),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	// result.Key holds the raw minted key -- never include result/result.Key
+	// in the audit detail. Detail is roles-only.
+	a.recordAdminAudit(r.Context(), AdminActionKeyCreate, req.ClientID,
+		"roles="+strings.Join(req.Roles, ","), "ok")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -272,6 +277,24 @@ type updateRequest struct {
 	Enabled *bool     `json:"enabled,omitempty"`
 	Roles   *[]string `json:"roles,omitempty"`
 	TTL     *string   `json:"ttl,omitempty"`
+}
+
+// updateAuditDetail summarizes which fields a PATCH /admin/keys/{id} request
+// touched, for the non-secret audit Detail (e.g. "fields=enabled,roles").
+// Split out of handleUpdate to keep its cyclomatic complexity under the
+// gocyclo threshold.
+func updateAuditDetail(req updateRequest) string {
+	var changed []string
+	if req.Enabled != nil {
+		changed = append(changed, "enabled")
+	}
+	if req.Roles != nil {
+		changed = append(changed, "roles")
+	}
+	if req.TTL != nil {
+		changed = append(changed, "ttl")
+	}
+	return "fields=" + strings.Join(changed, ",")
 }
 
 func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -334,6 +357,7 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		slog.String("client_id", clientID),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	a.recordAdminAudit(r.Context(), AdminActionKeyUpdate, clientID, updateAuditDetail(req), "ok")
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(summary); err != nil {
@@ -365,6 +389,7 @@ func (a *AdminServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 		slog.String("client_id", clientID),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	a.recordAdminAudit(r.Context(), AdminActionKeyDelete, clientID, "", "ok")
 
 	w.WriteHeader(http.StatusNoContent)
 }
