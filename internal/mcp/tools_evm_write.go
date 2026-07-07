@@ -103,43 +103,44 @@ func makeSendRawTxHandler(
 			}
 		}
 
-		// Broadcast bytes: today's raw passthrough (authed/self-host), or the
-		// scoped, canonical re-serialization under keyless writes (D9 / §5).
-		broadcastHex := input.SignedTxHex
-		var decoded *evm.DecodedTx // populated under keyless writes; drives signer-keyed audit
-		var quotaWindowStart time.Time
-		if keylessWrites {
-			dtx, ws, bh, perr := prepareKeylessBroadcast(
-				ctx, input.SignedTxHex, anchorAddr, gates, logger, recordReject,
-			)
-			if perr != nil {
-				return nil, sendRawTxOutput{}, perr
-			}
-			decoded = dtx
-			quotaWindowStart = ws
-			broadcastHex = bh
+		// decoded drives the signer-keyed audit; broadcastHex is the raw
+		// passthrough (authed/self-host) or the scoped canonical re-encode
+		// (keyless writes, D9 / §5).
+		decoded, quotaWindowStart, broadcastHex, perr := resolveBroadcast(
+			ctx, input.SignedTxHex, anchorAddr, keylessWrites, gates, logger, recordReject,
+		)
+		if perr != nil {
+			return nil, sendRawTxOutput{}, perr
 		}
 
 		clientID := auth.ClientIDFromContext(ctx)
 
-		// identityAttrs keys the audit record on the recovered signer under
-		// keyless writes (client_id is empty under authless), or on client_id
-		// in authed/self-host mode -- §4.D. Addresses/tx hashes only, no keys.
+		// identityAttrs records the recovered signer (when the tx decoded --
+		// always under keyless writes, best-effort under authed writes, F1)
+		// and the authenticated caller's client_id (empty under keyless /
+		// anonymous). Authed-mode lines carry BOTH the API caller and the
+		// on-chain signer. Addresses/tx hashes only, no keys -- §4.D.
 		identityAttrs := func() []slog.Attr {
+			var attrs []slog.Attr
 			if decoded != nil {
-				return []slog.Attr{
+				attrs = append(attrs,
 					slog.String("signer", decoded.Signer.String()),
 					slog.String("to", addrString(decoded.To)),
 					slog.String("value_wei", decoded.Value.String()),
 					slog.Int("calldata_len", len(decoded.Input)),
-				}
+				)
 			}
-			return []slog.Attr{slog.String("client_id", clientID)}
+			if clientID != "" {
+				attrs = append(attrs, slog.String("client_id", clientID))
+			}
+			return attrs
 		}
 
-		// recordAudit persists one broadcast attempt best-effort. Only the
-		// keyless path has a recovered signer (decoded != nil); authed mode
-		// keeps client_id in the slog line and is not persisted here.
+		// recordAudit persists one broadcast attempt best-effort. A row is
+		// written whenever a signer was recovered (decoded != nil -- keyless
+		// writes, or an authed broadcast whose tx decoded, F1) AND a store is
+		// configured. The persisted row is signer-keyed; the authed caller's
+		// client_id stays in the slog line (the table has no client_id column).
 		recordAudit := func(outcome, txHash, errMsg string) {
 			if audit == nil || decoded == nil {
 				return
@@ -202,6 +203,31 @@ func makeSendRawTxHandler(
 
 		return nil, sendRawTxOutput{TxHash: txHash, NextActions: evmSendRawTxNext(txHash)}, nil
 	}
+}
+
+// resolveBroadcast produces the decoded tx (for the signer-keyed audit),
+// the quota window start, and the bytes to broadcast. Under keyless writes
+// it runs the full pre-broadcast pipeline (decode + relay-scope gate +
+// blacklist/quota + canonical re-encode). In authed/self-host mode it does
+// a best-effort decode ONLY -- to audit the broadcast (F1) -- with no
+// relay-scope enforcement and raw passthrough of the caller's bytes; a
+// decode failure is non-fatal (decoded stays nil, the tx still broadcasts,
+// and the audit falls back to the client_id slog line).
+func resolveBroadcast(
+	ctx context.Context,
+	signedTxHex, anchorAddr string,
+	keylessWrites bool,
+	gates signerGates,
+	logger *slog.Logger,
+	recordReject func(telemetry.RelayRejectCause),
+) (*evm.DecodedTx, time.Time, string, error) {
+	if keylessWrites {
+		return prepareKeylessBroadcast(ctx, signedTxHex, anchorAddr, gates, logger, recordReject)
+	}
+	if dtx, derr := evm.DecodeSignedTx(signedTxHex); derr == nil {
+		return dtx, time.Time{}, signedTxHex, nil
+	}
+	return nil, time.Time{}, signedTxHex, nil
 }
 
 // prepareKeylessBroadcast runs the keyless-write pre-broadcast pipeline:

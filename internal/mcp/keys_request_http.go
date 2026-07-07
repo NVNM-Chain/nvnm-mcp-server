@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
+	"unicode"
 )
 
 // KeyRequestPath is the URL path the public self-serve endpoint
@@ -190,13 +191,43 @@ func validateKeyRequest(in KeyRequestInput) string {
 	if len(in.Company) > keyRequestMaxCompanyLen {
 		return "company too long"
 	}
+	if hasDisallowedControlChars(in.Company) {
+		return "company contains disallowed control characters"
+	}
 	if strings.TrimSpace(in.IntendedUse) == "" {
 		return "intended_use is required"
 	}
 	if len(in.IntendedUse) > keyRequestMaxIntendedUseLen {
 		return "intended_use too long"
 	}
+	if hasDisallowedControlChars(in.IntendedUse) {
+		return "intended_use contains disallowed control characters"
+	}
 	return ""
+}
+
+// hasDisallowedControlChars reports whether s contains a disallowed
+// character. F3: the key-request free-text fields are an unauthenticated
+// write, later stored and rendered to the reviewing operator, so we reject
+// the spoofing/injection primitives while still allowing ordinary
+// multi-line prose (tab and newline pass):
+//   - Unicode Cc control chars: NUL, carriage-return (CRLF injection),
+//     terminal escape sequences.
+//   - Unicode Cf format/bidi controls: U+202E RLO and the Trojan-Source
+//     bidi-override class, zero-width spaces, BOM -- invisible glyphs that
+//     let untrusted text misrepresent itself to a human reviewer.
+//
+// Email is separately gated by mail.ParseAddress.
+func hasDisallowedControlChars(s string) bool {
+	for _, r := range s {
+		if r == '\t' || r == '\n' {
+			continue
+		}
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeKeyRequestJSON(w http.ResponseWriter, logger *slog.Logger, status int, body any) {

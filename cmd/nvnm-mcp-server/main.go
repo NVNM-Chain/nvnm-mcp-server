@@ -556,7 +556,11 @@ func startAuditAndAdmin(
 func loadWriteAudit(
 	cfg *config.Config, logger *slog.Logger,
 ) (mcpserver.WriteAuditStore, mcpserver.SignerQuotaStore, mcpserver.SignerBlacklistStore, func(), error) {
-	if !cfg.KeylessWrites || cfg.KeylessPGDSN == "" {
+	// The write-audit store is provisioned whenever a DSN is set, in ANY
+	// mode (F1): authed/self-host broadcasts are audited too, not just
+	// keyless ones. The per-signer quota + blacklist gates are keyless-only
+	// concepts, so they are provisioned only under keyless writes (below).
+	if cfg.KeylessPGDSN == "" {
 		return nil, nil, nil, func() {}, nil
 	}
 	// Parse the DSN before connecting: a malformed DSN produces a pgx error
@@ -586,11 +590,19 @@ func loadWriteAudit(
 		pool.Close()
 		return nil, nil, nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
 	}
+	audit := mcpserver.NewPostgresWriteAuditStore(pool)
+	closeFn := func() { pool.Close() }
+	if !cfg.KeylessWrites {
+		// Authed/self-host audit-only: write_audit persists every broadcast
+		// (F1), but the keyless per-signer quota/blacklist gates are inactive.
+		logger.Info("write-audit backend: postgres (audit-only; keyless writes off)")
+		return audit, nil, nil, closeFn, nil
+	}
 	logger.Info("write-audit backend: postgres (keyless bundle)")
-	return mcpserver.NewPostgresWriteAuditStore(pool),
+	return audit,
 		mcpserver.NewPostgresSignerQuotaStore(pool),
 		mcpserver.NewPostgresSignerBlacklistStore(pool),
-		func() { pool.Close() }, nil
+		closeFn, nil
 }
 
 func startAdminServer(
