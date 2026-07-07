@@ -6,6 +6,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -19,6 +20,14 @@ import (
 
 const testAdminKey = "admin-secret-key-for-testing"
 
+// singleAdminKey builds the single-entry sha256(key)->"admin" identity
+// map NewAdminServer now expects, so existing tests written against the
+// old bare-string adminKey parameter stay terse after the Task 4
+// identity-map refactor.
+func singleAdminKey(k string) map[[32]byte]string {
+	return map[[32]byte]string{sha256.Sum256([]byte(k)): "admin"}
+}
+
 func startAdminTestServer(t *testing.T) (*httptest.Server, *ManagedKeyStore) {
 	t.Helper()
 
@@ -29,7 +38,7 @@ func startAdminTestServer(t *testing.T) (*httptest.Server, *ManagedKeyStore) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, 0, logger)
+	adminSrv := NewAdminServer(":0", singleAdminKey(testAdminKey), mks, 0, logger)
 
 	ts := httptest.NewServer(adminSrv.srv.Handler)
 	t.Cleanup(ts.Close)
@@ -623,7 +632,7 @@ func startAdminTestServerTTL(t *testing.T, defaultTTL time.Duration, startTime t
 	mks.now = nowFn
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, defaultTTL, logger)
+	adminSrv := NewAdminServer(":0", singleAdminKey(testAdminKey), mks, defaultTTL, logger)
 	adminSrv.now = nowFn
 
 	// Allow tests to advance the shared clock by mutating mks.now and

@@ -14,7 +14,7 @@ func TestAdminWriteAudit_ReturnsEntries(t *testing.T) {
 	fa := &fakeWriteAudit{recorded: []WriteAuditEntry{
 		{Signer: "0xaaa", Outcome: "broadcast_ok", TxHash: "0x1"},
 	}}
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).WithWriteAuditStore(fa)
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).WithWriteAuditStore(fa)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/write-audit?signer=0xaaa", http.NoBody)
 	req.Header.Set("Authorization", "Bearer admin-secret")
@@ -36,7 +36,7 @@ func TestAdminWriteAudit_ReturnsEntries(t *testing.T) {
 }
 
 func TestAdminWriteAudit_NilStore404(t *testing.T) {
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger())
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger())
 	req := httptest.NewRequest(http.MethodGet, "/admin/write-audit", http.NoBody)
 	rec := httptest.NewRecorder()
 	a.handleWriteAudit(rec, req)
@@ -50,7 +50,7 @@ func TestAdminWriteAudit_NilStore404(t *testing.T) {
 func TestAdminWriteAudit_BadParams400(t *testing.T) {
 	// A configured store so the handler passes the nil-store 404 guard and
 	// reaches param parsing.
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).
 		WithWriteAuditStore(&fakeWriteAudit{})
 
 	cases := []struct {

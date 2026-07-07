@@ -61,7 +61,7 @@ func (f *fakeAdminBlacklist) List(_ context.Context) ([]BlacklistEntry, error) {
 
 func TestAdmin_SignerBlacklist_RoundTrip(t *testing.T) {
 	store := &fakeAdminBlacklist{banned: map[string]BlacklistEntry{}}
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).WithSignerBlacklistStore(store)
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).WithSignerBlacklistStore(store)
 
 	// POST add.
 	body := `{"signer":"0xAbc0000000000000000000000000000000000001","reason":"spam"}`
@@ -98,7 +98,7 @@ func TestAdmin_SignerBlacklist_RoundTrip(t *testing.T) {
 
 func TestAdmin_SignerBlacklist_InvalidSigner400(t *testing.T) {
 	store := &fakeAdminBlacklist{banned: map[string]BlacklistEntry{}}
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).WithSignerBlacklistStore(store)
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).WithSignerBlacklistStore(store)
 
 	body := `{"signer":"not-an-address","reason":"spam"}`
 	req := httptest.NewRequest(http.MethodPost, "/admin/signer-blacklist", strings.NewReader(body))
@@ -112,7 +112,7 @@ func TestAdmin_SignerBlacklist_InvalidSigner400(t *testing.T) {
 
 func TestAdmin_SignerBlacklist_InvalidJSON400(t *testing.T) {
 	store := &fakeAdminBlacklist{banned: map[string]BlacklistEntry{}}
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).WithSignerBlacklistStore(store)
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).WithSignerBlacklistStore(store)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/signer-blacklist", strings.NewReader("not-json"))
 	req.Header.Set("Authorization", "Bearer admin-secret")
@@ -125,7 +125,7 @@ func TestAdmin_SignerBlacklist_InvalidJSON400(t *testing.T) {
 
 func TestAdmin_SignerBlacklist_DeleteMissingSigner400(t *testing.T) {
 	store := &fakeAdminBlacklist{banned: map[string]BlacklistEntry{}}
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).WithSignerBlacklistStore(store)
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).WithSignerBlacklistStore(store)
 
 	req := httptest.NewRequest(http.MethodDelete, "/admin/signer-blacklist/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer admin-secret")
@@ -138,7 +138,7 @@ func TestAdmin_SignerBlacklist_DeleteMissingSigner400(t *testing.T) {
 
 func TestAdmin_SignerBlacklist_StoreError500(t *testing.T) {
 	store := &fakeAdminBlacklist{banned: map[string]BlacklistEntry{}, err: errors.New("db unavailable")}
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger()).WithSignerBlacklistStore(store)
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger()).WithSignerBlacklistStore(store)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/signer-blacklist", http.NoBody)
 	req.Header.Set("Authorization", "Bearer admin-secret")
@@ -150,7 +150,7 @@ func TestAdmin_SignerBlacklist_StoreError500(t *testing.T) {
 }
 
 func TestAdmin_SignerBlacklist_NilStore404(t *testing.T) {
-	a := NewAdminServer(":0", "admin-secret", nil, 0, testLogger())
+	a := NewAdminServer(":0", singleAdminKey("admin-secret"), nil, 0, testLogger())
 
 	tests := []struct {
 		name    string

@@ -55,11 +55,14 @@ type AdminServer struct {
 }
 
 // NewAdminServer creates an admin API server.
-// adminKey is the bearer token required for all requests.
+// adminKeys maps sha256(admin-key) -> admin id; a bearer must hash to one
+// of these entries to authenticate, and the matched id is attributed to
+// the request as its admin actor (see adminActorFromContext).
 // defaultTTL is applied to newly created keys when no per-key ttl is specified
 // in the request; pass 0 for no default expiry.
 func NewAdminServer(
-	addr, adminKey string,
+	addr string,
+	adminKeys map[[32]byte]string,
 	keys KeyStoreBackend,
 	defaultTTL time.Duration,
 	logger *slog.Logger,
@@ -91,7 +94,7 @@ func NewAdminServer(
 
 	handler := adminAuth(
 		limitAdminRequestBody(mux),
-		adminKey,
+		adminKeys,
 		logger,
 	)
 
@@ -333,17 +336,19 @@ func (a *AdminServer) writeError(w http.ResponseWriter, status int, msg string) 
 
 // adminAuth gates the admin REST API behind a Bearer-token check.
 //
-// The token comparison hashes both sides with SHA-256 and compares
-// fixed-length digests. subtle.ConstantTimeCompare returns 0 fast on
-// length mismatch -- comparing raw tokens directly would leak the
-// admin-key length to a length-probing attacker. Hashing equalizes
-// lengths so the constant-time guarantee is meaningful.
+// keys maps sha256(admin-key) -> admin id, as produced by loadAdminKeys.
+// The presented bearer is hashed and compared against every entry with
+// subtle.ConstantTimeCompare so that the request's latency does not
+// depend on which entry (if any) matches -- comparing raw tokens
+// directly would additionally leak token length to a length-probing
+// attacker, so both sides are hashed first to equalize lengths.
 //
 // All failures return 401 per RFC 7235: a missing/wrong-scheme/wrong
-// bearer is an authentication failure, not an authorization failure.
-func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Handler {
-	want := sha256.Sum256([]byte(adminKey))
-
+// bearer is an authentication failure, not an authorization failure. On
+// a match, the resolved admin id is injected into the request context
+// via contextWithAdminActor for downstream handlers (e.g. audit writes)
+// to read with adminActorFromContext.
+func adminAuth(next http.Handler, keys map[[32]byte]string, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -366,7 +371,23 @@ func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Han
 		}
 
 		got := sha256.Sum256([]byte(strings.TrimPrefix(authHeader, prefix)))
-		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+
+		// Iterate every entry rather than doing a direct map lookup
+		// (`keys[got]`) so the amount of work done is independent of
+		// which entry, if any, matches -- a map lookup short-circuits
+		// on the first bucket collision and can leak timing signal
+		// about the key material. matched/id are only assigned to on
+		// a hit; the loop always walks the full map regardless.
+		var matched bool
+		var id string
+		for h, adminID := range keys {
+			if subtle.ConstantTimeCompare(got[:], h[:]) == 1 {
+				matched = true
+				id = adminID
+			}
+		}
+
+		if !matched {
 			logger.Warn("admin: rejected request with invalid admin key",
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("method", r.Method),
@@ -376,7 +397,7 @@ func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Han
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(contextWithAdminActor(r.Context(), id)))
 	})
 }
 

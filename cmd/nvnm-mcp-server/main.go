@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -629,8 +630,10 @@ func startAdminServer(
 		return nil, config.ErrAdminKeyWithoutFile
 	}
 
+	// Task 7 replaces this with loadAdminKeys(cfg)
+	adminKeys := map[[32]byte]string{sha256.Sum256([]byte(cfg.AdminAPIKey)): "admin"}
 	adminSrv := mcpserver.NewAdminServer(
-		cfg.AdminAPIAddr, cfg.AdminAPIKey, keys, cfg.KeyDefaultTTL, logger,
+		cfg.AdminAPIAddr, adminKeys, keys, cfg.KeyDefaultTTL, logger,
 	).WithPendingKeyStore(pendingStore, email).WithWriteAuditStore(writeAudit).WithSignerBlacklistStore(blacklist)
 	go func() {
 		if aErr := adminSrv.Start(); aErr != nil {

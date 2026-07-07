@@ -78,7 +78,7 @@ func startPendingAdminTestServer(t *testing.T) (*httptest.Server, *ManagedKeySto
 	email := &fakeEmailSender{}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, 0, logger).
+	adminSrv := NewAdminServer(":0", singleAdminKey(testAdminKey), mks, 0, logger).
 		WithPendingKeyStore(ps, email)
 
 	ts := httptest.NewServer(adminSrv.srv.Handler)
@@ -275,7 +275,7 @@ func TestAdminPending_NotConfigured503(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adminSrv := NewAdminServer(":0", testAdminKey, mks, 0, logger) // no WithPendingKeyStore
+	adminSrv := NewAdminServer(":0", singleAdminKey(testAdminKey), mks, 0, logger) // no WithPendingKeyStore
 
 	ts := httptest.NewServer(adminSrv.srv.Handler)
 	defer ts.Close()
