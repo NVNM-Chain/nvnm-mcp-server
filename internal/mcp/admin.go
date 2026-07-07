@@ -52,6 +52,7 @@ type AdminServer struct {
 	now          func() time.Time
 	writeAudit   WriteAuditStore
 	blacklist    SignerBlacklistStore
+	adminAudit   AdminAuditStore
 }
 
 // NewAdminServer creates an admin API server.
@@ -125,6 +126,50 @@ func (a *AdminServer) Start() error {
 // Close gracefully shuts down the admin server.
 func (a *AdminServer) Close(ctx context.Context) error {
 	return a.srv.Shutdown(ctx)
+}
+
+// WithAdminAuditStore attaches the per-admin mutation audit backend. nil
+// leaves recordAdminAudit falling back to attributed INFO log lines (self-host
+// / no MCP_KEYLESS_PG_DSN).
+func (a *AdminServer) WithAdminAuditStore(s AdminAuditStore) *AdminServer {
+	a.adminAudit = s
+	return a
+}
+
+// recordAdminAudit attributes an admin mutation to the actor resolved from
+// ctx (see adminActorFromContext) and persists it via the attached
+// AdminAuditStore. Best-effort: a store failure is logged at WARN and never
+// propagated, so an audit-write failure never fails the admin mutation it
+// describes. With no store attached, the mutation is instead emitted as an
+// attributed INFO log line so single-process / no-DSN deployments retain an
+// audit trail in their logs.
+func (a *AdminServer) recordAdminAudit(ctx context.Context, action AdminAction, target, detail, outcome string) {
+	actor := adminActorFromContext(ctx)
+
+	if a.adminAudit == nil {
+		a.logger.Info("admin: mutation",
+			slog.String("actor_id", actor),
+			slog.String("action", string(action)),
+			slog.String("target", target),
+			slog.String("outcome", outcome),
+		)
+		return
+	}
+
+	entry := AdminAuditEntry{
+		ActorID: actor,
+		Action:  action,
+		Target:  target,
+		Detail:  detail,
+		Outcome: outcome,
+	}
+	if err := a.adminAudit.Record(ctx, entry); err != nil {
+		a.logger.Warn("admin: audit record failed",
+			slog.String("actor_id", actor),
+			slog.String("action", string(action)),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // --- Handlers ---
