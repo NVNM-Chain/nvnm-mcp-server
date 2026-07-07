@@ -448,12 +448,19 @@ Guard (3) is the reason `mcp_write_relay_scope_rejected_total{cause="anchor_misc
 
 ### Admin Key Management API
 
+This section is for operators standing up the admin REST API — the surface used to create/rotate/revoke client keys, manage the signer blacklist, and review the pending-key queue. Read this before setting either admin env var below.
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ADMIN_API_KEY` | _(empty)_ | Admin bearer token for the key management REST API. The admin server only starts when this is set AND transport is `http`. |
+| `ADMIN_API_KEY` | _(empty)_ | Single shared admin bearer token for the key management REST API. Callers authenticating with it are attributed to the fixed identity `admin` in `admin_audit` / logs (see "Admin identities and per-admin audit attribution" below). |
+| `ADMIN_API_KEYS_FILE` | _(empty)_ | Path to a JSON file of per-admin identities: `[{"id":"alice","key":"..."},{"id":"bob","key":"..."}]`. Each row's `key` is hashed with plain SHA-256 (no pepper) and mapped to its `id`, so admin-API callers are individually attributed instead of collapsing to the single shared `admin` identity. `chmod 600` the file — it holds bearer-equivalent secrets in the clear. |
 | `ADMIN_API_ADDR` | `:8081` | Listen address for the admin API. |
 
-When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` with REST endpoints for runtime key management. Changes take effect immediately -- no server restart needed.
+The admin server starts when **either** `ADMIN_API_KEY` or `ADMIN_API_KEYS_FILE` is set, AND transport is `http`. A deployment can therefore run file-only (`ADMIN_API_KEYS_FILE` with no `ADMIN_API_KEY`) to avoid a shared static admin secret entirely — every caller carries an individually-attributable key.
+
+**Rotation has no hot-reload.** `ADMIN_API_KEYS_FILE` is loaded once at startup (`loadAdminKeys`, `cmd/nvnm-mcp-server/admin_keys.go`); editing the file on disk has no effect on a running process. To add, remove, or rotate an admin identity: edit the file, then restart the server. This differs from the key-management API below, where key CRUD via the REST endpoints *does* take effect immediately without a restart — that immediacy applies to client keys managed through the API, not to the admin identities that authenticate to it.
+
+When `ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE` is set, a separate HTTP server starts on `ADMIN_API_ADDR` with REST endpoints for runtime key management. Changes to client keys made through these endpoints take effect immediately -- no server restart needed.
 
 **Endpoints:**
 
@@ -464,7 +471,7 @@ When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` w
 | `PATCH` | `/admin/keys/{id}` | Update enabled/roles/ttl. Body fields: `enabled` (bool), `roles` (string array), `ttl` (duration string; omit = unchanged). |
 | `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
 
-All requests require `Authorization: Bearer <ADMIN_API_KEY>`.
+All requests require `Authorization: Bearer <key>`, where `<key>` is either the shared `ADMIN_API_KEY` or one of the per-admin keys from `ADMIN_API_KEYS_FILE`. The examples below use `$ADMIN_API_KEY` for brevity; a per-admin key from the file works identically, just with individual attribution instead of the shared `admin` identity.
 
 **TTL on create and PATCH.** The optional `"ttl"` field is a Go duration string (e.g. `"720h"`, `"8760h"`). Use `"0"`, `"none"`, or `"never"` for no expiry. A negative or zero-parsed duration returns HTTP 400. When `"ttl"` is omitted on create, `KEY_DEFAULT_TTL` applies (default `8760h`). On PATCH, omitting `"ttl"` leaves the existing expiry unchanged; sending `"ttl": "0"` clears it.
 
@@ -487,6 +494,17 @@ curl -X PATCH http://localhost:8081/admin/keys/new-agent \
 ```
 
 **Security:** The admin port should be restricted via firewall or Kubernetes NetworkPolicy to ops tooling only. The admin token is separate from client keys.
+
+#### Admin identities and per-admin audit attribution (`admin_audit`)
+
+This subsection is for operators who need to know **who** made a given admin change, and where that record lives — useful for incident review, change-control audits, or simply confirming a teammate's action landed. Pair with "Admin Key Management API" above for how identities are configured.
+
+Every admin mutation made through the endpoints on this page — key create/update/delete, signer-blacklist add/remove, and pending-key approve/reject — is recorded against the identity that authenticated the request (`admin` for the shared `ADMIN_API_KEY`, or the per-admin `id` from `ADMIN_API_KEYS_FILE`). The 7 audited actions are: `key.create`, `key.update`, `key.delete`, `blacklist.add`, `blacklist.remove`, `pending.approve`, `pending.reject`.
+
+- **Persisted (Postgres):** when `MCP_KEYLESS_PG_DSN` is configured, each mutation is appended to the `admin_audit` table (migration `0004_admin_audit.sql`) on that same pool — columns `id, actor_id, action, target, detail, outcome, created_at`. Recording is best-effort: a write failure is logged at `WARN` and never blocks the admin mutation it describes.
+- **Logs-only fallback:** when `MCP_KEYLESS_PG_DSN` is not configured, the same information is instead emitted as an attributed `INFO` log line (`actor_id`, `action`, `target`, `outcome`) rather than persisted to a table.
+
+**Immutability note.** The store is append-only by type (`AdminAuditStore.Record` — no update/delete method exists), but the running application's database role can still issue raw `UPDATE`/`DELETE` against `admin_audit` unless prevented at the database layer. For true immutability, revoke `UPDATE` and `DELETE` privileges on `admin_audit` from the application's DB role (grant `INSERT`/`SELECT` only) — this is defense in depth on top of the application-level append-only design, not a substitute for it.
 
 #### Signer blacklist (Phase 5)
 
@@ -580,7 +598,7 @@ no longer accept or display a write-approval policy.
 | Port | Purpose |
 |------|---------|
 | **8080** | MCP HTTP transport (`MCP_HTTP_ADDR`). |
-| **8081** | Admin key management API (`ADMIN_API_ADDR`). Only active when `ADMIN_API_KEY` is set. |
+| **8081** | Admin key management API (`ADMIN_API_ADDR`). Only active when `ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE` is set. |
 | **9090** | Health and metrics (`METRICS_ADDR`): `GET /healthz`, `GET /readyz`, `GET /metrics`. |
 
 Container image exposes 8080 and 9090. Map both in Kubernetes Services, ECS task definitions, and load balancers as required. The admin port (8081) should be exposed only to internal ops tooling -- restrict via NetworkPolicy or firewall rules.

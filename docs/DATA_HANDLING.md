@@ -8,9 +8,11 @@ lives.
 
 **Audience:** engineers, security reviewers, operators deploying the
 OSS, and counsel pairing the policy with auditable technical detail.
-**Currency:** reflects the code as of commit `b5e1895` (Phase 5
-anonymous-write bundle close-out, 2026-07-06). Revise alongside any
-change to the surfaces described.
+**Currency:** reflects the code as of commit `52e2357` (admin_audit
+provisioning + admin-server start-on-key-or-file boot wiring,
+2026-07-07). Revise alongside any change to the surfaces described.
+Re-stamp this anchor to the eventual squash-merge commit once this
+branch lands on `main`, rather than to a later doc-only fix.
 
 ## 1. Scope
 
@@ -356,6 +358,7 @@ span.
 | Write-audit log (keyless writes, Phase 4a) | `write_audit` Postgres table (opt-in via `MCP_KEYLESS_PG_DSN`) | Per Privacy Policy §8: **90 days** (write-path structured logs); `grantRole` broadcasts map to **12-month administrative audit-trail window**. Retention mechanism (time-partitioning, archival) is DevOps-owned. |
 | Per-signer quota counters (Phase 5) | `signer_quota` Postgres table (same `MCP_KEYLESS_PG_DSN`)               | Effectively transient — superseded every `MCP_SIGNER_WRITE_WINDOW`; see § 8.2 |
 | Per-signer blacklist (Phase 5)      | `signer_blacklist` Postgres table (same `MCP_KEYLESS_PG_DSN`)           | Until an admin removes the entry; see § 8.2 |
+| Admin mutation audit (F2/F5)        | `admin_audit` Postgres table (same `MCP_KEYLESS_PG_DSN`)                | Append-only; no defined pruning window yet. Retention mechanism (time-partitioning, archival) is DevOps-owned, same as `write_audit`. Logs-only (not persisted) when `MCP_KEYLESS_PG_DSN` is unset; see "Audit-trail scope and known limitations" below. |
 | Logs                                | stderr (operator-routed)                                               | Operator-defined                |
 | Metrics / traces                    | OTLP / Prometheus sink                                                 | Sink-defined                    |
 
@@ -374,12 +377,13 @@ Retention/partitioning mechanism is operator-owned (see `.env.example`, `MCP_KEY
 
 ### Audit-trail scope and known limitations
 
-`write_audit` records **every broadcast** (both keyless and authed) when a store is configured, but it does **not** capture admin mutations. Know the boundary before relying on it for compliance or forensics:
+`write_audit` and `admin_audit` are separate tables covering separate surfaces — broadcasts vs. admin mutations, respectively. Know the boundary between them before relying on either for compliance or forensics:
 
-- **Covered — every broadcast (F1):** `evm_send_raw_transaction` calls in **both** modes. Under `MCP_KEYLESS_WRITES=true` the keyless path decodes the signed transaction, recovers the signer, enforces relay-scope, and audits. Under keyless writes **off** (authed/self-host) the handler now decodes the tx **best-effort** solely to audit it ([`internal/mcp/tools_evm_write.go`](../internal/mcp/tools_evm_write.go), `resolveBroadcast`) — no relay-scope enforcement, raw passthrough — so the broadcast still writes a signer-keyed row. The persisted row is keyed on the recovered on-chain **signer**; in authed mode the authenticated caller's `client_id` is carried in the broadcast's structured-log line (§ 6), not in the table (there is no `client_id` column). Persistence requires a store: `write_audit` exists only when `MCP_KEYLESS_PG_DSN` is configured — without it, broadcasts are logged (§ 6) but not persisted, in either mode.
-- **Not covered — structured logs only, never this table:** admin mutations (API-key CRUD, § 2.1; signer-blacklist CRUD, § 8.2). And in the rare case an authed broadcast's bytes do not decode, there is no recovered signer to key a row on ([`recordAudit`](../internal/mcp/tools_evm_write.go) returns without writing) — the tx still broadcasts (the RPC is the arbiter) and the attempt is captured in logs only.
+- **Covered by `write_audit` — every broadcast (F1):** `evm_send_raw_transaction` calls in **both** modes. Under `MCP_KEYLESS_WRITES=true` the keyless path decodes the signed transaction, recovers the signer, enforces relay-scope, and audits. Under keyless writes **off** (authed/self-host) the handler now decodes the tx **best-effort** solely to audit it ([`internal/mcp/tools_evm_write.go`](../internal/mcp/tools_evm_write.go), `resolveBroadcast`) — no relay-scope enforcement, raw passthrough — so the broadcast still writes a signer-keyed row. The persisted row is keyed on the recovered on-chain **signer**; in authed mode the authenticated caller's `client_id` is carried in the broadcast's structured-log line (§ 6), not in the table (there is no `client_id` column). Persistence requires a store: `write_audit` exists only when `MCP_KEYLESS_PG_DSN` is configured — without it, broadcasts are logged (§ 6) but not persisted, in either mode.
+- **Covered by `admin_audit` — admin mutations, when a DSN is configured (F2/F5):** the 7 admin mutation types (`key.create`, `key.update`, `key.delete`, `blacklist.add`, `blacklist.remove`, `pending.approve`, `pending.reject`) are now recorded in the `admin_audit` table, attributed to the acting `actor_id` (the shared `admin` identity, or a per-admin id from `ADMIN_API_KEYS_FILE` — see `docs/RUNBOOK.md` § "Admin identities and per-admin audit attribution"), whenever `MCP_KEYLESS_PG_DSN` is configured. This closes the F2 gap **when Postgres is configured**.
+- **Not covered — structured logs only, no persisted table:** admin mutations when `MCP_KEYLESS_PG_DSN` is **not** configured fall back to attributed `INFO` log lines only — the same 7 actions, same `actor_id`, but never written to `admin_audit` (there is no table to write to). This is still a real gap in a no-DSN deployment; do not represent it as covered by a persisted audit trail. And in the rare case an authed broadcast's bytes do not decode, there is no recovered signer to key a `write_audit` row on ([`recordAudit`](../internal/mcp/tools_evm_write.go) returns without writing) — the tx still broadcasts (the RPC is the arbiter) and the attempt is captured in logs only.
 
-The admin-mutation gap is a known, tracked item (deferred security finding F2), documented here so the audit trail is not overclaimed to auditors or counsel. An operator who needs a persisted record of **admin actions** must rely on their log-shipping pipeline (§ 6), not `write_audit`.
+The F2 gap (previously: admin mutations were never persisted, logs-only, full stop) is now closed **conditionally** — it depends on `MCP_KEYLESS_PG_DSN` being configured, same precondition as `write_audit`. An operator who needs a persisted record of **admin actions** and has not configured `MCP_KEYLESS_PG_DSN` must still rely on their log-shipping pipeline (§ 6), not a table — no table exists to query.
 
 ### Per-signer write analysis (query `write_audit`, not Prometheus) <a id="per-signer-write-analysis-query-write_audit-not-prometheus"></a>
 
