@@ -5,7 +5,7 @@ ARG TARGETARCH
 # Pin the toolchain to the version in go.mod for reproducible builds.
 # Without this, GOTOOLCHAIN=auto would silently download whatever
 # point release happens to be current at build time.
-ENV GOTOOLCHAIN=go1.26.4
+ENV GOTOOLCHAIN=go1.26.5
 
 WORKDIR /build
 
