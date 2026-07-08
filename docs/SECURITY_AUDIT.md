@@ -1,7 +1,7 @@
 # Pre-Red-Team Security Assessment: NVNM Chain MCP Server
 
 **Date:** 2026-04-01
-**Last reviewed:** 2026-05-14 (Phase 8.12 OWASP Top 10 self-audit; see the "Update log" at the end)
+**Last reviewed:** 2026-07-08 (Phase 5 anonymous-write bundle + F1-F5 remediation, commit `8a74b49`; see the "Update log" at the end)
 **Scope:** Full repository defensive security review
 **Status:** Assessment complete; remediation complete (see Phase 4)
 
@@ -575,6 +575,11 @@ All "Immediate Fixes" and "Before Red Team" items have been implemented. Each fi
 | Changes | `evm_send_raw_transaction` logs `client_id`, `tx_hash` on success; `client_id`, `signed_tx_len`, `error` on failure. `anchor_prepare_add_registry` logs `client_id`, `from` (redacted), `registry_name`. `anchor_prepare_add_record` logs `client_id`, `from` (redacted), `registry`, `uri`. `anchor_prepare_grant_role` logs `client_id`, `from` (redacted), `registry_id`, `account` (redacted), `role`. Telemetry middleware logs `client_id` on every tool call and adds it as an OTel span attribute. |
 | Verification | `go test ./...` passes |
 
+(Extended 2026-07-08 — see the Phase 5 update below: append-only Postgres
+`write_audit` and `admin_audit` tables now exist alongside this structured-log
+audit trail, and F1 closed the gap where authed/self-host broadcasts were not
+persisted to `write_audit`.)
+
 #### Finding 5 (partial) / govulncheck: Dependency Vulnerability -- REMEDIATED
 
 | Aspect | Detail |
@@ -670,6 +675,7 @@ The sections below record changes made after the original 2026-04-01 pre-red-tea
 - [2026-06-24 — Phase 2 HMAC+pepper versioned key hashing](#update-2026-06-24-phase-2-hmacpepper-versioned-key-hashing)
 - [2026-06-25 — Phase 3 Postgres key-store backend (commit c7e6edd)](#update-2026-06-25-phase-3-postgres-key-store-backend)
 - [2026-06-26 — Phase 4 key expiry — enforcement, reject taxonomy, bounded disclosure](#update-2026-06-26-phase-4-key-expiry--enforcement-reject-taxonomy-bounded-disclosure)
+- [2026-07-08 — Phase 5 anonymous-write bundle + F1–F5 remediation](#update-2026-07-08-phase-5-anonymous-write-bundle--f1f5-remediation)
 
 ---
 
@@ -1165,6 +1171,8 @@ default-deny:
 - **No-identity callers are not affected.** stdio transport and anonymous
   keyless reads gated by the upstream authentication allowlist are allowed by
   that allowlist, not by RBAC; they are unaffected by this change.
+  (Superseded 2026-07-08 — see the Phase 5 update below: writes can also be
+  keyless under `MCP_KEYLESS_WRITES`.)
 
 The "Per-tool authorization (RBAC)" row in the longer-term-hardening triage
 above has been updated to reflect these changes.
@@ -1343,3 +1351,96 @@ Canonical definitions for `KEY_DEFAULT_TTL` and `KEY_RENEWAL_URL` live in
 `.env.example` (key expiry block) and the `docs/RUNBOOK.md § Authentication` table.
 Operational lifecycle guidance (revoke vs expire, renew commands) lives in
 `docs/RUNBOOK.md § Key lifecycle — revocation vs expiry`.
+
+---
+
+## Update 2026-07-08: Phase 5 anonymous-write bundle + F1–F5 remediation
+
+*Reflects code as of commit `8a74b49` (the F1–F5 remediation squash merge, PR
+#32), building on the Phase 5 anonymous-write bundle merged at `ac4bacb`. Run
+`git log 8a74b49..HEAD -- internal/mcp internal/config` to check for drift.*
+
+The RBAC hardening recorded in the 2026-06-23 entry above stated that only
+*reads* could be keyless. That is now **superseded**: Phase 5 makes
+`evm_send_raw_transaction` itself callable without authentication under a
+dedicated opt-in flag, and a follow-on remediation pass (F1–F5) closed five
+gaps a STRIDE-GPT-assisted review found in that bundle (tracked internally
+in `.local/SECURITY-FINDINGS-2026-07-06.md`).
+
+### Phase 5: anonymous writes (`ac4bacb`)
+
+`MCP_KEYLESS_WRITES=true` exempts `evm_send_raw_transaction` from
+authentication — `RequiresAuth(tool, keylessWrites)` in
+[`internal/mcp/authpolicy.go`](../internal/mcp/authpolicy.go) is the single
+place this exemption is evaluated. This is **not** an ungoverned relay. The
+pre-broadcast pipeline (`prepareKeylessBroadcast` in
+[`internal/mcp/tools_evm_write.go`](../internal/mcp/tools_evm_write.go)) runs,
+in order:
+
+1. **Decode** the signed transaction (`evm.DecodeSignedTx`).
+2. **Relay-scope check** (`checkRelayScope`) — the decoded `To` address must
+   match the configured anchor precompile address.
+3. **Per-signer blacklist** (`SignerBlacklistStore.IsBlacklisted`) — checked
+   first; a banned signer is rejected before the quota check runs.
+4. **Per-signer quota** (`SignerQuotaStore.Count`), a fixed-window counter
+   keyed on the recovered signer address. Default **500 writes / 24h**
+   (`MCP_SIGNER_WRITE_RATE`, `MCP_SIGNER_WRITE_WINDOW`).
+5. **Broadcast.**
+6. **Increment-on-success only** — `SignerQuotaStore.Increment` is called
+   only after a successful broadcast, so a rejected or failed write never
+   consumes quota.
+
+Both gates default to **fail closed**: `MCP_SIGNER_QUOTA_FAIL_OPEN` and
+`MCP_SIGNER_BLACKLIST_FAIL_OPEN` both default `false`, so a store-availability
+error rejects the write rather than silently admitting it. State for both
+gates, plus `write_audit`, lives on a **dedicated** Postgres pool
+(`MCP_KEYLESS_PG_DSN`, separate from the operator's key-store DSN) —
+`internal/mcp/signer_quota.go` and `internal/mcp/signer_blacklist.go`.
+
+### F1–F5 remediation (`8a74b49`)
+
+- **F1 — authed-path audit gap closed.** Previously only the keyless write
+  path persisted to `write_audit`; the authed/self-host path only logged.
+  `resolveBroadcast` now does a best-effort decode in authed mode too, solely
+  to audit the broadcast (no relay-scope enforcement, raw passthrough of the
+  caller's bytes; a decode failure is non-fatal). `loadWriteAudit`
+  (`cmd/nvnm-mcp-server/main.go`) provisions the `write_audit` store whenever
+  `MCP_KEYLESS_PG_DSN` is set, in **any** mode — closing the gap where the
+  "more trusted" authed path had the weaker audit trail.
+- **F2 — new admin-mutation audit trail.** An append-only Postgres
+  `admin_audit` table (`internal/mcp/migrations/0004_admin_audit.sql`) records
+  all admin mutation handlers (key create/update/delete, pending-request
+  approve/reject) with the resolved per-admin `actor_id`. Falls back to an
+  attributed structured-log line when no DSN is configured.
+- **F3 — key-request free-text hardened.** The self-serve key-request form's
+  `company` and `intended_use` fields now reject control characters and
+  Unicode format/bidi-override characters (`internal/mcp/keys_request_http.go`)
+  — the Trojan-Source U+202E class, zero-width spaces, and BOM — closing a
+  spoofing/rendering-confusion vector in free text an admin later reviews.
+- **F4 — raw-key logging gated behind explicit opt-in.** The self-serve
+  key-request approval flow previously fell back to logging the freshly
+  minted API key in the clear whenever SMTP was unconfigured. `main` now
+  refuses to boot with `KeyRequestEnabled` and no SMTP host unless the
+  operator sets `NVNM_ALLOW_KEY_IN_LOGS=true` (`ErrKeyInLogsNotAllowed`,
+  default `false` — fail closed).
+- **F5 — per-admin identity.** `ADMIN_API_KEYS_FILE` maps
+  `sha256(admin-bearer-key) -> admin-id`; the admin server resolves the
+  caller's identity via this map at constant time and starts on either a
+  single admin key or this file.
+
+### Residual gaps (stated honestly)
+
+- **No audit persistence without `MCP_KEYLESS_PG_DSN`.** If the DSN is unset,
+  both `write_audit` and `admin_audit` fall back to structured-log-only —
+  there is no append-only store in that configuration, in either auth mode.
+- **`write_audit` has no `client_id` column.** The table is keyed on the
+  recovered on-chain signer; in authed mode the authenticated caller's
+  `client_id` is only in the structured-log line for that broadcast, not in
+  the table.
+
+  For the authoritative, current description of audit-trail coverage and
+  these limitations, see `docs/DATA_HANDLING.md`'s **"Audit-trail scope and
+  known limitations"** section rather than this entry — that document is the
+  single source of truth for audit-scope detail and is kept current as the
+  audit surface evolves; this entry is a dated historical record of what
+  changed in `8a74b49`.

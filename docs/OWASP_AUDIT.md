@@ -2,6 +2,7 @@
 
 **Edition audited:** OWASP Top 10:2021
 **Created:** 2026-05-14 (Phase 8.12 close-out)
+**Last updated:** 2026-07-08 (Phase 5 anonymous writes + F1-F5 hardening)
 **Scope:** Security posture of `main` as of the Phase 8 close-out — the MCP
 server process, its HTTP/stdio transports, the admin REST API, the
 prepare-sign-submit write path, configuration, and the CI/deployment surface.
@@ -38,15 +39,15 @@ boundary (operator, reverse proxy, consuming agent).
 
 | # | Category | Disposition | One-line |
 |---|---|---|---|
-| A01 | Broken Access Control | **PARTIAL** | MCP transport authenticated + RBAC-gated (under `MCP_KEYLESS_READS=true` the read surface is intentionally anonymous; only `evm_send_raw_transaction` is gated); health/metrics endpoints rely on network isolation; RBAC enforcement is conditional on roles being assigned. |
+| A01 | Broken Access Control | **PARTIAL** | Three write-auth modes: (1) authed-only (default), (2) `MCP_KEYLESS_READS=true` with writes still authed, (3) `MCP_KEYLESS_WRITES=true` exempts `evm_send_raw_transaction` from auth (`internal/mcp/authpolicy.go` `RequiresAuth`), governed instead by a per-signer blacklist + fixed-window quota (default 500/24h); health/metrics endpoints rely on network isolation; RBAC enforcement is conditional on roles being assigned. |
 | A02 | Cryptographic Failures | **PARTIAL** | API keys stored as versioned hash digest at rest (v0 = plain SHA-256; v1 = HMAC-SHA256 under `KEY_HMAC_PEPPER`, opt-in) with constant-time compare; admin key sha256-hashed; OTLP TLS default-on; MCP HTTP transport TLS is a reverse-proxy responsibility. |
 | A03 | Injection | **COVERED** | No SQL/shell/template surface; calldata is typed ABI-encoded, never concatenated. Indirect prompt injection via on-chain data is documented as a consumer-side concern. |
-| A04 | Insecure Design | **COVERED** | Prepare-sign-submit keeps zero keys server-side; pre-mortem-driven design; honest wizard state names; writes gated by RBAC + `ENABLE_WRITE_TOOLS`; caller-side signature is the security boundary. |
+| A04 | Insecure Design | **COVERED** | Prepare-sign-submit keeps zero keys server-side; pre-mortem-driven design; honest wizard state names; `ENABLE_WRITE_TOOLS` still gates tool registration, but under `MCP_KEYLESS_WRITES=true` the RBAC-role precondition is bypassed and the gate becomes decode → relay-scope → blacklist → quota → broadcast; caller-side signature is the security boundary. |
 | A05 | Security Misconfiguration | **PARTIAL** | Secure defaults + fail-loud config validation; K8s/Helm hardened and aligned; K8s `:latest` image tag pinning deferred to the Phase 10 release pipeline. |
 | A06 | Vulnerable and Outdated Components | **COVERED** | `govulncheck` + license scan + Dependabot in CI; deps vendored and built `-mod=vendor`; Docker bases digest-pinned; GPL-exposed `go-ethereum` removed. |
-| A07 | Identification and Authentication Failures | **COVERED** | Two providers (hashed API keys, FusionAuth JWT/JWKS); 256-bit random keys; pre-auth per-IP failure limiter; constant-time compare with miss-path timing flattening. |
+| A07 | Identification and Authentication Failures | **COVERED** | Two providers (hashed API keys, FusionAuth JWT/JWKS); 256-bit random keys; pre-auth per-IP failure limiter; constant-time compare with miss-path timing flattening; F5 added `ADMIN_API_KEYS_FILE` for per-admin identity + attribution alongside the legacy single `ADMIN_API_KEY`. |
 | A08 | Software and Data Integrity Failures | **PARTIAL** | Cosign binary signing + SBOM + vendored deps + atomic/backed-up key-file migration; container-image-digest signing deferred to Phase 10. |
-| A09 | Security Logging and Monitoring Failures | **PARTIAL** | Write ops audit-logged with client identity + tx hash; per-call telemetry. A dedicated append-only audit stream and alerting maturity are Phase 10. |
+| A09 | Security Logging and Monitoring Failures | **PARTIAL** | Append-only Postgres `admin_audit` table (F2) records all 7 admin mutation handlers with per-admin `actor_id`; `write_audit` now covers both keyless and authed broadcasts (F1). Persistence requires `MCP_KEYLESS_PG_DSN`; see `docs/DATA_HANDLING.md`. Alerting maturity remains Phase 10. |
 | A10 | Server-Side Request Forgery | **COVERED** | No client-controlled outbound request target; all outbound URLs (RPC, OTLP, JWKS) are operator-configured. The anchor `uri` field is encoded, never fetched. |
 
 ---
@@ -71,6 +72,26 @@ in-scope only as a local-process boundary.
   `evm_send_raw_transaction` in `tools_evm_write.go` excludes `reader`. A role
   mismatch returns `apperrors.ErrPermissionDenied`, which `SafeForClient`
   renders as a client-safe 403.
+- **Three write-auth modes.** Write authorization is not a single on/off
+  switch; `RequiresAuth` in `internal/mcp/authpolicy.go` selects between:
+  1. **Authed-only (default).** `MCP_KEYLESS_WRITES=false` — every call to
+     `evm_send_raw_transaction` requires a valid bearer key/JWT and RBAC role,
+     same as any other write.
+  2. **Keyless reads, authed writes.** `MCP_KEYLESS_READS=true` exempts the
+     read-only tools in `authExemptTools` from auth, but
+     `evm_send_raw_transaction` is deliberately kept **out** of that map — a
+     keyless-reads deployment does not silently become a keyless-writes one.
+  3. **Keyless writes.** `MCP_KEYLESS_WRITES=true` (which requires
+     `MCP_KEYLESS_READS=true` — `config.ErrKeylessWritesRequiresReads`) exempts
+     `evm_send_raw_transaction` itself from authentication. In this mode RBAC
+     is replaced by two runtime gates enforced in `checkSignerGates`
+     (`internal/mcp/tools_evm_write.go`): a per-signer **blacklist**
+     (`internal/mcp/signer_blacklist.go`, checked first — a banned signer never
+     consumes quota) and a per-signer, fixed-window **quota**
+     (`internal/mcp/signer_quota.go`, `MCP_SIGNER_WRITE_RATE` default 500 per
+     `MCP_SIGNER_WRITE_WINDOW` default 24h). Both gates fail closed by default
+     (`MCP_SIGNER_QUOTA_FAIL_OPEN` / blacklist-fail-open default `false`) if
+     their backing Postgres store is unreachable.
 - **Write tools off by default.** `ENABLE_WRITE_TOOLS` (`internal/config`)
   defaults to `false`; `internal/mcp/server.go` only registers write tools when
   it is `true`.
@@ -90,10 +111,12 @@ in-scope only as a local-process boundary.
   dedicated auth layer for `:9090` is a **Phase 10** consideration.
 
 ### Disposition
-**PARTIAL.** The MCP transport is authenticated and RBAC-gated with a
-fail-closed posture (under `MCP_KEYLESS_READS=true` the read surface is
-intentionally anonymous; only `evm_send_raw_transaction` is gated). The two named gaps — conditional RBAC and unauthenticated
-`:9090` — are documented operator-boundary / Phase 10 items, not silent holes.
+**PARTIAL.** The MCP transport is authenticated and RBAC-gated by default,
+with a fail-closed posture across all three write-auth modes described above.
+When an operator opts into `MCP_KEYLESS_WRITES=true`, RBAC is intentionally
+replaced by the blacklist + quota gates rather than silently dropped. The two
+named gaps — conditional RBAC (mode 1/2) and unauthenticated `:9090` — are
+documented operator-boundary / Phase 10 items, not silent holes.
 
 ---
 
@@ -168,6 +191,11 @@ a consuming agent's context.
   ABI tuple, never string-concatenated into a call payload.
 - **Deserialization.** Inbound JSON is unmarshalled into concrete typed structs;
   there is no polymorphic / gadget-deserialization surface.
+- **Free-text control/bidi-char rejection (F3).** The public key-request HTTP
+  endpoint's free-text fields (`company`, `intended_use`) are rejected outright
+  if they contain Unicode `Cc` control characters (NUL, CRLF injection) or `Cf`
+  format/bidi-override characters (e.g. U+202E RLO, the Trojan-Source class,
+  zero-width spaces, BOM) — `internal/mcp/keys_request_http.go`.
 
 ### Residual risk / deferrals
 - **Indirect prompt injection.** On-chain string fields (registry names, record
@@ -206,11 +234,16 @@ state model, and whether security was designed in or bolted on.
   misleading `ready_to_anchor` — a deliberate
   design choice against a state name that would over-claim what the server can
   actually observe.
-- **Write gating.** Writes require both `ENABLE_WRITE_TOOLS=true` (off by
-  default) and an authenticated caller with `writer`, `admin`, or `automation`
-  role. The caller-side signature is the security boundary: the server
-  broadcasts exactly the signed bytes it receives. Human confirmation before
-  submitting a signed transaction is the client/agent's responsibility.
+- **Write gating.** `ENABLE_WRITE_TOOLS=true` (off by default) still gates
+  whether the write tool is *registered* at all. On top of that, authorization
+  differs by mode: under the default authed configuration a write additionally
+  requires an authenticated caller with `writer`, `admin`, or `automation`
+  role; under `MCP_KEYLESS_WRITES=true` that RBAC-role precondition is
+  deliberately bypassed and replaced by decode → relay-scope → blacklist →
+  quota → broadcast (see A01). The caller-side signature is the security
+  boundary in every mode: the server broadcasts exactly the signed bytes it
+  receives. Human confirmation before submitting a signed transaction is the
+  client/agent's responsibility.
 - **Defense in depth.** Origin guard → per-IP failure limiter → body limit →
   auth → per-client rate limiter, layered in `internal/mcp/server.go`.
 
@@ -337,6 +370,11 @@ stuffing resistance, and session handling.
   offer. The challenge carries no `resource_metadata` parameter by design.
 - **No session fixation surface.** The server is stateless; MCP session
   lifecycle is handled by the SDK.
+- **Per-admin identity (F5).** `ADMIN_API_KEYS_FILE` (`internal/config`) loads
+  a JSON map of per-admin keys alongside the legacy single `ADMIN_API_KEY`.
+  `adminAuth` in `internal/mcp/admin.go` resolves `sha256(admin-key) -> admin
+  id` under `subtle.ConstantTimeCompare`, so admin mutations are attributable
+  to an individual actor rather than one shared credential.
 
 ### Residual risk / deferrals
 - **JWKS is fetched at validator initialization.** Key rotation on the
@@ -397,6 +435,20 @@ alerting posture.
   `anchor_prepare_*` handlers emit structured `slog.Group("audit", ...)` lines
   with stable `tool`, `phase`, and `client_id` keys; the broadcast path logs the
   `tx_hash` (SECURITY_AUDIT.md Finding 8, plus the 2026-05-12 consistency fix).
+- **Append-only admin mutation audit (F2/F5).** The `admin_audit` Postgres
+  table (migration `internal/mcp/migrations/0004_admin_audit.sql`) records all
+  7 admin mutation actions — `key.create`, `key.update`, `key.delete`,
+  `blacklist.add`, `blacklist.remove`, `pending.approve`, `pending.reject`
+  (`internal/mcp/admin_audit.go`) — with a per-admin `actor_id` resolved from
+  `ADMIN_API_KEYS_FILE` (F5), so mutations are attributable to an individual
+  admin rather than a shared credential.
+- **Broadcast audit closed for authed mode (F1).** `write_audit` previously
+  only captured keyless-mode broadcasts. `evm_send_raw_transaction` now
+  audits **both** modes: under `MCP_KEYLESS_WRITES=true` the handler decodes,
+  enforces relay-scope, and audits; with keyless writes **off**, the handler
+  still decodes the signed transaction best-effort solely to record a
+  signer-keyed `write_audit` row (no relay-scope enforcement, raw passthrough)
+  — see `internal/mcp/tools_evm_write.go` `resolveBroadcast`.
 - **Per-call telemetry.** The middleware in `internal/telemetry/middleware.go`
   logs every tool call with `method`, `tool`, `request_id`, `client_id`,
   `duration`, and `status`, and mirrors it onto OTel spans + Prometheus metrics.
@@ -404,23 +456,35 @@ alerting posture.
   *not* recorded; errors are kept in full on the internal span but sanitized via
   `SafeForClient` before reaching the client. Credential material is never
   logged — `SafeURL` / `SafeAddr` / `SafeTxData` in `internal/logging/redact.go`
-  redact at the boundary.
+  redact at the boundary. F4 gates raw-key-in-logs behind an explicit
+  `NVNM_ALLOW_KEY_IN_LOGS` opt-in (default `false`).
 - **Alerting scaffolding.** `deploy/prometheus/alerts.yaml` ships baseline
   alerts.
 
 ### Residual risk / deferrals
-- **No dedicated, append-only audit stream.** Audit lines are structured but
-  share the general `slog` stream; the original Finding 8 mitigation envisioned
-  a *separate* audit log stream. Stream separation, retention, and
-  tamper-evidence are observability concerns owned by **Phase 10** (DevOps
-  Foundations).
+This section intentionally does not restate the audit-trail scope and gaps —
+`docs/DATA_HANDLING.md`'s "Audit-trail scope and known limitations" section is
+the single source of truth for what is and is not persisted. In short: both
+`admin_audit` and `write_audit` require `MCP_KEYLESS_PG_DSN` to be configured —
+without it, mutations/broadcasts are logged but not persisted, in either mode.
+`write_audit` has no `client_id` column (rows are signer-keyed; the authed
+caller's `client_id` lives only in the structured-log line, not the table).
+Retention/pruning for both tables is DevOps-owned and not yet implemented.
+- **No dedicated, append-only *log* stream (as distinct from the Postgres
+  audit tables above).** General `tool call` telemetry still shares the common
+  `slog` stream; stream separation and alerting maturity for that log line
+  remain **Phase 10** (DevOps Foundations).
 - **stdio transport has no client identity** — audit lines on that path carry an
   empty `client_id`. Acceptable for the local-process trust boundary.
 
 ### Disposition
-**PARTIAL.** Write operations are attributable (identity + tx hash) and every
-call is metered. The maturity gap — a segregated, retained, alert-wired audit
-stream — is a named Phase 10 deliverable.
+**PARTIAL.** Admin mutations (F2/F5) and both keyless and authed broadcasts
+(F1) now write to append-only Postgres audit tables with per-actor/per-signer
+attribution, closing the gap this section previously called out as
+"no dedicated, append-only audit stream." The remaining maturity gap —
+persistence without `MCP_KEYLESS_PG_DSN` configured, retention, and a
+segregated/alert-wired general log stream — is tracked in
+`docs/DATA_HANDLING.md` and owned by Phase 10.
 
 ---
 
@@ -464,7 +528,9 @@ When new surface lands:
   any categories touched by the public-facing OSS scaffolding.
 - **Phase 10 (DevOps Foundations)** owns the deferrals in A05 / A08 (digest-pinned
   and digest-signed images via the release pipeline), A01 (`:9090` auth posture),
-  and A09 (segregated append-only audit stream + alerting maturity).
+  and A09 (retention/pruning for the `admin_audit`/`write_audit` Postgres
+  tables, persistence when `MCP_KEYLESS_PG_DSN` is unset, and general-log-stream
+  segregation + alerting maturity).
 - Any change that moves a disposition (e.g. PARTIAL → COVERED) should update both
   the per-category section and the **Coverage summary** table, and note the
   change in `docs/SECURITY_AUDIT.md`'s update log so the dated history stays
