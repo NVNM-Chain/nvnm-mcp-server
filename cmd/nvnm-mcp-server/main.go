@@ -635,7 +635,8 @@ func startAdminServer(
 		return nil, nil
 	}
 	if cfg.Transport != "http" {
-		logger.Warn("ADMIN_API_KEY is set but transport is not HTTP; admin API not started")
+		logger.Warn("admin API configured (ADMIN_API_KEY / ADMIN_API_KEYS_FILE) but transport is not HTTP; " +
+			"admin API not started")
 		return nil, nil
 	}
 	if cfg.AuthProvider != "apikey" {

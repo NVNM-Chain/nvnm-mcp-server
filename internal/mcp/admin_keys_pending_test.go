@@ -263,6 +263,89 @@ func TestAdminPending_Reject_NoBody(t *testing.T) {
 	}
 }
 
+// TestAdminPending_Approve_DeciderIsAdminActor pins that the persisted
+// decider on an approved request is the resolved admin actor (from
+// adminAuth / contextWithAdminActor), not empty and not the unrelated
+// MCP auth.ClientIDFromContext value. "alice" is a unique non-"admin",
+// non-empty id so this only passes if the real actor propagated -- the
+// old auth.ClientIDFromContext read always produced "".
+func TestAdminPending_Approve_DeciderIsAdminActor(t *testing.T) {
+	t.Parallel()
+	keysPath := tempKeysFile(t)
+	mks, err := NewManagedKeyStore(keysPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingPath := filepath.Join(t.TempDir(), "keys_pending.json")
+	ps, err := NewPendingKeyStore(pendingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preq, err := ps.Add("a@example.test", "Acme", "use case", "10.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := NewAdminServer(":0", singleAdminKey(testAdminKey), mks, 0, logger).
+		WithPendingKeyStore(ps, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys/pending/"+preq.ID+"/approve", http.NoBody)
+	req.SetPathValue("id", preq.ID)
+	req = req.WithContext(contextWithAdminActor(req.Context(), "alice"))
+	rec := httptest.NewRecorder()
+	a.handleApprovePending(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	stored, ok := ps.Get(preq.ID)
+	if !ok {
+		t.Fatal("request not found after approve")
+	}
+	if stored.DeciderID != "alice" {
+		t.Errorf("stored.DeciderID = %q, want %q", stored.DeciderID, "alice")
+	}
+}
+
+// TestAdminPending_Reject_DeciderIsAdminActor is the reject-path sibling of
+// TestAdminPending_Approve_DeciderIsAdminActor.
+func TestAdminPending_Reject_DeciderIsAdminActor(t *testing.T) {
+	t.Parallel()
+	pendingPath := filepath.Join(t.TempDir(), "keys_pending.json")
+	ps, err := NewPendingKeyStore(pendingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preq, err := ps.Add("a@example.test", "", "use case", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := NewAdminServer(":0", singleAdminKey(testAdminKey), nil, 0, logger).
+		WithPendingKeyStore(ps, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys/pending/"+preq.ID+"/reject", http.NoBody)
+	req.SetPathValue("id", preq.ID)
+	req = req.WithContext(contextWithAdminActor(req.Context(), "alice"))
+	rec := httptest.NewRecorder()
+	a.handleRejectPending(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	stored, ok := ps.Get(preq.ID)
+	if !ok {
+		t.Fatal("request not found after reject")
+	}
+	if stored.DeciderID != "alice" {
+		t.Errorf("stored.DeciderID = %q, want %q", stored.DeciderID, "alice")
+	}
+}
+
 // TestAdminPending_NotConfigured503 pins that without WithPendingKeyStore
 // the routes still respond, but with 503 -- operators don't see a
 // confusing 404. Uses the bare AdminServer constructor without the

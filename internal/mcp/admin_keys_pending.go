@@ -10,8 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 )
 
 // WithPendingKeyStore attaches the Phase 11 L3 pending-request review
@@ -140,7 +138,7 @@ func (a *AdminServer) handleApprovePending(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	deciderID := auth.ClientIDFromContext(r.Context())
+	deciderID := adminActorFromContext(r.Context())
 	decided, err := a.pendingStore.Decide(req.ID, PendingStatusApproved, deciderID, created.ID)
 	if err != nil {
 		// The Decide rollback discipline guarantees the store is
@@ -243,7 +241,7 @@ func (a *AdminServer) handleRejectPending(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	deciderID := auth.ClientIDFromContext(r.Context())
+	deciderID := adminActorFromContext(r.Context())
 	decided, err := a.pendingStore.Decide(id, PendingStatusRejected, deciderID, "")
 	if err != nil {
 		status := http.StatusInternalServerError
