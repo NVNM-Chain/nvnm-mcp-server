@@ -1,6 +1,6 @@
 module github.com/NVNM-Chain/nvnm-mcp-server
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0
