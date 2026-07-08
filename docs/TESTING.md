@@ -1,20 +1,12 @@
 # Testing
 
-This document describes the testing strategy, framework, and latest results for the NVNM Chain MCP Server.
+This document describes the testing strategy and framework for the NVNM Chain MCP Server. Current test results live in CI, not here.
 
 ## Overview
 
 The project uses a layered testing approach: unit tests with mocks for fast feedback, golden tests for response shape stability, integration tests against the live NVNM testnet, HTTP end-to-end tests through the MCP protocol layer, k6 load tests for performance, and Docker smoke tests for deployment verification.
 
-**Test inventory** (as of 2026-05-13, after Phase 8.1-8.9 + 8.13 ship):
-
-| Metric | Count |
-|--------|-------|
-| Test files | 47 |
-| Test functions (top-level) | 334 |
-| Subtests (table-driven cases) | 136 |
-| Integration test files (`-tags integration`) | 8 |
-| Packages with tests | 9 of 13 |
+The suite runs via `make test`; CI enforces green on every PR. Exact test counts aren't tracked here — they drift every release. Run `go test ./...` (or check the CI job output) for current numbers.
 
 ## Running Tests
 
@@ -40,6 +32,7 @@ make seed-test-data    # Create a test registry with phoney records on-chain
 | `make test-load` | k6, running server on `:8080` | `brew install k6` |
 | `make docker-smoke` | Docker Desktop | -- |
 | `make seed-test-data` | `.chain_credentials.txt` in project root | See below |
+| Postgres-backed `internal/mcp` tests | `NVNM_TEST_PG_DSN` env var | See below |
 
 **Credentials file format** (`.chain_credentials.txt`, git-ignored):
 
@@ -50,29 +43,26 @@ PrivateKey: 0x...
 
 Used by integration write tests and `seed-test-data`. Tests skip gracefully if the file is missing.
 
+**Postgres-backed tests.** A subset of `internal/mcp` tests exercise the audit log, signer-quota, signer-blacklist, write-audit, and migration surface against a real Postgres database, gated on `NVNM_TEST_PG_DSN` (e.g. `postgres://.../nvnm?sslmode=disable`). They call `t.Skip` cleanly when the variable is unset, so `make test` passes without it — set `NVNM_TEST_PG_DSN` to actually exercise that surface.
+
 ## Test Layers
+
+Note: a subset of `internal/mcp` unit tests are Postgres-backed and gated on `NVNM_TEST_PG_DSN` (see Prerequisites above); they skip cleanly when it's unset.
 
 ### 1. Unit Tests (no network, no build tags)
 
 Fast, deterministic tests using mocks and stubs. Run with `make test`.
 
-| Package | Test file(s) | Tests | What's covered |
-|---------|-------------|-------|----------------|
-| `internal/mcp` | `tools_test.go` | 48 | The 16 EVM + anchor MCP tool handlers (happy path + error cases), validation helpers (`parseAddress`, `parseHash`, `parseHexData`) |
-| `internal/mcp` | `tools_onboarding_test.go` | 18 | The 5 Phase 8.8 onboarding tools (`nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature`) — state derivation, input validation, `next_actions` |
-| `internal/mcp` | `server_test.go` | 6 | HTTP E2E via `httptest.NewServer`: `ListTools` (all 21 tools), `CallTool` (success + error propagation) |
-| `internal/mcp` | `server_e2e_test.go` | 14 | API key auth E2E (valid/invalid/missing/disabled/no-keys), `TestE2E_SendRawTx_DirectBroadcast_NoElicitation` (writer key broadcasts directly), `TestE2E_StatelessHandler_ServesUnknownSession` (stateless multi-replica behavior), fail-loud migration sentinel error tests |
-| `internal/mcp` | `managed_keys_test.go` | 11 | `ManagedKeyStore` CRUD: create+lookup, duplicate rejection, list redaction, enable/disable, delete, persistence across reloads, counters, empty store, file permissions |
-| `internal/mcp` | `admin_test.go` | 16 | Admin API E2E: auth (missing/invalid/valid token), create (success/duplicate/missing-id), list (empty/with-keys), update (disable+enable/not-found/empty-body), delete (success/not-found), full lifecycle, hot-reload (created key immediately usable, disabled key immediately rejected) |
-| `internal/config` | `config_test.go` | 13 | Environment variable loading, defaults, validation errors, resilience config, `TestLoad_RejectsLegacyWriteApprovalDefault` (fail-loud migration guard) |
-| `internal/errors` | `errors_test.go` | 5 | Sentinel error distinctness, `IsInputError`, `IsTransientError`, `IsNotFound` |
-| `internal/evm` | `tracing_test.go` | 4 | `TracingClient` delegation and error propagation |
-| `internal/evm` | `resilient_test.go` | 8 | Retry with backoff, circuit breaker tripping, rate limiting, `SendRawTransaction` non-retry |
-| `internal/anchor` | `client_test.go` | 10 | `NewClient` (ABI loading variants), `RequireABI`, mock-based query methods |
-| `internal/anchor` | `prepare_test.go` | 9 | `PrepareAddRegistry`, `PrepareAddRecord`, `PrepareGrantRole` validation, gas buffer, `UnsignedTransaction` JSON |
-| `internal/telemetry` | `health_test.go` | 4 | `/healthz` and `/readyz` endpoints (healthy, RPC down, ABI missing) |
-| `internal/telemetry` | `middleware_test.go`, `metrics_test.go` | 5 | MCP middleware creation, request ID, tool name extraction, metric instruments |
-| `internal/logging` | `logger_test.go`, `fanout_test.go`, `redact_test.go` | 12 | Logger creation, JSON output, level filtering, dual-handler fanout, address/URL/data redaction |
+- **`internal/mcp`** — MCP tool dispatch (EVM + anchor read/write handlers, onboarding tools), HTTP/E2E protocol server, API key auth, RBAC/default-deny, admin key-management API + hot reload, `ManagedKeyStore` CRUD, write-audit + admin audit logging, signer quota/blacklist, Postgres-backed store and migrations, fail-loud legacy-config migration guards.
+- **`internal/auth`** — API-key hashing/validation (including legacy-hash back-compat), FusionAuth JWT/JWKS validation (issuer/audience/expiry/role extraction, app-scoped roles), claims propagation via context.
+- **`internal/config`** — environment variable loading, defaults, validation errors, resilience config, fail-loud migration guard for removed legacy settings.
+- **`internal/errors`** — sentinel error distinctness and classification helpers (`IsInputError`, `IsTransientError`, `IsNotFound`).
+- **`internal/evm`** — tracing client delegation, resilient wrapper (retry/backoff, circuit breaker, rate limiting, non-retry on send).
+- **`internal/anchor`** — client construction/ABI loading, mock-based query methods, prepare-transaction validation and gas buffering.
+- **`internal/telemetry`** — `/healthz` and `/readyz` endpoints, MCP middleware, request ID and tool-name extraction, metric instruments.
+- **`internal/logging`** — logger creation, JSON output, level filtering, dual-handler fanout, address/URL/data redaction.
+
+See each package's `*_test.go` files for the current set of test functions and cases; this list intentionally omits per-file counts since they drift every release.
 
 **Mock types** used across unit tests:
 
@@ -269,86 +259,9 @@ See `tests/load/README.md` for setup and usage details.
 
 This provides a known dataset for integration tests and manual testing.
 
-## Latest Test Results (2026-04-28)
+## Test Results
 
-### Unit Tests
-
-```
-$ make test
-ok  internal/anchor    0.313s
-ok  internal/config    0.560s
-ok  internal/errors    0.766s
-ok  internal/evm       1.061s
-ok  internal/logging   1.226s
-ok  internal/mcp       1.555s
-ok  internal/telemetry 1.736s
-```
-
-All 470 tests pass (334 top-level + 136 subtests, across 47 test files in 9 packages). Zero failures. Includes the protocol E2E suite, admin/managed-keys coverage, and the Phase 8 onboarding-tool tests in `internal/mcp`.
-
-### Integration Tests
-
-```
-$ make test-integration
-```
-
-**EVM integration** (4 files, 16 tests):
-
-- `ChainID` = 787111, `LatestBlockNumber` = 828169
-- `FilterLogs` found 6 logs from precompile in 1000-block range
-- `CallContract` against precompile returns expected error for empty calldata
-- All block, balance, and code queries return valid normalized types
-
-**Anchor integration** (3 files, 11 tests):
-
-- `GetRegistries` returns 153+ registries
-- `GetRegistry` by ID and name both resolve correctly
-- **AddRegistry**: mined successfully, new registry confirmed on-chain
-- **AddRecord**: mined successfully, record confirmed with correct checksum/URI
-- **GrantRole**: mined successfully in block 828178, 40,547 gas used -- first time this tool has been tested on-chain
-- **PrepareAddRegistry round-trips**: EIP-1559 (type-2 default) and legacy (type-0 opt-out) both prepare, sign, broadcast, and mine successfully
-
-**MCP integration** (1 file, 1 test):
-
-- **`eth_account` round-trip**: drives the real `wallet_status` tool core through prepare → sign (local key) → broadcast → receipt, and asserts `wallet_status` reports the nonce advanced by exactly one (Phase 8.12 gate)
-
-### k6 Load Test
-
-```
-$ make test-load    # with server running via make run-local
-```
-
-| Metric | Value |
-|--------|-------|
-| Total iterations | 38,178 |
-| Throughput | 212 req/s |
-| Avg latency | 757µs |
-| p90 latency | 1.46ms |
-| p95 latency | 1.83ms |
-| Max latency | 6.25ms |
-| HTTP failure rate | 0.00% |
-| VUs (max) | 75 |
-| Duration | 3 min |
-
-**Thresholds: ALL PASSED**
-
-- `http_req_duration p(95) < 2000ms` -- actual: 1.83ms
-- `http_req_failed rate < 0.01` -- actual: 0.00%
-
-**Known issue**: The k6 script's `tools/call JSON-RPC result` assertion reports failures because the response parser doesn't correctly handle SSE-formatted responses (the server uses `text/event-stream`, not `application/json`). All HTTP 200 responses are valid; this is a k6 script parsing bug, not a server issue.
-
-### Docker Smoke Test
-
-```
-$ make docker-smoke
-```
-
-- Docker image builds successfully (multi-stage: `golang:1.26.2-alpine` digest-pinned → `gcr.io/distroless/static-debian12` digest-pinned)
-- Container starts, ABI loads from `/app/abi/anchoring.json`
-- `/healthz` → `{"status":"ok","version":"1.0.0-rc.1"}` (or whatever `internal/version.Version` reports for the build)
-- `/readyz` → `{"status":"ready","checks":{"abi":"loaded","evm_rpc":"ok"}}`
-- MCP `initialize` → HTTP 200, session established
-- Container stops cleanly
+Current results live in CI — see the GitHub Actions run for this branch/PR for pass/fail status, coverage, and timing. This document doesn't hand-maintain a results snapshot because it goes stale every release.
 
 ## Test Architecture
 
@@ -358,13 +271,11 @@ $ make docker-smoke
 ├─────────────┬───────────────┬───────────────────────────────────┤
 │  Unit Tests │ Golden Tests  │  MCP E2E HTTP Tests               │
 │  (mocks)    │ (JSON shapes) │  (httptest + SDK client)          │
-│  170 tests  │ 13 fixtures   │  51 tests (protocol, admin, keys) │
 ├─────────────┴───────────────┴───────────────────────────────────┤
 │              Integration Tests (live testnet)                   │
-│              28 tests, build tag: integration                   │
+│              build tag: integration                             │
 ├─────────────────────────────────────────────────────────────────┤
 │              k6 Load Tests (HTTP transport)                     │
-│              3 scenarios, 75 VUs, 3 min                         │
 ├─────────────────────────────────────────────────────────────────┤
 │              Docker Smoke Test (container lifecycle)            │
 │              build → start → healthz → readyz → stop           │

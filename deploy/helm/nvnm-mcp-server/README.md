@@ -31,7 +31,7 @@ These pin the server's chain at startup. Operators **must** set them; the server
 
 ## Mainnet vs testnet
 
-The server deploys **one instance per chain** (see [`docs/DESIGN.md`](../../../docs/DESIGN.md) § Multi-chain). Same chart, different value files; the cutover playbook is [`docs/MAINNET_CUTOVER.md`](../../../docs/MAINNET_CUTOVER.md).
+The server deploys **one instance per chain** (see [`docs/DESIGN.md`](../../../docs/DESIGN.md) § Multi-chain). Same chart, different value files.
 
 | Aspect | Testnet | Mainnet |
 |---|---|---|
@@ -62,6 +62,5 @@ CI does not currently lint the chart on every push; run these locally before tag
 
 - [`docs/DESIGN.md`](../../../docs/DESIGN.md) — architecture
 - [`docs/RUNBOOK.md`](../../../docs/RUNBOOK.md) — runtime operations
-- [`docs/MAINNET_CUTOVER.md`](../../../docs/MAINNET_CUTOVER.md) — testnet → mainnet cutover
 - [`docs/SECURITY_AUDIT.md`](../../../docs/SECURITY_AUDIT.md) — security posture
 - [`CHANGELOG.md`](../../../CHANGELOG.md) — chart and binary release notes
