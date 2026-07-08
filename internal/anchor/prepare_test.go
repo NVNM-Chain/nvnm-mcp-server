@@ -475,6 +475,7 @@ func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
 	w := tx.WalletTxRequest
 	if w == nil {
 		t.Fatal("WalletTxRequest must not be nil")
+		return // unreachable; makes the nil guard explicit for staticcheck SA5011
 	}
 
 	// from is checksummed address
@@ -580,6 +581,7 @@ func TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault(t *testing.T) {
 	w := tx.WalletTxRequest
 	if w == nil {
 		t.Fatal("WalletTxRequest must not be nil")
+		return // unreachable; makes the nil guard explicit for staticcheck SA5011
 	}
 	if w.MaxFeePerGas != "0x"+big.NewInt(40_000_000_000).Text(16) {
 		t.Errorf("WalletTxRequest.MaxFeePerGas = %q", w.MaxFeePerGas)

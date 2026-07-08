@@ -68,6 +68,7 @@ func TestContextWithClaims_RoundTrip(t *testing.T) {
 	got := ClaimsFromContext(ctx)
 	if got == nil {
 		t.Fatal("expected claims, got nil")
+		return // unreachable; makes the nil guard explicit for staticcheck SA5011
 	}
 	if got.ClientID != "agent-1" {
 		t.Errorf("ClientID = %q, want %q", got.ClientID, "agent-1")
