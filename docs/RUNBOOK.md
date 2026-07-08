@@ -265,7 +265,7 @@ Validation rejections return 400 with `{"error": "..."}`. The endpoint sits outs
 
 #### Admin review queue
 
-All three endpoints below run on the admin REST server (separate port — `ADMIN_API_ADDR`, default `127.0.0.1:8081`) behind `ADMIN_API_KEY` Bearer auth.
+All three endpoints below run on the admin REST server (separate port — `ADMIN_API_ADDR`, default `127.0.0.1:8081`) behind admin Bearer auth (`ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE`).
 
 **List pending + decided history:**
 
@@ -508,7 +508,7 @@ Every admin mutation made through the endpoints on this page — key create/upda
 
 #### Signer blacklist (Phase 5)
 
-Operator-facing CRUD for the `signer_blacklist` table (§ "Anonymous writes" above; schema in `docs/DATA_HANDLING.md` § 8.2), on the same admin server, so an on-call operator can ban an abusive signer without a deploy. Behind the same `ADMIN_API_KEY` bearer auth as the endpoints above; all three routes return `404` if the server booted without a signer-blacklist store wired (self-host / no `MCP_KEYLESS_PG_DSN`).
+Operator-facing CRUD for the `signer_blacklist` table (§ "Anonymous writes" above; schema in `docs/DATA_HANDLING.md` § 8.2), on the same admin server, so an on-call operator can ban an abusive signer without a deploy. Behind the same admin Bearer auth (`ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE`) as the endpoints above; all three routes return `404` if the server booted without a signer-blacklist store wired (self-host / no `MCP_KEYLESS_PG_DSN`).
 
 ```sh
 # List current bans
