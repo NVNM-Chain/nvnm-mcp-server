@@ -69,6 +69,7 @@ func (a *AdminServer) handleAddBlacklist(w http.ResponseWriter, r *http.Request)
 		slog.String("signer", req.Signer),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	a.recordAdminAudit(r.Context(), AdminActionBlacklistAdd, req.Signer, "reason="+req.Reason, "ok")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -92,5 +93,6 @@ func (a *AdminServer) handleDeleteBlacklist(w http.ResponseWriter, r *http.Reque
 		slog.String("signer", signer),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	a.recordAdminAudit(r.Context(), AdminActionBlacklistRemove, signer, "", "ok")
 	w.WriteHeader(http.StatusOK)
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
@@ -14,6 +15,65 @@ import (
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// TestLoadWriteAudit_ProvisioningByMode covers F1: the write-audit store is
+// provisioned whenever MCP_KEYLESS_PG_DSN is set -- including authed /
+// self-host mode (keyless writes OFF) -- so authed broadcasts are auditable.
+// The per-signer quota + blacklist gates stay keyless-only.
+func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
+	dsn := os.Getenv("NVNM_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("NVNM_TEST_PG_DSN not set; skipping Postgres-backed test")
+	}
+
+	// No DSN: nothing is provisioned, in either mode.
+	a, q, b, adminAudit, cleanup, err := loadWriteAudit(&config.Config{KeylessPGDSN: ""}, discardLogger())
+	if err != nil {
+		t.Fatalf("loadWriteAudit (no dsn): %v", err)
+	}
+	cleanup()
+	if a != nil || q != nil || b != nil {
+		t.Error("no DSN must provision nothing")
+	}
+	if adminAudit != nil {
+		t.Error("no DSN must not provision the admin-audit store")
+	}
+
+	// Authed mode (keyless writes off) + DSN: audit store provisioned so
+	// authed broadcasts persist (F1); the keyless gates stay nil. The
+	// admin-audit store is also provisioned here (F2/F5 parallel to F1):
+	// it must not be gated on KeylessWrites.
+	a, q, b, adminAudit, cleanup, err = loadWriteAudit(
+		&config.Config{KeylessWrites: false, KeylessPGDSN: dsn}, discardLogger())
+	if err != nil {
+		t.Fatalf("loadWriteAudit (authed): %v", err)
+	}
+	defer cleanup()
+	if a == nil {
+		t.Error("F1: authed mode with a DSN must provision the write-audit store, got nil")
+	}
+	if q != nil || b != nil {
+		t.Error("authed mode must NOT provision the keyless quota/blacklist gates")
+	}
+	if adminAudit == nil {
+		t.Error("authed mode with a DSN must provision the admin-audit store, got nil")
+	}
+
+	// Keyless mode + DSN: audit + quota + blacklist + admin-audit all
+	// provisioned.
+	a2, q2, b2, adminAudit2, cleanup2, err := loadWriteAudit(
+		&config.Config{KeylessWrites: true, KeylessPGDSN: dsn}, discardLogger())
+	if err != nil {
+		t.Fatalf("loadWriteAudit (keyless): %v", err)
+	}
+	defer cleanup2()
+	if a2 == nil || q2 == nil || b2 == nil {
+		t.Error("keyless mode with a DSN must provision audit + quota + blacklist")
+	}
+	if adminAudit2 == nil {
+		t.Error("keyless mode with a DSN must provision the admin-audit store, got nil")
+	}
 }
 
 // TestLoadAPIKeys_HTTPFailsClosedWithoutAuth verifies that the HTTP

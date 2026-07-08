@@ -52,14 +52,18 @@ type AdminServer struct {
 	now          func() time.Time
 	writeAudit   WriteAuditStore
 	blacklist    SignerBlacklistStore
+	adminAudit   AdminAuditStore
 }
 
 // NewAdminServer creates an admin API server.
-// adminKey is the bearer token required for all requests.
+// adminKeys maps sha256(admin-key) -> admin id; a bearer must hash to one
+// of these entries to authenticate, and the matched id is attributed to
+// the request as its admin actor (see adminActorFromContext).
 // defaultTTL is applied to newly created keys when no per-key ttl is specified
 // in the request; pass 0 for no default expiry.
 func NewAdminServer(
-	addr, adminKey string,
+	addr string,
+	adminKeys map[[32]byte]string,
 	keys KeyStoreBackend,
 	defaultTTL time.Duration,
 	logger *slog.Logger,
@@ -91,7 +95,7 @@ func NewAdminServer(
 
 	handler := adminAuth(
 		limitAdminRequestBody(mux),
-		adminKey,
+		adminKeys,
 		logger,
 	)
 
@@ -122,6 +126,50 @@ func (a *AdminServer) Start() error {
 // Close gracefully shuts down the admin server.
 func (a *AdminServer) Close(ctx context.Context) error {
 	return a.srv.Shutdown(ctx)
+}
+
+// WithAdminAuditStore attaches the per-admin mutation audit backend. nil
+// leaves recordAdminAudit falling back to attributed INFO log lines (self-host
+// / no MCP_KEYLESS_PG_DSN).
+func (a *AdminServer) WithAdminAuditStore(s AdminAuditStore) *AdminServer {
+	a.adminAudit = s
+	return a
+}
+
+// recordAdminAudit attributes an admin mutation to the actor resolved from
+// ctx (see adminActorFromContext) and persists it via the attached
+// AdminAuditStore. Best-effort: a store failure is logged at WARN and never
+// propagated, so an audit-write failure never fails the admin mutation it
+// describes. With no store attached, the mutation is instead emitted as an
+// attributed INFO log line so single-process / no-DSN deployments retain an
+// audit trail in their logs.
+func (a *AdminServer) recordAdminAudit(ctx context.Context, action AdminAction, target, detail, outcome string) {
+	actor := adminActorFromContext(ctx)
+
+	if a.adminAudit == nil {
+		a.logger.Info("admin: mutation",
+			slog.String("actor_id", actor),
+			slog.String("action", string(action)),
+			slog.String("target", target),
+			slog.String("outcome", outcome),
+		)
+		return
+	}
+
+	entry := AdminAuditEntry{
+		ActorID: actor,
+		Action:  action,
+		Target:  target,
+		Detail:  detail,
+		Outcome: outcome,
+	}
+	if err := a.adminAudit.Record(ctx, entry); err != nil {
+		a.logger.Warn("admin: audit record failed",
+			slog.String("actor_id", actor),
+			slog.String("action", string(action)),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // --- Handlers ---
@@ -195,6 +243,7 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.logger.Error("admin: create key failed", slog.String("error", err.Error()))
+		a.recordAdminAudit(r.Context(), AdminActionKeyCreate, req.ClientID, "", "error")
 		a.writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -203,6 +252,10 @@ func (a *AdminServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 		slog.String("client_id", req.ClientID),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	// result.Key holds the raw minted key -- never include result/result.Key
+	// in the audit detail. Detail is roles-only.
+	a.recordAdminAudit(r.Context(), AdminActionKeyCreate, req.ClientID,
+		"roles="+strings.Join(req.Roles, ","), "ok")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -224,6 +277,24 @@ type updateRequest struct {
 	Enabled *bool     `json:"enabled,omitempty"`
 	Roles   *[]string `json:"roles,omitempty"`
 	TTL     *string   `json:"ttl,omitempty"`
+}
+
+// updateAuditDetail summarizes which fields a PATCH /admin/keys/{id} request
+// touched, for the non-secret audit Detail (e.g. "fields=enabled,roles").
+// Split out of handleUpdate to keep its cyclomatic complexity under the
+// gocyclo threshold.
+func updateAuditDetail(req updateRequest) string {
+	var changed []string
+	if req.Enabled != nil {
+		changed = append(changed, "enabled")
+	}
+	if req.Roles != nil {
+		changed = append(changed, "roles")
+	}
+	if req.TTL != nil {
+		changed = append(changed, "ttl")
+	}
+	return "fields=" + strings.Join(changed, ",")
 }
 
 func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +357,7 @@ func (a *AdminServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		slog.String("client_id", clientID),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	a.recordAdminAudit(r.Context(), AdminActionKeyUpdate, clientID, updateAuditDetail(req), "ok")
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(summary); err != nil {
@@ -317,6 +389,7 @@ func (a *AdminServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 		slog.String("client_id", clientID),
 		slog.String("remote_addr", r.RemoteAddr),
 	)
+	a.recordAdminAudit(r.Context(), AdminActionKeyDelete, clientID, "", "ok")
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -333,17 +406,19 @@ func (a *AdminServer) writeError(w http.ResponseWriter, status int, msg string) 
 
 // adminAuth gates the admin REST API behind a Bearer-token check.
 //
-// The token comparison hashes both sides with SHA-256 and compares
-// fixed-length digests. subtle.ConstantTimeCompare returns 0 fast on
-// length mismatch -- comparing raw tokens directly would leak the
-// admin-key length to a length-probing attacker. Hashing equalizes
-// lengths so the constant-time guarantee is meaningful.
+// keys maps sha256(admin-key) -> admin id, as produced by loadAdminKeys.
+// The presented bearer is hashed and compared against every entry with
+// subtle.ConstantTimeCompare so that the request's latency does not
+// depend on which entry (if any) matches -- comparing raw tokens
+// directly would additionally leak token length to a length-probing
+// attacker, so both sides are hashed first to equalize lengths.
 //
 // All failures return 401 per RFC 7235: a missing/wrong-scheme/wrong
-// bearer is an authentication failure, not an authorization failure.
-func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Handler {
-	want := sha256.Sum256([]byte(adminKey))
-
+// bearer is an authentication failure, not an authorization failure. On
+// a match, the resolved admin id is injected into the request context
+// via contextWithAdminActor for downstream handlers (e.g. audit writes)
+// to read with adminActorFromContext.
+func adminAuth(next http.Handler, keys map[[32]byte]string, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -366,7 +441,23 @@ func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Han
 		}
 
 		got := sha256.Sum256([]byte(strings.TrimPrefix(authHeader, prefix)))
-		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+
+		// Iterate every entry rather than doing a direct map lookup
+		// (`keys[got]`) so the amount of work done is independent of
+		// which entry, if any, matches -- a map lookup short-circuits
+		// on the first bucket collision and can leak timing signal
+		// about the key material. matched/id are only assigned to on
+		// a hit; the loop always walks the full map regardless.
+		var matched bool
+		var id string
+		for h, adminID := range keys {
+			if subtle.ConstantTimeCompare(got[:], h[:]) == 1 {
+				matched = true
+				id = adminID
+			}
+		}
+
+		if !matched {
 			logger.Warn("admin: rejected request with invalid admin key",
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("method", r.Method),
@@ -376,7 +467,7 @@ func adminAuth(next http.Handler, adminKey string, logger *slog.Logger) http.Han
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(contextWithAdminActor(r.Context(), id)))
 	})
 }
 

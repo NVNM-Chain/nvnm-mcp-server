@@ -78,6 +78,8 @@ func clearEnv(t *testing.T) {
 		"NVNM_SMTP_FROM_NAME",
 		"KEY_DEFAULT_TTL",
 		"KEY_RENEWAL_URL",
+		"ADMIN_API_KEY",
+		"ADMIN_API_KEYS_FILE",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -1034,6 +1036,10 @@ func TestLoad_KeyRequestEnabledLoadsFields(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)
 	t.Setenv("NVNM_KEY_REQUEST_ENABLED", "true")
+	// F4: key-request without SMTP now requires the explicit key-in-logs
+	// acknowledgement or Load() fails closed (ErrKeyInLogsNotAllowed). This
+	// test pins field round-tripping, not the guard, so opt in here.
+	t.Setenv("NVNM_ALLOW_KEY_IN_LOGS", "true")
 	t.Setenv("NVNM_KEY_PENDING_FILE", "/var/lib/nvnm/keys_pending.json")
 	t.Setenv("NVNM_KEY_REQUEST_RATE_LIMIT", "0.25")
 	t.Setenv("NVNM_KEY_REQUEST_RATE_BURST", "5")
@@ -1137,6 +1143,32 @@ func TestLoad_KeyExpiryConfig(t *testing.T) {
 		t.Setenv("KEY_DEFAULT_TTL", "not-a-duration")
 		if _, err := Load(); err == nil {
 			t.Fatal("expected error for invalid KEY_DEFAULT_TTL, got nil")
+		}
+	})
+}
+
+func TestLoad_AdminAPIKeysFile(t *testing.T) {
+	t.Run("unset defaults empty", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.AdminAPIKeysFile != "" {
+			t.Errorf("AdminAPIKeysFile = %q, want empty", cfg.AdminAPIKeysFile)
+		}
+	})
+	t.Run("env value parses through", func(t *testing.T) {
+		clearEnv(t)
+		setMinimalEnv(t)
+		t.Setenv("ADMIN_API_KEYS_FILE", "/etc/nvnm/admins.json")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.AdminAPIKeysFile != "/etc/nvnm/admins.json" {
+			t.Errorf("AdminAPIKeysFile = %q, want %q", cfg.AdminAPIKeysFile, "/etc/nvnm/admins.json")
 		}
 	})
 }

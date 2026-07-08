@@ -150,11 +150,15 @@ func (s *SMTPEmailSender) Send(_ context.Context, to, subject, body string) erro
 // LogOnlyEmailSender is the no-SMTP fallback: when an operator does
 // not configure SMTP (open-source operators evaluating, dev/test
 // deployments) the approve / reject flow still completes — the email
-// body is written to the logger at INFO so the operator can copy the
-// key to the customer by hand. The body is logged in full (including
-// the key) so the operator has what they need; operators using this
-// path are accepting that their structured-log store is the de-facto
-// secret store for the key for as long as it sits there.
+// body is written to the logger so the operator can copy the key to
+// the customer by hand. The body is logged in full (including the key),
+// so operators using this path accept that their structured-log store
+// is the de-facto secret store for the key for as long as it sits there.
+//
+// F4: this path is NOT a silent default. config.Validate (via
+// validateKeyRequestEmail) rejects KeyRequestEnabled+no-SMTP unless the
+// operator explicitly sets NVNM_ALLOW_KEY_IN_LOGS=true, so this sender is
+// only ever selected as a deliberate, acknowledged choice.
 type LogOnlyEmailSender struct {
 	logger *slog.Logger
 }
@@ -166,11 +170,13 @@ func NewLogOnlyEmailSender(logger *slog.Logger) *LogOnlyEmailSender {
 	return &LogOnlyEmailSender{logger: logger}
 }
 
-// Send writes the email payload to the logger at INFO. Returns nil
+// Send writes the email payload to the logger at WARN. Returns nil
 // unconditionally — the operator's structured-log pipeline is the
-// "delivery."
+// "delivery." Logged at WARN (not INFO) because the body includes the
+// minted API key: each emission is a credential landing in the log
+// store, and should be visible as such in log review (F4).
 func (l *LogOnlyEmailSender) Send(_ context.Context, to, subject, body string) error {
-	l.logger.Info("email (log-only, no SMTP configured)",
+	l.logger.Warn("email (log-only, no SMTP configured) — body contains the minted API key",
 		slog.String("to", to),
 		slog.String("subject", subject),
 		slog.String("body", body),

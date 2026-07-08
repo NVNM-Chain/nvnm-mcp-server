@@ -19,6 +19,7 @@ import (
 	"github.com/defiweb/go-eth/wallet"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
@@ -244,17 +245,20 @@ func TestSendRawTx_SignerAudit(t *testing.T) {
 		}
 	}
 
-	// authed (keyless off): success audit log keeps client_id, no signer field.
+	// authed (keyless off): F1 -- the broadcast now decodes best-effort, so
+	// the success audit log carries BOTH the recovered signer AND the
+	// authenticated caller's client_id.
 	buf.Reset()
+	authedCtx := auth.ContextWithClaims(context.Background(), &auth.Claims{ClientID: "c1", Roles: []string{"writer"}})
 	h2 := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, nil, nil, signerGates{}, logger)
-	if _, _, err := h2(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+	if _, _, err := h2(authedCtx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
 		t.Fatalf("authed broadcast err: %v", err)
 	}
 	authed := buf.String()
-	if strings.Contains(authed, `"signer"`) {
-		t.Errorf("authed audit log should not contain signer field\nlog: %s", authed)
+	if !strings.Contains(authed, `"signer"`) {
+		t.Errorf("F1: authed audit log should contain the recovered signer\nlog: %s", authed)
 	}
-	if !strings.Contains(authed, `"client_id"`) {
+	if !strings.Contains(authed, `"client_id":"c1"`) {
 		t.Errorf("authed audit log should contain client_id\nlog: %s", authed)
 	}
 }

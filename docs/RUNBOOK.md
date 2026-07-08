@@ -217,7 +217,8 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 | `NVNM_KEY_REQUEST_RATE_LIMIT` | `0.5` | Per-source-IP token-bucket rate (requests/sec) on the public key-request endpoint. Default deliberately tight — the endpoint produces durable side effects (a queue row + a reviewer ping) and is not a hot path. |
 | `NVNM_KEY_REQUEST_RATE_BURST` | `3` | Per-source-IP burst capacity. |
 | `NVNM_KEY_REQUEST_MAX_BODY_BYTES` | `16384` | JSON body cap for the public key-request endpoint (tighter than the global `MaxRequestBodyBytes` outer cap). |
-| `NVNM_SMTP_HOST` | _(empty)_ | SMTP relay hostname used by the admin approve/reject flow to email customers. Empty -> approvals fall back to a log-only sender (key material lands in structured logs for the operator to copy out). Phase 11 RD2. |
+| `NVNM_SMTP_HOST` | _(empty)_ | SMTP relay hostname used by the admin approve/reject flow to email customers. Empty -> approvals fall back to a log-only sender (key material lands in structured logs for the operator to copy out). **F4:** with the key-request flow enabled and no SMTP, the server refuses to boot unless `NVNM_ALLOW_KEY_IN_LOGS=true` is set — the log-only path is no longer a silent default. Phase 11 RD2. |
+| `NVNM_ALLOW_KEY_IN_LOGS` | `false` | Explicit acknowledgement (F4) that the log-only email sender may write freshly-minted API keys to structured logs. Required to boot when `NVNM_KEY_REQUEST_ENABLED=true` and `NVNM_SMTP_HOST` is empty; otherwise boot fails with `ErrKeyInLogsNotAllowed`. Leave `false` and configure SMTP for any deployment where the log store is not an acceptable secret store. When `true`, each approval logs the key-bearing email body at **WARN**. |
 | `NVNM_SMTP_PORT` | _(empty)_ | SMTP port. **Required** when `NVNM_SMTP_HOST` is set; startup fails loud otherwise. |
 | `NVNM_SMTP_USERNAME` | _(empty)_ | SMTP PlainAuth username. Optional; when both username and password are empty, no AUTH is attempted (useful for in-network relays). |
 | `NVNM_SMTP_PASSWORD` | _(empty)_ | SMTP PlainAuth password. |
@@ -264,7 +265,7 @@ Validation rejections return 400 with `{"error": "..."}`. The endpoint sits outs
 
 #### Admin review queue
 
-All three endpoints below run on the admin REST server (separate port — `ADMIN_API_ADDR`, default `127.0.0.1:8081`) behind `ADMIN_API_KEY` Bearer auth.
+All three endpoints below run on the admin REST server (separate port — `ADMIN_API_ADDR`, default `127.0.0.1:8081`) behind admin Bearer auth (`ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE`).
 
 **List pending + decided history:**
 
@@ -309,9 +310,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
 | Mode | Trigger | What happens on approve |
 |---|---|---|
 | SMTP relay | `NVNM_SMTP_HOST` set + `NVNM_SMTP_PORT` + `NVNM_SMTP_FROM` | Email delivered via `net/smtp`; `email_delivered: true` on success |
-| Log-only fallback | `NVNM_SMTP_HOST` unset | Email body (including the raw key) written to structured logs at INFO with `msg=email (log-only, no SMTP configured)`; `email_delivered: true` in the response (the structured-log pipeline is the delivery) |
+| Log-only fallback | `NVNM_SMTP_HOST` unset **and** `NVNM_ALLOW_KEY_IN_LOGS=true` (F4) | Email body (including the raw key) written to structured logs at **WARN** with `msg=email (log-only, no SMTP configured) — body contains the minted API key`; `email_delivered: true` in the response (the structured-log pipeline is the delivery) |
 
-The log-only mode is intended for OSS evaluators, dev / test deployments, and any operator who hasn't wired SMTP yet. Operators using this path are accepting that their log-shipping pipeline is the de-facto secret store for the duration the key sits there. For production-grade deployments, configure SMTP.
+**F4 — log-only is no longer a silent default.** With the key-request flow enabled and no SMTP, the server **refuses to boot** (`ErrKeyInLogsNotAllowed`) unless the operator explicitly sets `NVNM_ALLOW_KEY_IN_LOGS=true` (see the env-var table above). The log-only mode is intended for OSS evaluators, dev / test deployments, and any operator who hasn't wired SMTP yet. Operators who set the flag are accepting that their log-shipping pipeline is the de-facto secret store for the duration the key sits there — and each approval is logged at WARN so the exposure is visible in log review. For production-grade deployments, configure SMTP.
 
 #### Double-approve and double-reject guards
 
@@ -435,7 +436,7 @@ The Postgres key-store backend lets multiple server replicas share a single auth
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MCP_KEYLESS_WRITES` | `false` | When `true`, `evm_send_raw_transaction` restricts the relay to the anchor precompile (precompile-only scope, D9) and broadcasts the canonical re-serialization instead of the caller's raw bytes. Requires every prerequisite below; the server refuses to boot otherwise. |
-| `MCP_KEYLESS_PG_DSN` | _(empty)_ | Dedicated Postgres DSN for the authless bundle's shared state: `write_audit` (Phase 4a), `signer_quota`, and `signer_blacklist` (Phase 5 — see `docs/DATA_HANDLING.md` § 8.2). Separate from `KEY_STORE_DSN`; a hosted authless deployment runs no key store at all. **Required** when `MCP_KEYLESS_WRITES=true` — boot fails with `ErrKeylessWritesRequiresDSN` otherwise, since an authless write path with logs-only (non-persisted) audit is not a supported posture. |
+| `MCP_KEYLESS_PG_DSN` | _(empty)_ | Postgres DSN for the write-audit store and, under keyless writes, the `signer_quota` + `signer_blacklist` gates (see `docs/DATA_HANDLING.md` § 8.2). Separate from `KEY_STORE_DSN`; a hosted authless deployment runs no key store at all. **Required** when `MCP_KEYLESS_WRITES=true` — boot fails with `ErrKeylessWritesRequiresDSN` otherwise, since an authless write path with logs-only (non-persisted) audit is not a supported posture. **Optional in authed / self-host mode (F1):** setting it there provisions `write_audit` alone (the quota/blacklist gates stay off) so authed broadcasts are persisted too; leaving it empty keeps authed broadcasts logs-only. |
 | `MCP_SIGNER_WRITE_RATE` | `500` | Max anonymous-write broadcasts a single signer may make within `MCP_SIGNER_WRITE_WINDOW`. Boot fails with `ErrSignerWriteRateInvalid` if set `< 1`. |
 | `MCP_SIGNER_WRITE_WINDOW` | `24h` | The counting window `MCP_SIGNER_WRITE_RATE` is measured over. **Fixed (boundary-aligned), not sliding** — the quota counter truncates `time.Now()` to this window via `WindowStart`, so the budget resets at the window boundary rather than rolling continuously. Boot fails with `ErrSignerWriteWindowInvalid` if set `<= 0`. |
 | `MCP_SIGNER_QUOTA_FAIL_OPEN` | `false` | What happens when the `signer_quota` store itself is unreachable (not what happens on a legitimate quota hit). Default fail-closed: a store error rejects the write. See `docs/DATA_HANDLING.md` § 8.2 and `docs/INCIDENT_RUNBOOK.md` § "Relay-scope rejections spiking" for the fail-open tradeoff. |
@@ -447,12 +448,19 @@ Guard (3) is the reason `mcp_write_relay_scope_rejected_total{cause="anchor_misc
 
 ### Admin Key Management API
 
+This section is for operators standing up the admin REST API — the surface used to create/rotate/revoke client keys, manage the signer blacklist, and review the pending-key queue. Read this before setting either admin env var below.
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ADMIN_API_KEY` | _(empty)_ | Admin bearer token for the key management REST API. The admin server only starts when this is set AND transport is `http`. |
+| `ADMIN_API_KEY` | _(empty)_ | Single shared admin bearer token for the key management REST API. Callers authenticating with it are attributed to the fixed identity `admin` in `admin_audit` / logs (see "Admin identities and per-admin audit attribution" below). |
+| `ADMIN_API_KEYS_FILE` | _(empty)_ | Path to a JSON file of per-admin identities: `[{"id":"alice","key":"..."},{"id":"bob","key":"..."}]`. Each row's `key` is hashed with plain SHA-256 (no pepper) and mapped to its `id`, so admin-API callers are individually attributed instead of collapsing to the single shared `admin` identity. `chmod 600` the file — it holds bearer-equivalent secrets in the clear. |
 | `ADMIN_API_ADDR` | `:8081` | Listen address for the admin API. |
 
-When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` with REST endpoints for runtime key management. Changes take effect immediately -- no server restart needed.
+The admin server starts when **either** `ADMIN_API_KEY` or `ADMIN_API_KEYS_FILE` is set, AND transport is `http`. A deployment can therefore run file-only (`ADMIN_API_KEYS_FILE` with no `ADMIN_API_KEY`) to avoid a shared static admin secret entirely — every caller carries an individually-attributable key.
+
+**Rotation has no hot-reload.** `ADMIN_API_KEYS_FILE` is loaded once at startup (`loadAdminKeys`, `cmd/nvnm-mcp-server/admin_keys.go`); editing the file on disk has no effect on a running process. To add, remove, or rotate an admin identity: edit the file, then restart the server. This differs from the key-management API below, where key CRUD via the REST endpoints *does* take effect immediately without a restart — that immediacy applies to client keys managed through the API, not to the admin identities that authenticate to it.
+
+When `ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE` is set, a separate HTTP server starts on `ADMIN_API_ADDR` with REST endpoints for runtime key management. Changes to client keys made through these endpoints take effect immediately -- no server restart needed.
 
 **Endpoints:**
 
@@ -463,7 +471,7 @@ When `ADMIN_API_KEY` is set, a separate HTTP server starts on `ADMIN_API_ADDR` w
 | `PATCH` | `/admin/keys/{id}` | Update enabled/roles/ttl. Body fields: `enabled` (bool), `roles` (string array), `ttl` (duration string; omit = unchanged). |
 | `DELETE` | `/admin/keys/{id}` | Permanently remove a key. |
 
-All requests require `Authorization: Bearer <ADMIN_API_KEY>`.
+All requests require `Authorization: Bearer <key>`, where `<key>` is either the shared `ADMIN_API_KEY` or one of the per-admin keys from `ADMIN_API_KEYS_FILE`. The examples below use `$ADMIN_API_KEY` for brevity; a per-admin key from the file works identically, just with individual attribution instead of the shared `admin` identity.
 
 **TTL on create and PATCH.** The optional `"ttl"` field is a Go duration string (e.g. `"720h"`, `"8760h"`). Use `"0"`, `"none"`, or `"never"` for no expiry. A negative or zero-parsed duration returns HTTP 400. When `"ttl"` is omitted on create, `KEY_DEFAULT_TTL` applies (default `8760h`). On PATCH, omitting `"ttl"` leaves the existing expiry unchanged; sending `"ttl": "0"` clears it.
 
@@ -487,9 +495,20 @@ curl -X PATCH http://localhost:8081/admin/keys/new-agent \
 
 **Security:** The admin port should be restricted via firewall or Kubernetes NetworkPolicy to ops tooling only. The admin token is separate from client keys.
 
+#### Admin identities and per-admin audit attribution (`admin_audit`)
+
+This subsection is for operators who need to know **who** made a given admin change, and where that record lives — useful for incident review, change-control audits, or simply confirming a teammate's action landed. Pair with "Admin Key Management API" above for how identities are configured.
+
+Every admin mutation made through the endpoints on this page — key create/update/delete, signer-blacklist add/remove, and pending-key approve/reject — is recorded against the identity that authenticated the request (`admin` for the shared `ADMIN_API_KEY`, or the per-admin `id` from `ADMIN_API_KEYS_FILE`). The 7 audited actions are: `key.create`, `key.update`, `key.delete`, `blacklist.add`, `blacklist.remove`, `pending.approve`, `pending.reject`.
+
+- **Persisted (Postgres):** when `MCP_KEYLESS_PG_DSN` is configured, each mutation is appended to the `admin_audit` table (migration `0004_admin_audit.sql`) on that same pool — columns `id, actor_id, action, target, detail, outcome, created_at`. Recording is best-effort: a write failure is logged at `WARN` and never blocks the admin mutation it describes.
+- **Logs-only fallback:** when `MCP_KEYLESS_PG_DSN` is not configured, the same information is instead emitted as an attributed `INFO` log line (`actor_id`, `action`, `target`, `outcome`) rather than persisted to a table.
+
+**Immutability note.** The store is append-only by type (`AdminAuditStore.Record` — no update/delete method exists), but the running application's database role can still issue raw `UPDATE`/`DELETE` against `admin_audit` unless prevented at the database layer. For true immutability, revoke `UPDATE` and `DELETE` privileges on `admin_audit` from the application's DB role (grant `INSERT`/`SELECT` only) — this is defense in depth on top of the application-level append-only design, not a substitute for it.
+
 #### Signer blacklist (Phase 5)
 
-Operator-facing CRUD for the `signer_blacklist` table (§ "Anonymous writes" above; schema in `docs/DATA_HANDLING.md` § 8.2), on the same admin server, so an on-call operator can ban an abusive signer without a deploy. Behind the same `ADMIN_API_KEY` bearer auth as the endpoints above; all three routes return `404` if the server booted without a signer-blacklist store wired (self-host / no `MCP_KEYLESS_PG_DSN`).
+Operator-facing CRUD for the `signer_blacklist` table (§ "Anonymous writes" above; schema in `docs/DATA_HANDLING.md` § 8.2), on the same admin server, so an on-call operator can ban an abusive signer without a deploy. Behind the same admin Bearer auth (`ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE`) as the endpoints above; all three routes return `404` if the server booted without a signer-blacklist store wired (self-host / no `MCP_KEYLESS_PG_DSN`).
 
 ```sh
 # List current bans
@@ -579,7 +598,7 @@ no longer accept or display a write-approval policy.
 | Port | Purpose |
 |------|---------|
 | **8080** | MCP HTTP transport (`MCP_HTTP_ADDR`). |
-| **8081** | Admin key management API (`ADMIN_API_ADDR`). Only active when `ADMIN_API_KEY` is set. |
+| **8081** | Admin key management API (`ADMIN_API_ADDR`). Only active when `ADMIN_API_KEY` and/or `ADMIN_API_KEYS_FILE` is set. |
 | **9090** | Health and metrics (`METRICS_ADDR`): `GET /healthz`, `GET /readyz`, `GET /metrics`. |
 
 Container image exposes 8080 and 9090. Map both in Kubernetes Services, ECS task definitions, and load balancers as required. The admin port (8081) should be exposed only to internal ops tooling -- restrict via NetworkPolicy or firewall rules.
