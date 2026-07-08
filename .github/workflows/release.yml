@@ -102,7 +102,7 @@ jobs:
       - name: Determine pre-release flag
         id: prerelease
         run: |
-          if [[ "${GITHUB_REF_NAME}" == *"-rc."* || "${GITHUB_REF_NAME}" == *"-beta"* || "${GITHUB_REF_NAME}" == *"-alpha"* ]]; then
+          if [[ "${GITHUB_REF_NAME}" == *"-rc"* || "${GITHUB_REF_NAME}" == *"-beta"* || "${GITHUB_REF_NAME}" == *"-alpha"* ]]; then
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
