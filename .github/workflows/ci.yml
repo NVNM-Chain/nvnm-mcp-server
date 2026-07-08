@@ -51,6 +51,13 @@ jobs:
         with:
           version: v2.11.4
           args: --timeout=5m
+          # Always run without the restored analysis cache. On 2026-07-08 a
+          # cache restored right after the Go 1.26.4->1.26.5 bump held stale
+          # staticcheck facts (dropped "testing.T.Fatal terminates"), which
+          # false-flagged SA5011 nil-deref on unchanged test files and red'd
+          # PR CI nondeterministically. A fresh analysis each run is a few
+          # seconds slower and deterministic; correctness > the cache.
+          skip-cache: true
           # Skip `golangci-lint config verify`. That step fetches the
           # config JSON schema from golangci-lint.run at runtime, which
           # makes a required check depend on an external network call --
