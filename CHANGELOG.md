@@ -9,6 +9,22 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Container images now report their real version.** The Dockerfile built with
+  `-ldflags="-s -w"` and no `-X` injection, and the image workflow passed no
+  version build-arg, so the binary fell back to the hardcoded
+  `version.Version = "1.0.0-rc10"`. **Every image from rc11 onward reported
+  itself as `1.0.0-rc10`** — the image tag said one thing and `serverInfo` /
+  `/healthz` said another. `release.yml` already injected the version correctly
+  into the standalone binaries; the image build was the one path that did not.
+
+  The Dockerfile now takes `ARG VERSION` and injects it via `-X`, and
+  `image.yml` passes `${{ steps.meta.outputs.version }}`. The fallback in
+  `internal/version` is now **`dev`**, not a release-shaped number: a
+  plausible-but-wrong version is worse than an obviously-unset one, because it
+  fails silently. That stale constant is exactly why this went unnoticed across
+  two release candidates.
+
 ### Added
 - **Operator-configured data retention with an enforcing purge.** The four
   Postgres tables the keyless bundle writes (`write_audit`, `signer_quota`,
