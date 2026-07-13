@@ -112,22 +112,38 @@ var canonicalJourney = []canonicalJourneyStep{
 	},
 }
 
-// prereqsSummary lists the operator-facing prerequisites an agent or
-// human should have in place before exercising write tools. The
-// wizard's needs_wallet / unfunded states walk the agent through
-// these; the overview lists them up front for self-aware consumers.
+// basePrereqs lists the prerequisites that hold in every deployment,
+// regardless of the auth posture. The wizard's needs_wallet / unfunded
+// states walk the agent through these; the overview lists them up front
+// for self-aware consumers.
 //
 //nolint:gochecknoglobals // immutable text; package-level by design
-var prereqsSummary = []string{
+var basePrereqs = []string{
 	"An EVM wallet you control. Server never holds private keys.",
 	"That wallet funded with the gas token. See bridge_url for the funding flow.",
 	"A signing path: either a browser wallet (MetaMask via the wallet_tx_request " +
 		"field returned by anchor_prepare_*) or a local/headless signer " +
 		"(sign raw_tx, broadcast via evm_send_raw_transaction).",
-	"For broadcasting (evm_send_raw_transaction): an API key on this server " +
-		"with the writer or admin role. The anchor_prepare_* tools return " +
+}
+
+// prereqsFor returns the prerequisite list for this deployment. The
+// broadcast prerequisite is deployment-dependent and must be derived from
+// the same flag the enforcement reads (cfg.KeylessWrites, consulted by
+// RequiresAuth), never restated independently — a static claim here drifts
+// out of step with the auth policy the server actually applies.
+func prereqsFor(cfg *config.Config) []string {
+	broadcast := "For broadcasting (evm_send_raw_transaction): an API key on this " +
+		"server with the writer or admin role. The anchor_prepare_* tools return " +
 		"unsigned bytes and may be callable without authentication under a " +
-		"keyless-read deployment (per the deployment's auth policy).",
+		"keyless-read deployment (per the deployment's auth policy)."
+	if cfg.KeylessWrites {
+		broadcast = "For broadcasting (evm_send_raw_transaction): no credential of " +
+			"any kind. This deployment is keyless: it issues no accounts and no API " +
+			"keys, and accepts an anonymous signed transaction whose destination is " +
+			"the anchor precompile. Your wallet signature is the only identity the " +
+			"server sees. Per-signer volume quotas and a signer blacklist apply."
+	}
+	return append(append([]string(nil), basePrereqs...), broadcast)
 }
 
 func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
@@ -160,7 +176,7 @@ func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, o
 			TokenWrapped:     naming.Wrapped,
 			WhatIsNVNMChain:  whatIsNVNMChainText,
 			PrivacyByDesign:  privacyByDesignText,
-			Prereqs:          prereqsSummary,
+			Prereqs:          prereqsFor(cfg),
 			CanonicalJourney: canonicalJourney,
 			NextActions: []NextAction{
 				{

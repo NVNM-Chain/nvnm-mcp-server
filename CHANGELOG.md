@@ -114,6 +114,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   <client-id> --ttl <dur|0>` subcommand extends or clears expiry from
   now; `--ttl` is required (the default TTL is not applied on renew).
 
+### Fixed
+- **`nvnm_overview` no longer tells agents a keyless deployment requires an
+  API key.** The `prereqs` list was a package-level constant asserting that
+  broadcasting needs "an API key on this server with the writer or admin
+  role" — false since the authless flip, and model-visible to every connecting
+  client. It is now derived from `cfg.KeylessWrites`, the same flag
+  `RequiresAuth` reads to make the actual enforcement decision, so the stated
+  requirement cannot drift from the enforced one. A keyless deployment now
+  reports that no credential is required and that the wallet signature is the
+  only identity the server sees.
+- **`docs/RUNBOOK.md` no longer claims a hosted authless deployment "runs no
+  key store at all."** The code does not permit that: `loadAPIKeys` fails boot
+  with `ErrHTTPAuthRequired` when neither `MCP_API_KEY` nor
+  `MCP_API_KEYS_FILE` is set on the HTTP transport, and that guard has no
+  keyless exception. Such a deployment holds an operator credential that is
+  never issued to any caller; callers remain wholly anonymous, but the
+  Bearer-validation path stays mounted and an invalid token draws a `401`. The
+  same incorrect claim is corrected in `internal/config`'s `KeylessPGDSN`
+  godoc.
+
 ## [1.0.0-rc10] - 2026-06-19
 
 Fixes from the rc9 dmome21 full smoke test (testnet, real MCP client),

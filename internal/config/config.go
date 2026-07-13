@@ -212,7 +212,10 @@ type Config struct {
 
 	// KeylessPGDSN is the dedicated Postgres DSN for the authless-bundle
 	// shared state (write_audit now; per-signer quota/blacklist later).
-	// Separate from KEY_STORE_DSN: hosted authless runs no key store.
+	// Separate from KEY_STORE_DSN: hosted authless issues no caller keys.
+	// (It still HAS a key store -- loadAPIKeys refuses to boot on HTTP with
+	// no credential source, keyless or not -- but the key it holds is the
+	// operator's and is never issued to a caller.)
 	// Empty => logs-only audit, no persistence. MCP_KEYLESS_PG_DSN.
 	KeylessPGDSN string
 
