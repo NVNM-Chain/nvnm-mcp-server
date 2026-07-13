@@ -10,6 +10,39 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Operator-configured data retention with an enforcing purge.** The four
+  Postgres tables the keyless bundle writes (`write_audit`, `signer_quota`,
+  `signer_blacklist`, `admin_audit`) previously had **no purge, TTL, or expiry
+  of any kind** — rows accumulated indefinitely, and the retention periods our
+  own documentation cited were enforced by nothing. A new in-process purge now
+  enforces per-table windows: `MCP_WRITE_AUDIT_RETENTION`,
+  `MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION`, `MCP_SIGNER_QUOTA_RETENTION`,
+  `MCP_SIGNER_BLACKLIST_RETENTION`, `MCP_ADMIN_AUDIT_RETENTION`, and
+  `MCP_RETENTION_PURGE_INTERVAL` (default `1h`).
+
+  **Every window defaults to unset, which means retain indefinitely** — no
+  existing deployment changes behavior on upgrade. Retention is deliberately
+  operator-chosen rather than hardcoded: a self-hosting operator's obligations
+  are theirs to determine. The point of the feature is that a window an
+  operator *does* set is now enforced by the artifact rather than promised by a
+  document. Boot fails on a negative window, on a window with a non-positive
+  purge interval (it would never fire), and on a `grantRole` window shorter
+  than the ordinary one (it would purge the administrative trail before the
+  routine traffic it exists to outlive). Deletes are batched so a large first
+  sweep cannot hold long row locks. See `docs/DATA_HANDLING.md` § 8.3 and
+  `docs/RUNBOOK.md` § "Data retention".
+- **`write_audit.method_selector` (migration 0005).** Records the 4-byte ABI
+  method selector of each broadcast. Under keyless writes every relayed
+  transaction shares one destination (`checkRelayScope` permits only the anchor
+  precompile), so `to_addr` could not distinguish an administrative `grantRole`
+  call from a routine anchor write — which made the longer `grantRole`
+  retention window our privacy policy promises **unenforceable**. The selector
+  is derived from the loaded ABI (`anchor.Client.MethodSelector`), never
+  hardcoded: this precompile's `grantRole` takes four arguments, so its selector
+  is *not* the well-known OpenZeppelin `grantRole(bytes32,address)` value. A
+  selector is a public function identifier and carries no caller data. Rows
+  written before this migration carry an empty selector and are treated as
+  ordinary writes.
 - **Trusted-proxy header hardening (C3/C5).** Two defense-in-depth
   controls, both gated on the existing `NVNM_TRUST_PROXY_HEADERS`
   (default `false`, unchanged): (C3) the fail-rate and anon-read
@@ -80,6 +113,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   <dur|0>` (default from `KEY_DEFAULT_TTL`). New `key-mgmt renew
   <client-id> --ttl <dur|0>` subcommand extends or clears expiry from
   now; `--ttl` is required (the default TTL is not applied on renew).
+
+### Fixed
+- **`nvnm_overview` no longer tells agents a keyless deployment requires an
+  API key.** The `prereqs` list was a package-level constant asserting that
+  broadcasting needs "an API key on this server with the writer or admin
+  role" — false since the authless flip, and model-visible to every connecting
+  client. It is now derived from `cfg.KeylessWrites`, the same flag
+  `RequiresAuth` reads to make the actual enforcement decision, so the stated
+  requirement cannot drift from the enforced one. A keyless deployment now
+  reports that no credential is required and that the wallet signature is the
+  only identity the server sees.
+- **`docs/RUNBOOK.md` no longer claims a hosted authless deployment "runs no
+  key store at all."** The code does not permit that: `loadAPIKeys` fails boot
+  with `ErrHTTPAuthRequired` when neither `MCP_API_KEY` nor
+  `MCP_API_KEYS_FILE` is set on the HTTP transport, and that guard has no
+  keyless exception. Such a deployment holds an operator credential that is
+  never issued to any caller; callers remain wholly anonymous, but the
+  Bearer-validation path stays mounted and an invalid token draws a `401`. The
+  same incorrect claim is corrected in `internal/config`'s `KeylessPGDSN`
+  godoc.
 
 ## [1.0.0-rc10] - 2026-06-19
 

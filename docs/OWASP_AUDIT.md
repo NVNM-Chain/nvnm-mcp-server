@@ -469,7 +469,10 @@ the single source of truth for what is and is not persisted. In short: both
 without it, mutations/broadcasts are logged but not persisted, in either mode.
 `write_audit` has no `client_id` column (rows are signer-keyed; the authed
 caller's `client_id` lives only in the structured-log line, not the table).
-Retention/pruning for both tables is DevOps-owned and not yet implemented.
+Retention/pruning for both tables is implemented in-process (see
+[`DATA_HANDLING.md`](DATA_HANDLING.md) § 8.3) but is **opt-in**: every window
+defaults to unset, which means retain indefinitely. An operator who publishes a
+retention period must set the corresponding env var for it to be enforced.
 - **No dedicated, append-only *log* stream (as distinct from the Postgres
   audit tables above).** General `tool call` telemetry still shares the common
   `slog` stream; stream separation and alerting maturity for that log line

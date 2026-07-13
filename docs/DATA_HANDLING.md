@@ -355,10 +355,10 @@ span.
 | Request correlation UUID            | Process memory                                                         | Single request                  |
 | Failed-auth IP buckets              | Process memory                                                         | 15-min inactivity TTL           |
 | JWKS public keys                    | Process memory (`keyfunc` cache)                                       | Process lifetime                |
-| Write-audit log (keyless writes, Phase 4a) | `write_audit` Postgres table (opt-in via `MCP_KEYLESS_PG_DSN`) | Per Privacy Policy §8: **90 days** (write-path structured logs); `grantRole` broadcasts map to **12-month administrative audit-trail window**. Retention mechanism (time-partitioning, archival) is DevOps-owned. |
-| Per-signer quota counters (Phase 5) | `signer_quota` Postgres table (same `MCP_KEYLESS_PG_DSN`)               | Effectively transient — superseded every `MCP_SIGNER_WRITE_WINDOW`; see § 8.2 |
-| Per-signer blacklist (Phase 5)      | `signer_blacklist` Postgres table (same `MCP_KEYLESS_PG_DSN`)           | Until an admin removes the entry; see § 8.2 |
-| Admin mutation audit (F2/F5)        | `admin_audit` Postgres table (same `MCP_KEYLESS_PG_DSN`)                | Append-only; no defined pruning window yet. Retention mechanism (time-partitioning, archival) is DevOps-owned, same as `write_audit`. Logs-only (not persisted) when `MCP_KEYLESS_PG_DSN` is unset; see "Audit-trail scope and known limitations" below. |
+| Write-audit log (keyless writes, Phase 4a) | `write_audit` Postgres table (opt-in via `MCP_KEYLESS_PG_DSN`) | **Retained indefinitely unless `MCP_WRITE_AUDIT_RETENTION` is set.** When set, enforced in-process by the retention purge; `grantRole` broadcasts take the separate, longer `MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION` window. See § 8.3. |
+| Per-signer quota counters (Phase 5) | `signer_quota` Postgres table (same `MCP_KEYLESS_PG_DSN`)               | **Retained indefinitely unless `MCP_SIGNER_QUOTA_RETENTION` is set.** Note the quota logic itself never deletes a row — an expired window stops *counting*, but the row remains. See § 8.2. |
+| Per-signer blacklist (Phase 5)      | `signer_blacklist` Postgres table (same `MCP_KEYLESS_PG_DSN`)           | Until an admin removes the entry. `MCP_SIGNER_BLACKLIST_RETENTION` can expire bans automatically but is **unset by default — deleting a ban un-bans that signer**. See § 8.2. |
+| Admin mutation audit (F2/F5)        | `admin_audit` Postgres table (same `MCP_KEYLESS_PG_DSN`)                | **Retained indefinitely unless `MCP_ADMIN_AUDIT_RETENTION` is set.** Logs-only (not persisted) when `MCP_KEYLESS_PG_DSN` is unset; see "Audit-trail scope and known limitations" below. |
 | Logs                                | stderr (operator-routed)                                               | Operator-defined                |
 | Metrics / traces                    | OTLP / Prometheus sink                                                 | Sink-defined                    |
 
@@ -368,12 +368,9 @@ No other runtime writes to local storage.
 
 The `write_audit` table records attempted keyless broadcasts (when `MCP_KEYLESS_WRITES=true`). Each row captures the on-chain signer address, destination, value, calldata length, transaction hash, outcome (success/failure/queued), and timestamp. The table is append-only and populated when `MCP_KEYLESS_PG_DSN` is configured; without it, the server logs broadcast attempts but does not persist them.
 
-Retention is scoped by Privacy Policy §8 (cross-reference; do not duplicate):
+Each row also records the 4-byte ABI **method selector** (`method_selector`, migration 0005). Under keyless writes every relayed transaction shares one destination — `checkRelayScope` permits only the anchor precompile — so `to_addr` cannot distinguish an administrative `grantRole` call from a routine anchor write. The selector is what allows the two retention windows below to be applied to the right rows. A selector is a public function identifier and carries no caller data.
 
-- **Write-path broadcasts** (typical `evm_send_raw_transaction` calls): **90 days** per Privacy Policy §8 write-path window.
-- **Administrative broadcasts** (`grantRole` signer-keyed actions): **12 months** per Privacy Policy §8 administrative audit-trail window.
-
-Retention/partitioning mechanism is operator-owned (see `.env.example`, `MCP_KEYLESS_PG_DSN` documentation).
+Retention windows are **operator-configured and enforced in-process** — see § 8.3. They default to *unset*, which means **retain indefinitely**. An operator who publishes a retention period (in a privacy policy, DPA, or contract) must set the corresponding window here; a period promised in a document and enforced by nothing is not a retention period.
 
 ### Audit-trail scope and known limitations
 
@@ -443,7 +440,37 @@ Managed exclusively via the admin API (`GET`/`POST /admin/signer-blacklist`, `DE
 
 **Fail-open knobs and default-closed posture.** `MCP_SIGNER_QUOTA_FAIL_OPEN` and `MCP_SIGNER_BLACKLIST_FAIL_OPEN` (both default `false`) govern what happens when the respective store itself is unreachable (e.g. the keyless Postgres pool is down) — **not** what happens on a legitimate quota/blacklist hit, which always rejects. Default fail-closed: a store error rejects the write (`cause="quota_store_error"` / `cause="blacklist_store_error"` — § 7.1) rather than silently admitting a signer the server could not actually check. Flipping either to `true` trades that safety check for availability during a store outage; see [`docs/INCIDENT_RUNBOOK.md`](INCIDENT_RUNBOOK.md#relay-scope-rejections-spiking) for when an operator might reach for that lever, and `docs/RUNBOOK.md` § "Anonymous writes" for the canonical env-var reference.
 
-Retention: neither table is covered by the Privacy Policy §8 write-audit windows above (those apply to `write_audit`). `signer_quota` rows are effectively transient, superseded every window; `signer_blacklist` rows persist until an admin removes them. Partitioning/pruning is operator-owned, same as `write_audit`.
+**Retention.** Both tables default to **retain indefinitely**; see § 8.3 for the windows that change that.
+
+A correction worth stating plainly, because earlier revisions of this document got it wrong: `signer_quota` rows are **not** "effectively transient." The 500-per-24h quota is enforced by a **read-time timestamp comparison** — `Count` selects only rows matching the *current* `window_start`, and a new window **inserts a new row** (the primary key is `(signer, window_start)`). An expired window therefore stops *counting* against a signer, but its row is **never deleted by the quota logic**. Absent `MCP_SIGNER_QUOTA_RETENTION`, these rows accumulate one per signer per window, indefinitely. Do not describe this data as transient in any policy document.
+
+`signer_blacklist` rows persist until an admin removes them. `MCP_SIGNER_BLACKLIST_RETENTION` can expire them automatically, but it is **unset by default and should usually stay that way**: deleting a ban row *un-bans* that signer, silently restoring an abuser's access when the window elapses.
+
+### 8.3 Retention purge
+
+The retention purge is the **only** mechanism in this server that deletes rows from `write_audit`, `signer_quota`, `signer_blacklist`, or `admin_audit`. Nothing else — no TTL, no partition drop, no background job — ever removes them. Prior to its introduction, every one of these tables grew without bound, and the retention periods this document previously cited were enforced by nothing.
+
+Every window is **operator-configured and defaults to unset (= retain indefinitely)**. That default is deliberate: a self-hosting operator's retention obligations are theirs to determine, and a server that silently deleted their audit trail on our schedule would be worse than one that keeps everything. The trade is that an operator who *publishes* a retention period must configure it here for it to be true.
+
+| Env var | Table | Default |
+|---------|-------|---------|
+| `MCP_WRITE_AUDIT_RETENTION` | `write_audit` (ordinary broadcasts) | unset — retain indefinitely |
+| `MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION` | `write_audit` (`grantRole` broadcasts only) | unset — falls under the ordinary window |
+| `MCP_SIGNER_QUOTA_RETENTION` | `signer_quota` | unset — retain indefinitely |
+| `MCP_SIGNER_BLACKLIST_RETENTION` | `signer_blacklist` | unset — bans are permanent (recommended) |
+| `MCP_ADMIN_AUDIT_RETENTION` | `admin_audit` | unset — retain indefinitely |
+| `MCP_RETENTION_PURGE_INTERVAL` | how often the purge runs | `1h` |
+
+Values are Go durations; days and months are not units (90 days = `2160h`, 12 months = `8760h`).
+
+**Boot guards.** The server refuses to start rather than enforce a policy an operator plainly did not intend:
+
+- A **negative** window is rejected (`ErrRetentionNegative`) — it is always a typo, and reading it as "delete everything" would be catastrophic.
+- A window set with a **non-positive purge interval** is rejected (`ErrRetentionIntervalInvalid`) — the purge would never fire and the window would be silently unenforced, which is the exact failure this feature exists to end.
+- A **`grantRole` window shorter than the ordinary window** is rejected (`ErrRetentionGrantRoleShorter`). The administrative carve-out is only meaningful as a *longer* window; inverting it would purge the admin audit trail before the routine traffic it exists to outlive. Note that an *unset* ordinary window counts as **infinite** here, so setting only the `grantRole` window is the same inversion by another route and is likewise rejected.
+- A `grantRole` window configured while the **anchor ABI is unavailable** is rejected: the selector cannot be derived, `grantRole` rows could not be told apart from ordinary ones, and every one of them would be purged on the shorter window while the server reported success.
+
+**Operational notes.** Deletes are batched (5,000 rows per statement, capped per table per tick) so a large backlog cannot hold long row locks or starve live traffic; the remainder is picked up on the next tick. A failing sweep is logged and retried rather than killing the goroutine. Rows written before migration 0005 carry an empty `method_selector` and are treated as ordinary writes.
 
 ## 9. Outbound network destinations
 

@@ -150,9 +150,13 @@ func makeSendRawTxHandler(
 				ToAddr:      addrString(decoded.To),
 				ValueWei:    decoded.Value.String(),
 				CalldataLen: len(decoded.Input),
-				TxHash:      txHash,
-				Outcome:     outcome,
-				Error:       errMsg,
+				// Retention (Privacy Policy § 8) gives grantRole a longer
+				// window than ordinary anchor writes; the selector is the
+				// only thing that distinguishes them once stored.
+				MethodSelector: MethodSelectorOf(decoded.Input),
+				TxHash:         txHash,
+				Outcome:        outcome,
+				Error:          errMsg,
 			})
 			if rerr != nil {
 				logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
