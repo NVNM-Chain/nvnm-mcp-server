@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc13] - 2026-07-13
+
+Cumulative since `v1.0.0-rc10`: `rc11` and `rc12` were cut without CHANGELOG
+entries, so the changes they carried are recorded here rather than lost.
+
 ### Fixed
 - **Container images now report their real version.** The Dockerfile built with
   `-ldflags="-s -w"` and no `-X` injection, and the image workflow passed no
