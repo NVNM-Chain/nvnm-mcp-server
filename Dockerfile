@@ -25,7 +25,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w -X github.com/NVNM-Chain/nvnm-mcp-server/internal/version.Version=${VERSION}" \
       -o nvnm-mcp-server ./cmd/nvnm-mcp-server
 
-FROM gcr.io/distroless/static-debian12@sha256:20bc6c0bc4d625a22a8fde3e55f6515709b32055ef8fb9cfbddaa06d1760f838
+FROM gcr.io/distroless/static-debian12@sha256:22fd79fd75eab2372585b44517f8a094349938919dc613aafc37e4bdc9967c82
 
 COPY --from=builder /build/nvnm-mcp-server /nvnm-mcp-server
 COPY --from=builder /build/abi /app/abi
