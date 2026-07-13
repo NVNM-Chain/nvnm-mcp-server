@@ -7,18 +7,18 @@ distinct from the open-source software it runs — the software is
 governed by the Apache License 2.0 in [LICENSE](../LICENSE); these Terms
 govern your use of the *Service we host*.
 
-**Audience:** any party that accesses the hosted Service via an issued
-credential, an anonymous read endpoint, or any other endpoint we make
-publicly reachable. Operators who deploy the open-source binary
-themselves are governed by Apache 2.0, not these Terms — they are the
-operator of their own deployment.
+**Audience:** any party that accesses the hosted Service. The hosted
+Service is **anonymous**: it issues no accounts and no credentials, and
+requires none. Operators who deploy the open-source binary themselves are
+governed by Apache 2.0, not these Terms — they are the operator of their
+own deployment, and the credentialed features described in the Software's
+documentation belong to that deployment, not to this Service.
 
-**Currency:** reflects the resolved Product Launch decisions as of
-commit `e2de26c` (2026-05-27). Counsel-iteration items appear in
-bracketed provisional form and will be revised editorially against the
-live document, not as prerequisites for publication; the published
+**Currency:** reflects the code as of commit `ac4bacb` (2026-07-07), the
+anonymous-write bundle that removed caller authentication from the hosted
+Service. The published
 [Privacy Policy](NVNM_MCP_Privacy_Policy_Jun_2026.pdf) is the parallel
-counsel-finalized artifact.
+counsel-finalized artifact and is being revised against the same code.
 
 **Effective Date:** [TBD at v1 launch — set at the moment of public
 repository flip and Service availability].
@@ -27,8 +27,20 @@ repository flip and Service availability].
 that will be revised by counsel before public launch. Acceptable-use
 enumeration (§ 6), liability language (§§ 11–13), and governing-law
 clause (§ 16) are the sections most likely to change in counsel review.
-Engineering scope, tool-surface descriptions (§§ 2, 6), and the
-Apache-2.0 / Service bifurcation (§ 7) are stable.
+
+> **Open question for counsel — acceptance (§ 3).** These Terms were
+> drafted when Service access required a credential, which supplied a
+> clean acceptance event: you requested a key, you accepted the Terms.
+> **That event no longer exists.** The hosted Service is anonymous — a
+> caller presents no credential, creates no account, provides no email,
+> and performs no affirmative act by which acceptance could be recorded.
+> The only remaining theory in § 3 is constructive acceptance by use
+> against posted Terms. Engineering has no view on whether that is
+> sufficient; we flag it because it is now the *only* mechanism, and
+> because the same fact (no caller accepts terms, no contract is formed)
+> is the factual predicate on which the revised Privacy Policy relies for
+> its GDPR Art 6(1)(f) legitimate-interests basis. The two documents must
+> not contradict each other on this point.
 
 ---
 
@@ -39,11 +51,9 @@ These Terms apply to:
 - The hosted NVNM Chain MCP Server endpoints operated by Inveniam,
   including but not limited to the production mainnet instance and the
   public testnet instance;
-- Any credential ("API key" or federated identity) issued by Inveniam
-  for use against the hosted Service;
-- Any anonymous (unauthenticated) read traffic admitted under the
-  keyless-read posture documented in
-  [docs/DATA_HANDLING.md](DATA_HANDLING.md) § 2.
+- All traffic to those endpoints, which is **anonymous** — both reads and
+  writes. Inveniam issues no credential for the hosted Service and
+  requires none. See [docs/DATA_HANDLING.md](DATA_HANDLING.md).
 
 These Terms do **not** apply to:
 
@@ -63,32 +73,34 @@ These Terms do **not** apply to:
 
 | Term | Meaning |
 |---|---|
-| **Service** | The hosted NVNM Chain MCP Server endpoints operated by Inveniam, including authenticated and anonymous-read traffic to those endpoints. |
+| **Service** | The hosted NVNM Chain MCP Server endpoints operated by Inveniam. All traffic to them is anonymous. |
 | **Software** | The open-source source code at <https://github.com/NVNM-Chain/nvnm-mcp-server>, licensed under Apache 2.0. |
 | **Operator** | Inveniam, with respect to the hosted Service. A self-hosting third party is the Operator of their own deployment, which these Terms do not govern. |
-| **You / User** | The individual or legal entity accessing the Service. For organizational use, "You" means the organization and any individual using a credential issued to it. |
-| **Credential** | An API key, a JSON Web Token (JWT) issued by Inveniam's FusionAuth tenant, or any other authentication artifact Inveniam issues for Service access. |
+| **You / User** | The individual or legal entity accessing the Service. Because the Service is anonymous, Inveniam does not know who You are and holds no identifying information about You. |
+| **Signer** | The blockchain wallet address recovered from the signature on a transaction You submit. It is the only identifier the Service observes, and the identifier on which the abuse controls in § 6 operate. Inveniam has no means of resolving a Signer to a person. |
+| **Credential** | *Not applicable to the hosted Service.* The Software supports API keys and federated identity for self-hosted deployments; the hosted Service issues none and accepts none. The term is retained only so that references from the Software's documentation resolve. |
 | **Tools** | The MCP tools exposed by the Service, including but not limited to the EVM read tools, anchor tools, onboarding tools, and `evm_send_raw_transaction`. |
 | **Chain** | The NVNM Chain (mainnet `nvnm-1` / testnet `nvnm-testnet-1`) and the underlying public blockchain infrastructure. |
 
 ## 3. Acceptance
 
-You accept these Terms by any of:
+> **Counsel review required — see the open question in the header.** The
+> mechanisms below are the *only* ones available, because the hosted
+> Service has no credential request, no account creation, no sign-in, and
+> no affirmative acceptance gesture of any kind. Engineering states the
+> facts; the sufficiency of constructive acceptance is a legal judgment.
 
-1. Submitting a credential request via `POST /keys/request`;
-2. Presenting an issued Credential to the Service;
-3. Authenticating via federated identity (FusionAuth) against the
-   Service;
-4. Sending any anonymous read request to the Service while these Terms
-   are posted at a publicly reachable URL.
+You accept these Terms by sending any request to the Service while these
+Terms are posted at a publicly reachable URL.
 
 If you do not agree to these Terms, do not use the Service. The Service
 may be used as Software under Apache 2.0 instead — see § 7.
 
-The version of these Terms you accept is the version posted at the time
-of acceptance. The Service may record the version identifier and
-timestamp of your acceptance as part of the credential record
-(`tos_version`, `tos_accepted_at`).
+The version of these Terms in force is the version posted at the time of
+your request. **The Service records no acceptance event.** It holds no
+account, no credential record, and no `tos_version` / `tos_accepted_at`
+field — there is no artifact in which such a record could be kept, and no
+identifier for a caller to which it could be attached.
 
 ## 4. Eligibility
 
@@ -108,53 +120,39 @@ You represent and warrant that:
   applicable to you, including export-control, sanctions, anti-money
   laundering, and tax laws.
 
-## 5. Credentials and account security
+## 5. No credentials; your keys are yours
 
-### 5.1 Credential issuance
+### 5.1 The Service issues no credentials
 
-Credentials are issued through the following processes:
+**Inveniam issues no API key, no account, and no federated identity for
+the hosted Service, and requires none to use it.** There is no sign-up,
+no sign-in, and no credential to safeguard. Access is anonymous.
 
-- **Self-serve API key request** — `POST /keys/request` enqueues a
-  pending request that an Inveniam reviewer manually approves during
-  the v1 closed-beta period. The endpoint responds `202 Accepted
-  { request_id, status: pending }` and a credential, when approved, is
-  delivered to the email address you provided.
-- **Federated identity (FusionAuth)** — you create a user account at
-  the Inveniam-operated FusionAuth tenant; the JWT issued by
-  FusionAuth is your Credential.
+The Software supports credentialed operation, and a self-hosting operator
+may enable it. That is a property of *their* deployment and is outside
+these Terms.
 
-Inveniam may decline to issue, or may revoke, any Credential at its
-discretion, including for reasons related to capacity, suspected abuse,
-or breach of these Terms.
-
-### 5.2 Credential security
-
-You are responsible for safeguarding your Credential. You must not:
-
-- Share a Credential with any party not authorized by you to act on
-  your behalf;
-- Transmit a Credential to the Service or to any third party over an
-  unencrypted channel;
-- Embed a Credential in client-side code distributed to end users
-  (mobile apps, browser bundles, etc.) — the Credential is intended
-  for server-side or trusted-environment use;
-- Continue using a Credential you know or suspect to be compromised
-  without first notifying Inveniam at `security@nvnmchain.io`.
+### 5.2 Your blockchain private keys
 
 Inveniam holds **zero blockchain private keys** and performs **zero
 signing** — see [docs/KEY_CUSTODY_THREAT_MODEL.md](KEY_CUSTODY_THREAT_MODEL.md).
-A "Credential" in these Terms means a Service-access token, not a
-blockchain wallet private key. You are solely responsible for the
-custody and security of any blockchain private keys you use with the
-Service.
+Every write you make must arrive at the Service already signed by a key
+You control; the Service cannot originate a transaction on your behalf.
 
-### 5.3 One Credential per principal
+You are solely responsible for the custody and security of any blockchain
+private keys you use with the Service, and for every transaction signed
+with them. The Service broadcasts the signed transaction it receives; it
+does not prompt for, obtain, or verify human approval of any write. If
+approval by a human is required in your context, it must be enforced by
+your own wallet or agent software, not by the Service.
 
-Each Credential is issued to a specific principal (a single individual,
-or a single legal entity acting through identified personnel). Creating
-multiple Credentials to circumvent rate limits, evade an active
-suspension, or obscure the identity of the principal is a breach of
-these Terms.
+### 5.3 Multiple wallets
+
+The abuse controls in § 6 (per-wallet quotas and the ban list) key on the
+Signer address recovered from your transaction. Generating additional
+wallet addresses in order to circumvent a rate limit or quota, or to evade
+an active ban, is a breach of these Terms — notwithstanding that the
+Service is technically unable to prevent it.
 
 ## 6. Acceptable use
 
@@ -166,8 +164,8 @@ You must not use the Service to:
   users (denial-of-service attacks, request floods, sustained spike
   traffic clearly designed to exhaust rate-limit budget rather than
   perform productive work);
-- Bypass, defeat, or circumvent any rate limit, authentication check,
-  Origin guard, or other access control;
+- Bypass, defeat, or circumvent any rate limit, per-wallet quota, ban
+  list, relay-scope restriction, Origin guard, or other access control;
 - Probe the Service for vulnerabilities except under an authorized
   security-research arrangement (see § 6.5);
 - Reverse engineer, decompile, or attempt to extract operational
@@ -176,29 +174,36 @@ You must not use the Service to:
 
 ### 6.2 Transaction abuse (`evm_send_raw_transaction`)
 
-The `evm_send_raw_transaction` tool accepts any well-formed signed
-transaction and submits it to the EVM RPC endpoint. You retain full
-responsibility for any transaction you sign and submit, **and** you must
-not use this tool to:
+**The hosted Service is not a general-purpose transaction relay.** It
+will broadcast a signed transaction **only** if that transaction is
+addressed to the NVNM anchoring contract. It **refuses** value transfers,
+contract deployments, and calls to any other contract, and it broadcasts
+its own canonical re-encoding of the transaction it decoded rather than
+the raw bytes it was given. A transaction outside that scope is rejected
+and never reaches the Chain.
 
-- Broadcast transactions designed to deploy or invoke smart-contract
-  code intended primarily to harm third parties (drainer contracts,
-  honeypots, malware proxies, ransomware payment infrastructure);
-- Submit transactions to or from on-chain addresses identified on
-  applicable sanctions lists;
-- Conduct front-running, sandwich, or other transaction-ordering
-  attacks where prohibited by applicable law;
+Within that scope, You retain full responsibility for any transaction you
+sign and submit, **and** you must not use this tool to:
+
+- Anchor or reference data prohibited by applicable law (see § 6.3);
+- Submit transactions from on-chain addresses identified on applicable
+  sanctions lists;
 - Submit transactions whose primary purpose is to defeat the
   irreversibility properties of the Chain (e.g., orchestrated
   chain-reorg solicitation, knowing collusion with validators to
   reorder finalized state).
 
-Nothing in this Section enlarges Inveniam's role beyond that of an RPC
-forwarder. Inveniam does not pre-screen, validate the economic intent
-of, or assume custody over any transaction submitted via this tool.
-Once submitted to the EVM RPC endpoint, transactions enter the Chain's
-public mempool and are subject to the Chain's protocol rules — Inveniam
-cannot recall, reverse, or modify them.
+Nothing in this Section enlarges Inveniam's role beyond that of a
+scope-limited forwarder. Inveniam does not pre-screen the *content* of an
+anchoring transaction, validate its economic intent, or assume custody
+over it. Once submitted to the EVM RPC endpoint, transactions enter the
+Chain's public mempool and are subject to the Chain's protocol rules —
+Inveniam cannot recall, reverse, or modify them.
+
+**Abuse controls.** The Service enforces a per-wallet write quota (500
+writes per 24 hours) and a wallet ban list, both keyed on the Signer
+address. Inveniam may add any Signer to the ban list at its discretion,
+including for suspected abuse or breach of these Terms.
 
 ### 6.3 Anchor tools
 
@@ -260,8 +265,9 @@ limit, or extend that license in any way. In particular:
 The hosted Service is a separate offering: it is the running
 instance(s) of the Software that Inveniam operates, plus the data
 those instances hold and process, plus any operational artifacts
-(Credentials, rate-limit state, telemetry) that exist only in
-Inveniam's deployment. These Terms govern that hosted offering.
+(rate-limit state, per-wallet quota counters, the ban list, the
+broadcast audit, telemetry) that exist only in Inveniam's deployment.
+These Terms govern that hosted offering.
 
 If you contribute to the open-source repository, that contribution is
 also governed by the Developer Certificate of Origin sign-off required
@@ -287,8 +293,9 @@ complementary, not conflicting.
 ### 9.1 Free at v1
 
 The Service is provided to You free of charge for v1. Inveniam does not
-charge for credential issuance, request volume within published rate
-limits, or any other access category at v1.
+charge for request volume within published rate limits, or for any other
+access category, at v1. (There is nothing to charge *for* at the account
+level: the Service issues no credentials and holds no accounts.)
 
 ### 9.2 Reservation of right to charge
 
@@ -302,12 +309,10 @@ introduction's effective date constitutes acceptance of the fee terms.
 ### 9.3 No grandfathering
 
 **Use of the Service while it is free does not entitle You to
-permanent free use of the Service.** No Credential issued during the
-free period carries any grandfathered, perpetual, or special-rate
-status by virtue of having been issued during the free period. If
-Inveniam introduces fees, those fees apply to all then-active
-Credentials and all then-active use of the Service, regardless of when
-the Credential was first issued or when use first began.
+permanent free use of the Service.** Use during the free period carries
+no grandfathered, perpetual, or special-rate status. If Inveniam
+introduces fees, those fees apply to all then-active use of the Service,
+regardless of when that use began.
 
 This clause is intentional: provisioning permanent free access by
 silence creates compounding obligations that cannot be undone without
@@ -329,10 +334,13 @@ prior notice:
 
 Inveniam will use reasonable efforts to communicate planned
 discontinuation through the canonical repository and the Service's
-known-active Credential population. The Service runs against external
-infrastructure (the EVM RPC endpoint, the underlying Chain, the
-FusionAuth tenant, the SMTP relay, telemetry sinks) whose availability
-is itself not under Inveniam's sole control; Service availability is
+public documentation. **Because the Service is anonymous, Inveniam
+cannot notify users individually** — it holds no email address, no
+account, and no contact information for any caller. Public posting is
+the only notice channel available. The Service runs against external
+infrastructure (the EVM RPC endpoint, the underlying Chain, telemetry
+sinks) whose availability is itself not under Inveniam's sole control;
+Service availability is
 necessarily bounded by the availability of those dependencies.
 
 The use of "reasonable efforts" here is deliberate. The term "best
@@ -425,25 +433,27 @@ Inveniam's prior written consent.
 
 ### 14.1 By You
 
-You may stop using the Service at any time. If you hold a Credential,
-you may request its revocation by emailing
-`privacy@nvnmchain.io` from the email address on the Credential
-record.
+You may stop using the Service at any time. Nothing needs to be
+cancelled: You hold no account and no credential, and the Service retains
+no relationship with You to terminate.
 
 ### 14.2 By Inveniam
 
-Inveniam may suspend or revoke a Credential, or terminate Your access
-to the Service, at any time, with or without notice, for any reason or
-no reason. Reasons that will, where reasonably practicable, prompt
-notice include:
+Inveniam may block or ban any Signer address, or terminate Your access to
+the Service, at any time, with or without notice, for any reason or no
+reason. Reasons include:
 
 - Suspected breach of these Terms (including any acceptable-use
   obligation in § 6);
-- Suspected compromise of the Credential;
 - Operational necessity (capacity exhaustion, incident response,
   forced maintenance);
 - Legal obligation (a binding order, sanctions designation,
   regulatory direction).
+
+**Notice is generally not possible.** Because the Service is anonymous,
+Inveniam holds no contact information for any caller and cannot give
+individual notice of a ban. A banned Signer's writes are rejected at the
+point of use.
 
 ### 14.3 Survival
 
@@ -465,14 +475,14 @@ the Privacy Policy.
 Inveniam may revise these Terms from time to time. Revisions are
 effective when published at the URL these Terms are then served from
 and identified by an updated `Effective Date` and version identifier.
-Material changes will be communicated through reasonable means,
-which may include in-MCP `instructions` payload notices, repository
-release notes, or an email to active Credential holders.
+Material changes will be communicated through reasonable means, which may
+include in-MCP `instructions` payload notices and repository release
+notes. **Individual notice is not possible**: the Service is anonymous
+and Inveniam holds no contact information for any caller.
 
 Continued use of the Service after a revision's Effective Date
-constitutes acceptance of the revised Terms. If You do not agree to
-the revision, You must stop using the Service and may, but are not
-required to, request revocation of Your Credential.
+constitutes acceptance of the revised Terms. If You do not agree to the
+revision, You must stop using the Service.
 
 ## 16. Governing law and dispute resolution
 
@@ -523,10 +533,10 @@ intellectual-property rights or confidentiality obligations.
   the Service.
 - **Notices to Inveniam.** Notices to Inveniam under these Terms must
   be sent to `privacy@nvnmchain.io` (general legal notices) or
-  `security@nvnmchain.io` (security-related notices). Notices to You
-  may be sent to the email address associated with Your Credential,
-  posted at the URL these Terms are served from, or included in an
-  in-MCP `instructions` payload.
+  `security@nvnmchain.io` (security-related notices). Notices to You may
+  be posted at the URL these Terms are served from, or included in an
+  in-MCP `instructions` payload. Inveniam has no means of contacting You
+  directly: the Service is anonymous and holds no address for You.
 - **Headings.** Section headings are for convenience only and do not
   affect interpretation.
 
