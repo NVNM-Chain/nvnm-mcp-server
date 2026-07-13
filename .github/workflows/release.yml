@@ -114,8 +114,17 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           NOTES_FILE=release-notes.md
           if [ -f CHANGELOG.md ]; then
-            awk -v ver="[$VERSION]" '
-              $0 ~ "^## " ver { found=1; next }
+            # Match the heading LITERALLY. The previous version interpolated
+            # the version into a regex ($0 ~ "^## " ver, ver="[1.0.0-rc13]"),
+            # where the brackets open a CHARACTER CLASS and "0-r" is an ASCII
+            # range (48-114) that happens to contain "[" (91). So the pattern
+            # matched EVERY "## [..." heading, and because that rule ends in
+            # `next` it preempted the `exit` rule -- the section never
+            # terminated and the whole changelog was emitted as release notes.
+            # index($0, ver) == 1 is a literal starts-with test: no pattern
+            # semantics, so dots/brackets/dashes in a version are inert.
+            awk -v ver="## [$VERSION]" '
+              index($0, ver) == 1 { found=1; next }
               found && /^## \[/ { exit }
               found { print }
             ' CHANGELOG.md > "$NOTES_FILE"
