@@ -442,6 +442,30 @@ The Postgres key-store backend lets multiple server replicas share a single auth
 | `MCP_SIGNER_QUOTA_FAIL_OPEN` | `false` | What happens when the `signer_quota` store itself is unreachable (not what happens on a legitimate quota hit). Default fail-closed: a store error rejects the write. See `docs/DATA_HANDLING.md` § 8.2 and `docs/INCIDENT_RUNBOOK.md` § "Relay-scope rejections spiking" for the fail-open tradeoff. |
 | `MCP_SIGNER_BLACKLIST_FAIL_OPEN` | `false` | Same fail-open/fail-closed knob for the `signer_blacklist` store. Default fail-closed. |
 
+### Data retention (purge windows)
+
+This section is for the operator who decides **how long this deployment keeps the rows it writes**. The purge is the only thing in the server that deletes from `write_audit`, `signer_quota`, `signer_blacklist`, or `admin_audit` — no TTL, partition drop, or external job exists. Read [`DATA_HANDLING.md`](DATA_HANDLING.md) § 8.3 for the data model; this table is the operational reference.
+
+**Every window defaults to unset, which means retain indefinitely.** That is deliberate: your retention obligations are yours, and a server that deleted your audit trail on our schedule would be worse than one that keeps everything. The corollary is that **a retention period you publish is not enforced until you set it here.**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MCP_RETENTION_PURGE_INTERVAL` | `1h` | How often the purge runs. Only consulted when at least one window is set; boot fails if a window is set and this is `<= 0` (the windows would never be enforced). |
+| `MCP_WRITE_AUDIT_RETENTION` | _(unset)_ | Window for ordinary broadcast rows in `write_audit`. Go duration — 90 days is `2160h`. |
+| `MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION` | _(unset)_ | Separate, **longer** window for `grantRole` broadcasts, matched on the ABI method selector in `write_audit.method_selector`. Must be `>=` `MCP_WRITE_AUDIT_RETENTION`, and requires a loaded anchor ABI (the selector is derived from it, never hardcoded). Boot fails otherwise — see the guards below. |
+| `MCP_SIGNER_QUOTA_RETENTION` | _(unset)_ | Window for expired `signer_quota` counter rows. **These are never deleted by the quota logic itself**: an expired window stops counting but the row remains, so without this they accumulate one row per signer per window forever. |
+| `MCP_ADMIN_AUDIT_RETENTION` | _(unset)_ | Window for `admin_audit` staff-action rows. Confirm your own audit obligations permit deleting these before setting it. |
+| `MCP_SIGNER_BLACKLIST_RETENTION` | _(unset)_ | Window after which a ban row is deleted. **Deleting a ban un-bans that signer.** Leave unset unless you specifically want time-expiring bans. |
+
+**Boot guards (retention).** The server refuses to start rather than enforce a policy you plainly did not intend:
+
+1. A **negative** window → `ErrRetentionNegative`. Always a typo; reading it as "delete everything" would be catastrophic.
+2. A window set with **`MCP_RETENTION_PURGE_INTERVAL <= 0`** → `ErrRetentionIntervalInvalid`. The purge would never fire and your window would be silently unenforced.
+3. A **`grantRole` window shorter than the ordinary window** → `ErrRetentionGrantRoleShorter`. The carve-out is only meaningful as a longer window; inverted, it would purge the administrative trail before the routine traffic it exists to outlive. **An unset ordinary window counts as infinite**, so setting *only* the `grantRole` window trips this guard too.
+4. A **`grantRole` window with no anchor ABI loaded** → boot error. The selector cannot be derived, so `grantRole` rows could not be distinguished and would all be purged on the shorter window while the server reported success.
+
+**Operational notes.** Deletes are batched (5,000 rows/statement, capped per table per tick) so a large first sweep cannot hold long row locks; the remainder is picked up on the next tick. A failing sweep is logged (`retention purge failed`) and retried on the next tick rather than killing the goroutine. A successful sweep that deleted nothing is silent. Rows written before migration 0005 have an empty `method_selector` and are treated as ordinary writes.
+
 **Boot guard chain.** When `MCP_KEYLESS_WRITES=true`, `config.Validate()` (`validateKeylessWrites`) enforces, in order: (1) `MCP_KEYLESS_PG_DSN` is set (`ErrKeylessWritesRequiresDSN`); (2) `MCP_KEYLESS_READS=true` — an anonymous write path is unreachable without the anonymous HTTP read path also being enabled (`ErrKeylessWritesRequiresReads`); (3) `ANCHOR_ADDRESS` parses as a valid address via the same `defitypes.AddressFromHex` the runtime relay handler uses (`ErrAnchorAddressInvalid`); (4) `MCP_SIGNER_WRITE_RATE >= 1`; (5) `MCP_SIGNER_WRITE_WINDOW > 0`.
 
 Guard (3) is the reason `mcp_write_relay_scope_rejected_total{cause="anchor_misconfig"}` (see `docs/DATA_HANDLING.md` § 7.1 and `docs/INCIDENT_RUNBOOK.md` § "Relay-scope rejections spiking") **should never fire at runtime** in a healthy deployment: the boot-time check parses the anchor address with the identical function the request-time relay-scope check uses, so any address that would fail at request time already failed at boot. A nonzero rate on that cause is always a page.

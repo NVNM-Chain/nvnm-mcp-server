@@ -5,6 +5,7 @@ package anchor
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -25,6 +26,14 @@ const PrecompileAddress = "0x0000000000000000000000000000000000000A00"
 type Client interface {
 	Info() PrecompileInfo
 	Available() bool
+
+	// MethodSelector returns the 0x-prefixed 4-byte ABI selector for the
+	// named method (e.g. "grantRole"). ok is false when no ABI is loaded or
+	// the method is unknown. Callers must derive selectors through this --
+	// the precompile's grantRole takes four arguments, so its selector is
+	// NOT the well-known OpenZeppelin grantRole(bytes32,address) value, and
+	// a hardcoded constant would silently mis-classify every row.
+	MethodSelector(name string) (selector string, ok bool)
 
 	// Read methods
 	GetRegistry(ctx context.Context, req GetRegistryRequest) (*Registry, error)
@@ -135,6 +144,19 @@ func (c *client) Info() PrecompileInfo {
 
 func (c *client) Available() bool {
 	return c.parsedABI != nil
+}
+
+// MethodSelector returns the 0x-prefixed 4-byte ABI selector for name.
+func (c *client) MethodSelector(name string) (string, bool) {
+	if c.parsedABI == nil {
+		return "", false
+	}
+	m, found := c.parsedABI.Methods[name]
+	if !found || m == nil {
+		return "", false
+	}
+	fb := m.FourBytes()
+	return "0x" + hex.EncodeToString(fb[:]), true
 }
 
 // GetRegistry fetches a single registry by ID or name.

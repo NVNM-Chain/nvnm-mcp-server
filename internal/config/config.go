@@ -108,6 +108,27 @@ var (
 	ErrSignerWriteRateInvalid   = errors.New("MCP_SIGNER_WRITE_RATE must be >= 1")
 	ErrSignerWriteWindowInvalid = errors.New("MCP_SIGNER_WRITE_WINDOW must be > 0")
 	ErrInvalidTrustedProxyHops  = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
+
+	// ErrRetentionNegative rejects a negative retention window. Zero means
+	// "retain indefinitely" (the default); a negative value is always a
+	// typo, and silently treating it as "delete everything" would be a
+	// catastrophic misreading of an operator's intent.
+	ErrRetentionNegative = errors.New(
+		"retention windows must be >= 0 (0 = retain indefinitely)")
+
+	// ErrRetentionIntervalInvalid rejects a non-positive purge interval when
+	// any retention window is set -- a zero interval would mean the purge
+	// goroutine never fires, so the configured windows would be silently
+	// unenforced. That is the exact failure this whole feature exists to end.
+	ErrRetentionIntervalInvalid = errors.New(
+		"MCP_RETENTION_PURGE_INTERVAL must be > 0 when any retention window is set")
+
+	// ErrRetentionGrantRoleShorter rejects a grantRole window shorter than
+	// the ordinary write-audit window. Privacy Policy § 8 gives grantRole
+	// broadcasts the LONGER administrative window; inverting that would purge
+	// the admin audit trail before the routine traffic it is meant to outlive.
+	ErrRetentionGrantRoleShorter = errors.New(
+		"MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION must be >= MCP_WRITE_AUDIT_RETENTION")
 )
 
 // Config holds all server configuration, loaded from environment variables.
@@ -194,6 +215,11 @@ type Config struct {
 	// Separate from KEY_STORE_DSN: hosted authless runs no key store.
 	// Empty => logs-only audit, no persistence. MCP_KEYLESS_PG_DSN.
 	KeylessPGDSN string
+
+	// Retention holds the per-table purge windows. Every window defaults to
+	// zero = retain indefinitely; an operator opts in per table. See
+	// RetentionConfig.
+	Retention RetentionConfig
 
 	// SignerWriteRate is the max number of anonymous-write transactions a
 	// single signer may submit within SignerWriteWindow. MCP_SIGNER_WRITE_RATE
@@ -827,7 +853,125 @@ func (c *Config) loadKeylessConfig() error {
 	}
 	c.AnonRateBurst = anonBurst
 
-	return c.loadSignerQuotaConfig()
+	if err := c.loadSignerQuotaConfig(); err != nil {
+		return err
+	}
+	return c.loadRetentionConfig()
+}
+
+// loadRetentionConfig reads the retention windows. Every window defaults to
+// zero, which means "retain indefinitely" -- the historical behavior, and
+// the only safe default for a self-hosted operator whose retention obligations
+// we cannot know. An operator opts in per table; the hosted Service sets the
+// windows its published privacy policy commits to.
+func (c *Config) loadRetentionConfig() error {
+	windows := []struct {
+		env string
+		dst *time.Duration
+	}{
+		{"MCP_WRITE_AUDIT_RETENTION", &c.Retention.WriteAudit},
+		{"MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION", &c.Retention.WriteAuditGrantRole},
+		{"MCP_SIGNER_QUOTA_RETENTION", &c.Retention.SignerQuota},
+		{"MCP_SIGNER_BLACKLIST_RETENTION", &c.Retention.SignerBlacklist},
+		{"MCP_ADMIN_AUDIT_RETENTION", &c.Retention.AdminAudit},
+	}
+	for _, w := range windows {
+		raw := envOrDefault(w.env, "")
+		if raw == "" {
+			continue // unset: retain indefinitely
+		}
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return fmt.Errorf("invalid %s %q: %w", w.env, raw, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("%s=%q: %w", w.env, raw, ErrRetentionNegative)
+		}
+		*w.dst = d
+	}
+
+	intervalStr := envOrDefault("MCP_RETENTION_PURGE_INTERVAL", "1h")
+	interval, err := time.ParseDuration(intervalStr)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_RETENTION_PURGE_INTERVAL %q: %w", intervalStr, err)
+	}
+	c.Retention.PurgeInterval = interval
+
+	return c.Retention.validate()
+}
+
+// RetentionConfig holds the per-table retention windows for the four
+// Postgres tables the keyless bundle writes. A zero window means RETAIN
+// INDEFINITELY: the purge skips that table entirely.
+//
+// Retention is deliberately operator-configured rather than hardcoded. A
+// third party self-hosting this server has its own regulatory obligations and
+// must be free to choose its own windows -- but a window an operator DOES set
+// is enforced by this artifact, not merely promised by a document.
+type RetentionConfig struct {
+	// WriteAudit is the window for ordinary anchor broadcasts in write_audit.
+	// MCP_WRITE_AUDIT_RETENTION (e.g. "2160h" = 90d).
+	WriteAudit time.Duration
+
+	// WriteAuditGrantRole is the window for grantRole broadcasts, which
+	// Privacy Policy § 8 keeps for a longer administrative audit-trail
+	// period. Rows are matched by the ABI method selector recorded in
+	// write_audit.method_selector (migration 0005). When zero, grantRole rows
+	// fall under WriteAudit like any other row.
+	// MCP_WRITE_AUDIT_GRANT_ROLE_RETENTION (e.g. "8760h" = 12mo).
+	WriteAuditGrantRole time.Duration
+
+	// SignerQuota is the window for expired quota-counter rows. Note these
+	// rows stop counting against a signer's quota at the window boundary but
+	// are NOT deleted by the quota logic itself -- without this purge they
+	// accumulate one row per signer per window, forever.
+	// MCP_SIGNER_QUOTA_RETENTION.
+	SignerQuota time.Duration
+
+	// SignerBlacklist is the window after which a ban is deleted -- which
+	// UN-BANS that signer. Left zero (the default) bans are permanent until
+	// an admin removes them. Set this only deliberately.
+	// MCP_SIGNER_BLACKLIST_RETENTION.
+	SignerBlacklist time.Duration
+
+	// AdminAudit is the window for staff-action records in admin_audit.
+	// MCP_ADMIN_AUDIT_RETENTION.
+	AdminAudit time.Duration
+
+	// PurgeInterval is how often the purge goroutine runs.
+	// MCP_RETENTION_PURGE_INTERVAL, default 1h.
+	PurgeInterval time.Duration
+}
+
+// Enabled reports whether any table has a retention window set. When false the
+// purge goroutine is never started and every table retains indefinitely.
+func (r RetentionConfig) Enabled() bool {
+	return r.WriteAudit > 0 || r.WriteAuditGrantRole > 0 || r.SignerQuota > 0 ||
+		r.SignerBlacklist > 0 || r.AdminAudit > 0
+}
+
+// validate rejects configurations whose windows would not do what the operator
+// evidently meant. Fail at boot, not at the first purge tick.
+func (r RetentionConfig) validate() error {
+	if !r.Enabled() {
+		return nil // nothing to enforce; PurgeInterval is irrelevant
+	}
+	if r.PurgeInterval <= 0 {
+		return ErrRetentionIntervalInvalid
+	}
+	// The carve-out is only meaningful as a LONGER window. If an operator
+	// inverts the two, the grantRole rows -- the administrative trail -- would
+	// be purged before the ordinary traffic they are meant to outlive.
+	//
+	// Zero means INFINITE here, so an unset WriteAudit is longer than any
+	// finite grantRole window: setting only the grantRole window would purge
+	// the admin trail while keeping routine traffic forever, which is the same
+	// inversion by another route.
+	if r.WriteAuditGrantRole > 0 &&
+		(r.WriteAudit == 0 || r.WriteAuditGrantRole < r.WriteAudit) {
+		return ErrRetentionGrantRoleShorter
+	}
+	return nil
 }
 
 // loadSignerQuotaConfig parses the per-signer write-quota and blacklist

@@ -28,7 +28,8 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	}
 
 	// No DSN: nothing is provisioned, in either mode.
-	a, q, b, adminAudit, cleanup, err := loadWriteAudit(&config.Config{KeylessPGDSN: ""}, discardLogger())
+	a, q, b, adminAudit, pool, cleanup, err := loadWriteAudit(
+		&config.Config{KeylessPGDSN: ""}, discardLogger())
 	if err != nil {
 		t.Fatalf("loadWriteAudit (no dsn): %v", err)
 	}
@@ -39,12 +40,18 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	if adminAudit != nil {
 		t.Error("no DSN must not provision the admin-audit store")
 	}
+	// The pool is what the retention purge runs against; no DSN means no pool,
+	// which is what makes startRetentionPurge a warn-and-skip rather than a
+	// goroutine that silently purges nothing.
+	if pool != nil {
+		t.Error("no DSN must not open a pool")
+	}
 
 	// Authed mode (keyless writes off) + DSN: audit store provisioned so
 	// authed broadcasts persist (F1); the keyless gates stay nil. The
 	// admin-audit store is also provisioned here (F2/F5 parallel to F1):
 	// it must not be gated on KeylessWrites.
-	a, q, b, adminAudit, cleanup, err = loadWriteAudit(
+	a, q, b, adminAudit, pool, cleanup, err = loadWriteAudit(
 		&config.Config{KeylessWrites: false, KeylessPGDSN: dsn}, discardLogger())
 	if err != nil {
 		t.Fatalf("loadWriteAudit (authed): %v", err)
@@ -52,6 +59,9 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 	defer cleanup()
 	if a == nil {
 		t.Error("F1: authed mode with a DSN must provision the write-audit store, got nil")
+	}
+	if pool == nil {
+		t.Error("a DSN must return the pool the retention purge runs against, got nil")
 	}
 	if q != nil || b != nil {
 		t.Error("authed mode must NOT provision the keyless quota/blacklist gates")
@@ -62,7 +72,7 @@ func TestLoadWriteAudit_ProvisioningByMode(t *testing.T) {
 
 	// Keyless mode + DSN: audit + quota + blacklist + admin-audit all
 	// provisioned.
-	a2, q2, b2, adminAudit2, cleanup2, err := loadWriteAudit(
+	a2, q2, b2, adminAudit2, _, cleanup2, err := loadWriteAudit(
 		&config.Config{KeylessWrites: true, KeylessPGDSN: dsn}, discardLogger())
 	if err != nil {
 		t.Fatalf("loadWriteAudit (keyless): %v", err)

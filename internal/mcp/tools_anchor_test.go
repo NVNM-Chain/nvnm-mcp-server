@@ -25,6 +25,10 @@ type fakeAnchor struct {
 func (f *fakeAnchor) Info() anchor.PrecompileInfo { return anchor.PrecompileInfo{} }
 func (f *fakeAnchor) Available() bool             { return true }
 
+// MethodSelector returns a stable stub selector; no test in this file
+// exercises selector-keyed behavior (see purge_test.go for that).
+func (f *fakeAnchor) MethodSelector(string) (string, bool) { return "", false }
+
 func (f *fakeAnchor) GetRegistry(context.Context, anchor.GetRegistryRequest) (*anchor.Registry, error) {
 	return f.registry, nil
 }

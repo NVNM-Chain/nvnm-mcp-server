@@ -111,6 +111,9 @@ type mockAnchor struct {
 
 func (m *mockAnchor) Info() anchor.PrecompileInfo { return m.info }
 func (m *mockAnchor) Available() bool             { return m.info.ABILoaded }
+
+// MethodSelector reports no ABI: these tests never assert on selectors.
+func (m *mockAnchor) MethodSelector(string) (string, bool) { return "", false }
 func (m *mockAnchor) GetRegistry(_ context.Context, _ anchor.GetRegistryRequest) (*anchor.Registry, error) {
 	return m.registry, m.returnErr
 }

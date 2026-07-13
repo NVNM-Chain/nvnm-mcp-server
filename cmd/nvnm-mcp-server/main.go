@@ -172,9 +172,9 @@ func run() error {
 		return err
 	}
 
-	// --- Write-audit store + signer quota/blacklist stores + Admin API Server ---
+	// --- Write-audit store + signer quota/blacklist stores + retention purge + Admin API Server ---
 	writeAudit, signerQuota, signerBlacklist, adminCleanup, err := startAuditAndAdmin(
-		cfg, managedKeys, pendingStore, emailSender, logger)
+		ctx, cfg, managedKeys, pendingStore, emailSender, anchorClient, logger)
 	if err != nil {
 		return err
 	}
@@ -525,15 +525,21 @@ func loadAPIKeys(
 // single call so run() does not accumulate their error and nil-check
 // branches against its cyclomatic-complexity budget.
 func startAuditAndAdmin(
+	ctx context.Context,
 	cfg *config.Config,
 	keys mcpserver.KeyStoreBackend,
 	pendingStore *mcpserver.PendingKeyStore,
 	email mcpserver.EmailSender,
+	anchorClient anchor.Client,
 	logger *slog.Logger,
 ) (mcpserver.WriteAuditStore, mcpserver.SignerQuotaStore, mcpserver.SignerBlacklistStore, func(), error) {
-	writeAudit, quota, blacklist, adminAudit, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
+	writeAudit, quota, blacklist, adminAudit, pool, writeAuditCleanup, err := loadWriteAudit(cfg, logger)
 	if err != nil {
 		return nil, nil, nil, func() {}, err
+	}
+	if purgeErr := startRetentionPurge(ctx, cfg, pool, anchorClient, logger); purgeErr != nil {
+		writeAuditCleanup()
+		return nil, nil, nil, func() {}, purgeErr
 	}
 	adminShutdown, err := startAdminServer(cfg, keys, pendingStore, email, writeAudit, blacklist, adminAudit, logger)
 	if err != nil {
@@ -546,6 +552,47 @@ func startAuditAndAdmin(
 		}
 		writeAuditCleanup()
 	}, nil
+}
+
+// startRetentionPurge launches the retention purge goroutine when the operator
+// has configured at least one window. It is a no-op otherwise: with no window
+// set every table retains indefinitely, which is the default and the only safe
+// assumption for a self-hosted operator whose obligations we cannot know.
+//
+// The goroutine exits when ctx is canceled (SIGINT/SIGTERM), so it needs no
+// entry in the cleanup chain.
+func startRetentionPurge(
+	ctx context.Context,
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	anchorClient anchor.Client,
+	logger *slog.Logger,
+) error {
+	if !cfg.Retention.Enabled() {
+		return nil
+	}
+	if pool == nil {
+		// A retention window without a database is a misconfiguration, not a
+		// no-op: the operator believes rows are being purged and nothing is
+		// storing them in the first place. Say so instead of starting a
+		// goroutine that would silently do nothing.
+		logger.Warn("retention windows configured but no MCP_KEYLESS_PG_DSN is set; " +
+			"nothing is persisted, so nothing is purged")
+		return nil
+	}
+	// Derive the grantRole selector from the loaded ABI. Never hardcode it:
+	// this precompile's grantRole takes four arguments, so its selector is not
+	// the well-known OpenZeppelin value. Empty => no ABI; NewPurger rejects the
+	// combination of "grantRole window set" + "selector unknown" rather than
+	// mis-classifying every grantRole row as ordinary traffic.
+	grantRoleSelector, _ := anchorClient.MethodSelector("grantRole")
+
+	purger, err := mcpserver.NewPurger(pool, cfg.Retention, grantRoleSelector, logger)
+	if err != nil {
+		return fmt.Errorf("retention purge: %w", err)
+	}
+	go purger.Run(ctx)
+	return nil
 }
 
 // loadWriteAudit stands up the dedicated authless-bundle Postgres pool and
@@ -565,6 +612,7 @@ func loadWriteAudit(
 	mcpserver.SignerQuotaStore,
 	mcpserver.SignerBlacklistStore,
 	mcpserver.AdminAuditStore,
+	*pgxpool.Pool, // nil when persistence is unconfigured; owned by closeFn
 	func(),
 	error,
 ) {
@@ -574,7 +622,7 @@ func loadWriteAudit(
 	// writes. The per-signer quota + blacklist gates are keyless-only
 	// concepts, so they are provisioned only under keyless writes (below).
 	if cfg.KeylessPGDSN == "" {
-		return nil, nil, nil, nil, func() {}, nil
+		return nil, nil, nil, nil, nil, func() {}, nil
 	}
 	// Parse the DSN before connecting: a malformed DSN produces a pgx error
 	// that can echo the connection string (password included), so it must
@@ -583,7 +631,7 @@ func loadWriteAudit(
 	// redact the password, and are safe to wrap.
 	poolCfg, err := pgxpool.ParseConfig(cfg.KeylessPGDSN)
 	if err != nil {
-		return nil, nil, nil, nil, nil, errKeylessDSNInvalid
+		return nil, nil, nil, nil, nil, nil, errKeylessDSNInvalid
 	}
 	// Bound the boot-time dial + migrate so an unreachable Postgres cannot
 	// hang startup indefinitely (CODING_STANDARDS: never allow unbounded waits).
@@ -591,17 +639,17 @@ func loadWriteAudit(
 	defer cancel()
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("connect keyless pg: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("connect keyless pg: %w", err)
 	}
 	// pgxpool is lazy; Ping forces the initial dial under the bounded context
 	// so a down database fails boot fast instead of at first write.
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, nil, nil, nil, nil, fmt.Errorf("ping keyless pg: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("ping keyless pg: %w", err)
 	}
 	if err := mcpserver.RunMigrations(ctx, pool, logger); err != nil {
 		pool.Close()
-		return nil, nil, nil, nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("migrate keyless pg: %w", err)
 	}
 	audit := mcpserver.NewPostgresWriteAuditStore(pool)
 	adminAudit := mcpserver.NewPostgresAdminAuditStore(pool)
@@ -611,13 +659,14 @@ func loadWriteAudit(
 		// every broadcast / admin mutation (F1 / F2-F5), but the keyless
 		// per-signer quota/blacklist gates are inactive.
 		logger.Info("write-audit backend: postgres (audit-only; keyless writes off)")
-		return audit, nil, nil, adminAudit, closeFn, nil
+		return audit, nil, nil, adminAudit, pool, closeFn, nil
 	}
 	logger.Info("write-audit backend: postgres (keyless bundle)")
 	return audit,
 		mcpserver.NewPostgresSignerQuotaStore(pool),
 		mcpserver.NewPostgresSignerBlacklistStore(pool),
 		adminAudit,
+		pool,
 		closeFn, nil
 }
 
