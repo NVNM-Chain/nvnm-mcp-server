@@ -17,7 +17,7 @@ documentation belong to that deployment, not to this Service.
 **Currency:** reflects the code as of commit `ac4bacb` (2026-07-07), the
 anonymous-write bundle that removed caller authentication from the hosted
 Service. The published
-[Privacy Policy](NVNM_MCP_Privacy_Policy_Jun_2026.pdf) is the parallel
+[Privacy Policy](NVNM_MCP_Privacy_Policy_Jul_2026.pdf) is the parallel
 counsel-finalized artifact and is being revised against the same code.
 
 **Effective Date:** [TBD at v1 launch — set at the moment of public
@@ -554,7 +554,7 @@ intellectual-property rights or confidentiality obligations.
 - [docs/DATA_HANDLING.md](DATA_HANDLING.md) — engineering reference
   for what data the Service processes; canonical source for the
   Privacy Policy's technical detail.
-- [Privacy Policy](NVNM_MCP_Privacy_Policy_Jun_2026.pdf) — the
+- [Privacy Policy](NVNM_MCP_Privacy_Policy_Jul_2026.pdf) — the
   counsel-finalized Privacy Policy that consumes DATA_HANDLING.md.
 - [docs/KEY_CUSTODY_THREAT_MODEL.md](KEY_CUSTODY_THREAT_MODEL.md) —
   rationale for the zero-key-custody posture referenced in §§ 5.2

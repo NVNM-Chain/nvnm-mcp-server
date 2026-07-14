@@ -9,6 +9,30 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Privacy Policy revised for the authless architecture, effective 2026-07-14.**
+  The published Policy now describes the Service as it actually runs: no
+  authentication on any tool, abuse controlled by the on-chain signer address
+  recovered from each broadcast, and the anchor-precompile-only relay
+  restriction. The retention schedule in §8 is the one the in-code purge
+  enforces (shipped in rc13).
+
+  Validated against the codebase before publication. Corrections made as a
+  result: §3(c) now discloses the `method_selector` column (the four-byte
+  public ABI function identifier stored alongside the calldata *length*);
+  §3(d)'s IP-logging sentence now matches the code, which logs a caller IP only
+  on error, authentication-rejection, Origin-rejection, and rate-limit paths
+  and never on an accepted tool call; §8's `admin_audit` row no longer refers to
+  "account closure" (the Service has no user accounts); and §10 no longer claims
+  an Origin allowlist is enforced on *every* request, since a request carrying
+  no Origin header is not rejected on that basis — the DNS-rebinding defence the
+  MCP specification actually requires.
+
+  The file is renamed `docs/NVNM_MCP_Privacy_Policy_Jun_2026.pdf` →
+  `docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf` to match its new effective date;
+  the four references in `README.md` and `docs/TERMS.md` are updated in the same
+  commit.
+
 ### Removed
 - **The opt-in Docker Hub mirror is gone from the image workflow.** `image.yml`
   carried a mirror that, when the repo variable `DOCKERHUB_IMAGE` was set,
