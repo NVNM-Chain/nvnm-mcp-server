@@ -9,6 +9,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+- **The opt-in Docker Hub mirror is gone from the image workflow.** `image.yml`
+  carried a mirror that, when the repo variable `DOCKERHUB_IMAGE` was set,
+  logged into `docker.io` with `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` and
+  re-tagged each GHCR manifest onto Docker Hub. It was never enabled — the
+  variable was never set, so the steps always skipped — and mirroring has in
+  practice been done by hand.
+
+  It was removed rather than left dormant. This repository is headed for public
+  release, and a workflow step that *references* a private-registry credential
+  is a reachable sink for that credential the moment one repo variable is set;
+  "currently skipped" is a configuration state, not a security boundary.
+  **GHCR is now the sole registry this workflow publishes to, and the workflow
+  holds no credential for any other.**
+
+  No supply-chain guarantee is lost. The mirror never rebuilt anything — it
+  re-tagged the same content-addressable digest — so an image mirrored by hand
+  (`docker buildx imagetools create -t docker.io/<org>/nvnm-mcp-server:<tag>
+  ghcr.io/nvnm-chain/nvnm-mcp-server:<tag>`) is byte-identical to what the
+  automated step produced and carries the same Cosign signature over that
+  digest. Publishing to a second registry is now a deliberate, human act.
+
 ## [1.0.0-rc13] - 2026-07-13
 
 Cumulative since `v1.0.0-rc10`: `rc11` and `rc12` were cut without CHANGELOG
