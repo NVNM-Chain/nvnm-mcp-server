@@ -57,7 +57,7 @@ This README is the technical entry point. For deeper context, follow the links b
 | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) | Per-alert investigation playbook; what to do when each Prometheus rule fires |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
 | [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
-| [`docs/NVNM_MCP_Privacy_Policy_Jun_2026.pdf`](docs/NVNM_MCP_Privacy_Policy_Jun_2026.pdf) | Counsel-finalized Privacy Policy for the hosted Service (published legal artifact) |
+| [`docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf`](docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf) | Counsel-finalized Privacy Policy for the hosted Service (published legal artifact) |
 | [`docs/TERMS.md`](docs/TERMS.md) | Terms of Service for the hosted Service (Apache 2.0 governs the Software) |
 | [`docs/KEY_CUSTODY_THREAT_MODEL.md`](docs/KEY_CUSTODY_THREAT_MODEL.md) | Rationale for the zero-key-custody design — no agent-mediated signing |
 | [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
@@ -538,7 +538,7 @@ docs/
   SECURITY_AUDIT.md               Security assessment and remediation results
   OWASP_AUDIT.md                  OWASP Top 10 self-audit (Phase 8.12)
   DATA_HANDLING.md                Privacy-by-design technical reference
-  NVNM_MCP_Privacy_Policy_Jun_2026.pdf  Finalized Privacy Policy (legal artifact)
+  NVNM_MCP_Privacy_Policy_Jul_2026.pdf  Finalized Privacy Policy (legal artifact)
   TERMS.md                        Terms of Service for the hosted Service
   INCIDENT_RUNBOOK.md             Per-alert investigation playbook
   KEY_CUSTODY_THREAT_MODEL.md     Rationale for zero-key-custody design
