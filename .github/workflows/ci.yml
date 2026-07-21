@@ -73,7 +73,12 @@ jobs:
         # linking) was replaced with github.com/defiweb/go-eth (MIT)
         # in the swap recorded in docs/SECURITY_AUDIT.md.
         run: |
-          go install github.com/google/go-licenses@latest
+          # Pinned, not @latest: `go install ...@latest` resolves to whatever
+          # the module proxy serves at run time and executes arbitrary Go on the
+          # runner — an unpinned build-time tool is a supply-chain sink,
+          # especially in a job that carries id-token:write. v1.6.0 is verified
+          # to run under the pinned Go toolchain (see Dockerfile GOTOOLCHAIN).
+          go install github.com/google/go-licenses@v1.6.0
           go-licenses check ./... \
             --ignore github.com/NVNM-Chain/nvnm-mcp-server \
             --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-2-Clause-FreeBSD,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0,0BSD,Zlib,EPL-2.0,CDDL-1.0
