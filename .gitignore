@@ -60,6 +60,14 @@ __pycache__/
 # Local per-developer scratch (HANDOFF notes, throwaway files)
 .local/
 
+# Security-assessment artifacts. The supplement is a system model (trust
+# boundaries, invariants, known controls); .refute/ holds attack-path analysis
+# and a NIST 800-115 test plan. On a PUBLIC repo these must never be published --
+# they map the attack surface. The skills read .security/supplement.md from the
+# filesystem, so ignoring it does not break local auto-discovery.
+.security/
+.refute/
+
 # graphify knowledge-graph build artifacts (auto-generated, per-developer)
 # Includes graph.html, graph.json, GRAPH_REPORT.md, cache/, manifest.json, cost.json
 graphify-out/

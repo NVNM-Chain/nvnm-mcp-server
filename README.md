@@ -407,7 +407,7 @@ The health and metrics server runs on a separate port (default `:9090`), indepen
 - **Every MCP tool call** gets a trace span and metrics (duration histogram, call counter, error counter, active request gauge)
 - **Every upstream EVM RPC call** gets a child trace span with method name and duration
 - **Structured logs** include request IDs and can be correlated with OTel traces
-- **Sensitive data** (addresses, URLs, tx data) is redacted in all log output
+- **Sensitive data** — the `SafeAddr` / `SafeURL` / `SafeTxData` helpers redact addresses, URLs, and tx data on **debug** log lines ([`internal/logging/redact.go`](internal/logging/redact.go)). Note the write-audit **broadcast** lines (INFO/WARN) deliberately record the recovered on-chain signer, destination, and value in full — these are public on-chain data and form the write-audit trail, not debug output. See [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) for the exact redaction scope.
 
 ### Deployment Integration
 

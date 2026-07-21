@@ -9,6 +9,27 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Pinned the CI license-check tool: `go-licenses@latest` → `@v1.6.0`
+  ([.github/workflows/ci.yml](.github/workflows/ci.yml)).** An unpinned
+  `go install ...@latest` resolves to whatever the module proxy serves at run
+  time and executes arbitrary Go on the runner — a supply-chain sink,
+  particularly in a job that carries `id-token: write`. It sat directly beside a
+  deliberately-pinned `govulncheck@v1.3.0`; this closes the asymmetry. v1.6.0
+  verified to run clean under the pinned Go toolchain. Surfaced by the pre-red-team
+  security assessment (finding SC-2). No image change.
+
+### Fixed
+- **Corrected an over-broad logging claim in the README.** The Observability
+  section stated sensitive data "is redacted in all log output"; in fact the
+  `SafeAddr`/`SafeURL`/`SafeTxData` helpers redact on **debug** lines, while the
+  write-audit **broadcast** lines (INFO/WARN) deliberately record the recovered
+  on-chain signer, destination, and value in full (public on-chain data forming
+  the audit trail). README now matches the code and cross-references
+  `docs/DATA_HANDLING.md`. Surfaced by the security assessment (finding LG-1,
+  doc leg). The in-code decision of whether to redact those identifiers in the
+  broadcast logs is deferred to a future code RC.
+
 ## [1.0.0-rc14] - 2026-07-21
 
 ### Changed
