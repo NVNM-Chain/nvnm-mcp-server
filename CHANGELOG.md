@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc14] - 2026-07-21
+
 ### Changed
 - **`evm_send_raw_transaction` relay scope is now enforced on the authenticated
   path too, not only under keyless writes.** The tool is a *scoped anchoring
