@@ -58,6 +58,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the four references in `README.md` and `docs/TERMS.md` are updated in the same
   commit.
 
+### Security
+- **Bumped `golang.org/x/crypto` v0.50.0 → v0.54.0** to clear seven Dependabot
+  alerts (all SSH-package vulnerabilities in that module: `VerifiedPublicKeyCallback`
+  permission-skip, client-driven server deadlock, agent-constraint drop on key
+  forwarding, `@revoked` auth-bypass, pathological RSA/DSA DoS, certificate-
+  restriction bypass, and a `CheckHostKey`/`Authenticate` server panic). The
+  vulnerable `x/crypto/ssh` code is not reachable from this server — no package
+  in the module imports `x/crypto` (`go mod why` confirms it is a transitive-only
+  requirement via `goose` and `x/net`) — so this is a hygiene bump to keep the
+  alert page clean ahead of public release, not a fix for an exploitable path.
+  The upgrade pulled the rest of the `golang.org/x/*` family up in step
+  (`net` 0.53→0.56, `sys` 0.43→0.47, `text` 0.36→0.40, `sync` 0.20→0.22); all
+  BSD-3-Clause. Vendor tree re-synced; `go test -race ./...` green.
+
 ### Removed
 - **The opt-in Docker Hub mirror is gone from the image workflow.** `image.yml`
   carried a mirror that, when the repo variable `DOCKERHUB_IMAGE` was set,
