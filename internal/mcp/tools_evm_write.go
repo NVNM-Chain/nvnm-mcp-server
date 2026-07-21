@@ -38,6 +38,7 @@ func registerEVMWriteTools(
 	evmClient evm.Client,
 	anchorAddr string,
 	keylessWrites bool,
+	relayAllowAny bool,
 	audit WriteAuditStore,
 	metrics WriteMetrics,
 	gates signerGates,
@@ -56,7 +57,7 @@ func registerEVMWriteTools(
 			"Returns the transaction hash. " +
 			"Confirm the result with evm_get_transaction_receipt.",
 		Annotations: newDestructiveWriteTool(),
-	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, audit, metrics, gates, logger))
+	}, makeSendRawTxHandler(evmClient, anchorAddr, keylessWrites, relayAllowAny, audit, metrics, gates, logger))
 }
 
 // --- Input/output types ---
@@ -73,7 +74,7 @@ type sendRawTxOutput struct {
 // --- Handler ---
 
 func makeSendRawTxHandler(
-	c evm.Client, anchorAddr string, keylessWrites bool, audit WriteAuditStore, metrics WriteMetrics,
+	c evm.Client, anchorAddr string, keylessWrites bool, relayAllowAny bool, audit WriteAuditStore, metrics WriteMetrics,
 	gates signerGates, logger *slog.Logger,
 ) mcp.ToolHandlerFor[sendRawTxInput, sendRawTxOutput] {
 	return func(
@@ -107,7 +108,7 @@ func makeSendRawTxHandler(
 		// passthrough (authed/self-host) or the scoped canonical re-encode
 		// (keyless writes, D9 / §5).
 		decoded, quotaWindowStart, broadcastHex, perr := resolveBroadcast(
-			ctx, input.SignedTxHex, anchorAddr, keylessWrites, gates, logger, recordReject,
+			ctx, input.SignedTxHex, anchorAddr, keylessWrites, relayAllowAny, gates, logger, recordReject,
 		)
 		if perr != nil {
 			return nil, sendRawTxOutput{}, perr
@@ -210,17 +211,26 @@ func makeSendRawTxHandler(
 }
 
 // resolveBroadcast produces the decoded tx (for the signer-keyed audit),
-// the quota window start, and the bytes to broadcast. Under keyless writes
-// it runs the full pre-broadcast pipeline (decode + relay-scope gate +
-// blacklist/quota + canonical re-encode). In authed/self-host mode it does
-// a best-effort decode ONLY -- to audit the broadcast (F1) -- with no
-// relay-scope enforcement and raw passthrough of the caller's bytes; a
-// decode failure is non-fatal (decoded stays nil, the tx still broadcasts,
-// and the audit falls back to the client_id slog line).
+// the quota window start, and the bytes to broadcast. Three modes:
+//
+//   - Keyless writes: the full pre-broadcast pipeline -- decode + relay-scope
+//     gate + blacklist/quota + canonical re-encode.
+//   - Authed/self-host, default (relayAllowAny=false): decode-or-reject +
+//     relay-scope gate, then raw passthrough of the caller's bytes. The
+//     anchor-precompile scope is enforced exactly as under keyless writes, so
+//     the relay never broadcasts to a non-anchor destination; unlike keyless
+//     it passes the original hex through rather than the canonical re-encode.
+//   - Authed/self-host, escape hatch (relayAllowAny=true): best-effort decode
+//     ONLY -- to audit the broadcast (F1) -- with NO relay-scope enforcement
+//     and raw passthrough; a decode failure is non-fatal (decoded stays nil,
+//     the tx still broadcasts, the audit falls back to the client_id slog
+//     line). This restores the pre-Option-B general-purpose relay for
+//     operators who opt in via MCP_RELAY_ALLOW_ANY.
 func resolveBroadcast(
 	ctx context.Context,
 	signedTxHex, anchorAddr string,
 	keylessWrites bool,
+	relayAllowAny bool,
 	gates signerGates,
 	logger *slog.Logger,
 	recordReject func(telemetry.RelayRejectCause),
@@ -228,36 +238,42 @@ func resolveBroadcast(
 	if keylessWrites {
 		return prepareKeylessBroadcast(ctx, signedTxHex, anchorAddr, gates, logger, recordReject)
 	}
-	if dtx, derr := evm.DecodeSignedTx(signedTxHex); derr == nil {
-		return dtx, time.Time{}, signedTxHex, nil
+	if relayAllowAny {
+		if dtx, derr := evm.DecodeSignedTx(signedTxHex); derr == nil {
+			return dtx, time.Time{}, signedTxHex, nil
+		}
+		return nil, time.Time{}, signedTxHex, nil
 	}
-	return nil, time.Time{}, signedTxHex, nil
+	// Authed default: enforce anchor-precompile scope, then raw passthrough.
+	dtx, err := decodeAndScope(ctx, signedTxHex, anchorAddr, logger, recordReject)
+	if err != nil {
+		return nil, time.Time{}, "", err
+	}
+	return dtx, time.Time{}, signedTxHex, nil
 }
 
-// prepareKeylessBroadcast runs the keyless-write pre-broadcast pipeline:
-// decode, anchor-scope check, and the Phase-5 blacklist/quota gates. It
-// returns the decoded tx, the quota window start (for the caller's later
-// increment-on-success call), and the canonical broadcast hex, or a non-nil
-// error if any check rejects the request. Split out of makeSendRawTxHandler
-// to keep that function's cyclomatic complexity within the package's lint
-// budget.
-func prepareKeylessBroadcast(
+// decodeAndScope decodes a signed transaction and enforces anchor-precompile
+// relay scope: it rejects an undecodable tx (CauseDecode), a misconfigured
+// anchor address (CauseAnchorMisconfig), and any destination other than the
+// anchor precompile (CauseRelayScope, with a signer-keyed audit line). It is
+// the shared pre-broadcast gate for both the keyless-write pipeline and the
+// authed/self-host default path, so the two enforce identical scope. Returns
+// the decoded tx when permitted.
+func decodeAndScope(
 	ctx context.Context,
 	signedTxHex, anchorAddr string,
-	gates signerGates,
 	logger *slog.Logger,
 	recordReject func(telemetry.RelayRejectCause),
-) (*evm.DecodedTx, time.Time, string, error) {
+) (*evm.DecodedTx, error) {
 	dtx, derr := evm.DecodeSignedTx(signedTxHex)
 	if derr != nil {
 		recordReject(telemetry.CauseDecode)
-		return nil, time.Time{}, "", derr // ErrTxDecode (input class)
+		return nil, derr // ErrTxDecode (input class)
 	}
 	anchor, aerr := defitypes.AddressFromHex(anchorAddr)
 	if aerr != nil {
 		recordReject(telemetry.CauseAnchorMisconfig)
-		return nil, time.Time{}, "",
-			fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
+		return nil, fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
 	}
 	if serr := checkRelayScope(dtx.To, anchor); serr != nil {
 		logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
@@ -267,7 +283,28 @@ func prepareKeylessBroadcast(
 			slog.String("to", addrString(dtx.To)),
 		}))
 		recordReject(telemetry.CauseRelayScope)
-		return nil, time.Time{}, "", serr // ErrRelayScopeRejected (input class)
+		return nil, serr // ErrRelayScopeRejected (input class)
+	}
+	return dtx, nil
+}
+
+// prepareKeylessBroadcast runs the keyless-write pre-broadcast pipeline:
+// decode + anchor-scope check (decodeAndScope) followed by the Phase-5
+// blacklist/quota gates. It returns the decoded tx, the quota window start
+// (for the caller's later increment-on-success call), and the canonical
+// broadcast hex, or a non-nil error if any check rejects the request. Split
+// out of makeSendRawTxHandler to keep that function's cyclomatic complexity
+// within the package's lint budget.
+func prepareKeylessBroadcast(
+	ctx context.Context,
+	signedTxHex, anchorAddr string,
+	gates signerGates,
+	logger *slog.Logger,
+	recordReject func(telemetry.RelayRejectCause),
+) (*evm.DecodedTx, time.Time, string, error) {
+	dtx, err := decodeAndScope(ctx, signedTxHex, anchorAddr, logger, recordReject)
+	if err != nil {
+		return nil, time.Time{}, "", err
 	}
 
 	// Blacklist + quota gates (Phase 5, keyless writes only). Blacklist is

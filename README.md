@@ -258,6 +258,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `REQUEST_TIMEOUT` | `15s` | Timeout for upstream RPC calls |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `ENABLE_WRITE_TOOLS` | `false` | Enable write (prepare) tools |
+| `MCP_RELAY_ALLOW_ANY` | `false` | Authenticated-path escape hatch: when `true`, `evm_send_raw_transaction` skips the anchor-precompile relay scope and broadcasts to any destination. Default `false` pins the relay to the anchor precompile. No effect under keyless writes (and a boot error if combined with `MCP_KEYLESS_WRITES=true`). See [Write Architecture](#write-architecture-phase-3). |
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
 | `OTLP_INSECURE` | `false` | Use TLS for the OTLP gRPC connection. Set to `true` only for sidecar / localhost collectors that do not support TLS. |
@@ -376,6 +377,8 @@ signed_hex = my_signer.sign(prepared["raw_tx"])
 result = mcp.call("evm_send_raw_transaction", {"signed_tx": signed_hex})
 receipt = mcp.call("evm_get_transaction_receipt", {"tx_hash": result["tx_hash"]})
 ```
+
+> **Broadcast allowlist (relay scope):** `evm_send_raw_transaction` is a *scoped anchoring relay*, not a general-purpose broadcaster. The server decodes the signed transaction and rejects it unless its destination is the anchor precompile (`ANCHOR_ADDRESS`); other contracts, externally-owned accounts, value transfers, and contract creation are refused without broadcast. This holds on both the keyless-write and authenticated/self-host paths — the caller's signature cannot be relayed to move funds or reach arbitrary contracts. Self-hosters who need to broadcast non-anchor transactions can opt out with `MCP_RELAY_ALLOW_ANY=true` (authenticated path only; forbidden under keyless writes). Reads are never restricted.
 
 3. **Verify** -- Use `evm_get_transaction_receipt(tx_hash)` and `anchor_get_records` to confirm the anchor is on-chain.
 

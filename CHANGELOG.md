@@ -10,6 +10,31 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **`evm_send_raw_transaction` relay scope is now enforced on the authenticated
+  path too, not only under keyless writes.** The tool is a *scoped anchoring
+  relay*: the server decodes each signed transaction and refuses to broadcast
+  unless its destination is the anchor precompile (`ANCHOR_ADDRESS`) — other
+  contracts, externally-owned accounts, native value transfers, and contract
+  creation are rejected with no broadcast. Previously this check ran only on the
+  anonymous keyless-write path; the authenticated/self-host path decoded
+  best-effort and relayed any signed transaction. Now both paths share one gate
+  (`decodeAndScope`), so a caller's signature can never be relayed through this
+  server to move funds or reach an arbitrary contract. The authenticated path
+  still passes the caller's original bytes through (keyless broadcasts the
+  canonical re-encode). Behavior change for self-hosters: an authenticated write
+  to a non-anchor destination — or a signed transaction the decoder cannot parse
+  — is now rejected by default where it previously broadcast.
+
+  New escape hatch `MCP_RELAY_ALLOW_ANY` (default `false`) restores the prior
+  unscoped best-effort relay on the **authenticated path only**, for self-host
+  operators who genuinely need to broadcast non-anchor transactions (registry
+  deploys, admin ops, exotic tx types). It has no effect under keyless writes
+  and is a **boot error** (`ErrRelayAllowAnyWithKeyless`) if combined with
+  `MCP_KEYLESS_WRITES=true` — anonymous writes are always pinned to the
+  precompile. Reads of any data remain unrestricted. Documented in `README.md`
+  (Write Architecture + env table), `docs/TOOL_REFERENCE.md` §16, and
+  `.env.example`.
+
 - **Privacy Policy revised for the authless architecture, effective 2026-07-14.**
   The published Policy now describes the Service as it actually runs: no
   authentication on any tool, abuse controlled by the on-chain signer address

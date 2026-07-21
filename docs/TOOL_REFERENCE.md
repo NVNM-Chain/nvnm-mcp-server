@@ -1226,6 +1226,8 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 > Requires `ENABLE_WRITE_TOOLS=true`
 >
 > **Write gate:** The server checks RBAC role (`writer`, `admin`, or `automation`) and the `ENABLE_WRITE_TOOLS` flag. On success, the signed transaction is broadcast directly. Obtaining human confirmation before submitting a signed transaction is the caller/agent's responsibility.
+>
+> **Relay scope (broadcast allowlist):** This tool is a *scoped anchoring relay*, not a general-purpose transaction broadcaster. Before broadcasting, the server decodes the signed transaction and rejects it unless its destination is the anchor precompile (`ANCHOR_ADDRESS`, default `0x0000000000000000000000000000000000000A00`). Every other destination — a different contract, an externally-owned account, a native value transfer, or contract creation (`to` is empty) — is rejected with no broadcast. The check runs on **both** the anonymous keyless-write path and the authenticated/self-host path; the signer cannot use this relay to move funds or touch arbitrary contracts. Self-host operators who need to broadcast non-anchor transactions (e.g. deploying their own registry contract or admin operations) can set `MCP_RELAY_ALLOW_ANY=true`, which restores an unscoped best-effort relay on the authenticated path only. That flag has no effect under keyless writes and is a boot error if combined with them — anonymous writes are always pinned to the precompile. Reads of any data remain unrestricted.
 
 Broadcast a signed transaction to the network. Input is the signed transaction as a hex string (0x-prefixed). Returns the transaction hash.
 
@@ -1246,6 +1248,7 @@ Broadcast a signed transaction to the network. Input is the signed transaction a
 - `signed_tx` is empty (missing required parameter).
 - Invalid hex encoding.
 - RLP decoding failure (malformed transaction).
+- Relay scope rejection: the transaction's destination is not the anchor precompile (see the **Relay scope** note above). Not raised when `MCP_RELAY_ALLOW_ANY=true` on the authenticated path.
 - Nonce too low or too high.
 - Insufficient funds for gas.
 - Transaction rejected by the node (e.g., invalid signature, chain ID mismatch).
