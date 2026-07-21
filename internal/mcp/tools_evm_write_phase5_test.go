@@ -81,7 +81,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		q := &fakeQuota{counts: map[string]int{}}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{blacklist: bl, quota: q, rate: 10, window: time.Hour}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if !errors.Is(err, ErrSignerBlacklisted) {
@@ -100,7 +100,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		q := &fakeQuota{counts: map[string]int{strings.ToLower(signer): 5}}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{quota: q, rate: 5, window: time.Hour}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if !errors.Is(err, ErrSignerQuotaExceeded) {
@@ -116,7 +116,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		bl := &fakeBlacklist{err: errors.New("db down")}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{blacklist: bl, blacklistFailOpen: false}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if err == nil {
@@ -132,7 +132,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		bl := &fakeBlacklist{err: errors.New("db down")}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{blacklist: bl, blacklistFailOpen: true}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if err != nil {
@@ -148,7 +148,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		q := &fakeQuota{err: errors.New("db down")}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{quota: q, rate: 5, window: time.Hour, quotaFailOpen: false}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if err == nil {
@@ -164,7 +164,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		q := &fakeQuota{err: errors.New("db down")}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{quota: q, rate: 5, window: time.Hour, quotaFailOpen: true}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if err != nil {
@@ -180,7 +180,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		q := &fakeQuota{counts: map[string]int{}}
 		cc := &captureClient{txHash: "0xabc"}
 		gates := signerGates{quota: q, rate: 10, window: time.Hour}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if err != nil {
@@ -199,7 +199,7 @@ func TestSendRawTx_Phase5_Enforcement(t *testing.T) {
 		q := &fakeQuota{counts: map[string]int{}}
 		cc := &captureClient{err: errors.New("rpc down")}
 		gates := signerGates{quota: q, rate: 10, window: time.Hour}
-		h := makeSendRawTxHandler(cc, anchorHex, true, nil, nil, gates, logger)
+		h := makeSendRawTxHandler(cc, anchorHex, true, false, nil, nil, gates, logger)
 
 		_, _, err := h(ctx, &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 		if err == nil {

@@ -90,7 +90,7 @@ Cold-reader assumptions to head off up front. The server is deliberately scoped 
 
 ## Status
 
-**Current release: `v1.0.0-rc9`.** The server is feature-complete and security-hardened — 21 typed tools (EVM reads, anchor reads, prepare-sign-submit writes, guided onboarding) with provider-agnostic auth (API keys or FusionAuth JWTs), per-tool RBAC, optional keyless reads, pre-auth and per-client rate limiting, DNS-rebinding defense, an OWASP Top-10 self-audit, and SBOM + Cosign-signed multi-arch images. See [`CHANGELOG.md`](CHANGELOG.md) for the full release history and [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) for the security assessment.
+**Current release: `v1.0.0-rc13`.** The server is feature-complete and security-hardened — 21 typed tools (EVM reads, anchor reads, prepare-sign-submit writes, guided onboarding) with provider-agnostic auth (API keys or FusionAuth JWTs), per-tool RBAC, optional keyless reads, pre-auth and per-client rate limiting, DNS-rebinding defense, operator-configured data-retention purge, an OWASP Top-10 self-audit, and SBOM + Cosign-signed multi-arch images. See [`CHANGELOG.md`](CHANGELOG.md) for the full release history and [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) for the security assessment.
 
 HTTP transport supports two auth providers (API keys or FusionAuth JWTs) with per-client identity flowing into all **authenticated** audit logs and OTel spans. Under keyless reads (`MCP_KEYLESS_READS=true`, the Inveniam-hosted default) only `evm_send_raw_transaction` authenticates and carries a per-client identifier; the `anchor_prepare_*` tools are auth-exempt and anonymous reads carry no `client_id`. API keys are stored sha256-hashed at rest and indexed by hash in memory (Phase 8.6); the validator compares hash bytes under constant time and flattens hit/miss timing with a placeholder compare on the miss path (Phase 8.7). A pre-auth IP failure-rate limiter throttles credential stuffing before the auth check runs; per-client MCP rate limiting (post-auth) returns HTTP `429` when exceeded. Per-tool authorization (RBAC) gates each handler on `reader` / `writer` / `admin` / `automation` roles. Origin-header validation (Phase 8.5) provides DNS-rebinding defense at the outermost middleware position; allowlist via `NVNM_ALLOWED_ORIGINS`. Write access is gated by RBAC role and `ENABLE_WRITE_TOOLS`; obtaining human confirmation before submitting a signed transaction is the caller/agent's responsibility (stated in the server's `initialize` instructions). The signature remains the security boundary — the server holds no keys and cannot alter a signed transaction. A dedicated admin REST API (default-bound to `127.0.0.1:8081`) enables runtime key management without server restarts.
 
@@ -258,6 +258,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `REQUEST_TIMEOUT` | `15s` | Timeout for upstream RPC calls |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `ENABLE_WRITE_TOOLS` | `false` | Enable write (prepare) tools |
+| `MCP_RELAY_ALLOW_ANY` | `false` | Authenticated-path escape hatch: when `true`, `evm_send_raw_transaction` skips the anchor-precompile relay scope and broadcasts to any destination. Default `false` pins the relay to the anchor precompile. No effect under keyless writes (and a boot error if combined with `MCP_KEYLESS_WRITES=true`). See [Write Architecture](#write-architecture-phase-3). |
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `:8080` | Listen address for HTTP transport |
 | `OTLP_INSECURE` | `false` | Use TLS for the OTLP gRPC connection. Set to `true` only for sidecar / localhost collectors that do not support TLS. |
@@ -376,6 +377,8 @@ signed_hex = my_signer.sign(prepared["raw_tx"])
 result = mcp.call("evm_send_raw_transaction", {"signed_tx": signed_hex})
 receipt = mcp.call("evm_get_transaction_receipt", {"tx_hash": result["tx_hash"]})
 ```
+
+> **Broadcast allowlist (relay scope):** `evm_send_raw_transaction` is a *scoped anchoring relay*, not a general-purpose broadcaster. The server decodes the signed transaction and rejects it unless its destination is the anchor precompile (`ANCHOR_ADDRESS`); other contracts, externally-owned accounts, value transfers, and contract creation are refused without broadcast. This holds on both the keyless-write and authenticated/self-host paths — the caller's signature cannot be relayed to move funds or reach arbitrary contracts. Self-hosters who need to broadcast non-anchor transactions can opt out with `MCP_RELAY_ALLOW_ANY=true` (authenticated path only; forbidden under keyless writes). Reads are never restricted.
 
 3. **Verify** -- Use `evm_get_transaction_receipt(tx_hash)` and `anchor_get_records` to confirm the anchor is on-chain.
 

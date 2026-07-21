@@ -1401,9 +1401,12 @@ gates, plus `write_audit`, lives on a **dedicated** Postgres pool
 
 - **F1 — authed-path audit gap closed.** Previously only the keyless write
   path persisted to `write_audit`; the authed/self-host path only logged.
-  `resolveBroadcast` now does a best-effort decode in authed mode too, solely
-  to audit the broadcast (no relay-scope enforcement, raw passthrough of the
-  caller's bytes; a decode failure is non-fatal). `loadWriteAudit`
+  `resolveBroadcast` now decodes in authed mode too and enforces the same
+  anchor-precompile relay-scope gate as the keyless path (shared
+  `decodeAndScope`), raw passthrough of the caller's bytes on success. (The
+  original F1 behaviour — best-effort decode, no relay-scope enforcement, a
+  non-fatal decode failure — now applies only under `MCP_RELAY_ALLOW_ANY=true`,
+  the authenticated-path escape hatch.) `loadWriteAudit`
   (`cmd/nvnm-mcp-server/main.go`) provisions the `write_audit` store whenever
   `MCP_KEYLESS_PG_DSN` is set, in **any** mode — closing the gap where the
   "more trusted" authed path had the weaker audit trail.

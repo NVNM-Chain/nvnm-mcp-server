@@ -107,7 +107,17 @@ var (
 		"ANCHOR_ADDRESS is not a valid address (required when MCP_KEYLESS_WRITES=true)")
 	ErrSignerWriteRateInvalid   = errors.New("MCP_SIGNER_WRITE_RATE must be >= 1")
 	ErrSignerWriteWindowInvalid = errors.New("MCP_SIGNER_WRITE_WINDOW must be > 0")
-	ErrInvalidTrustedProxyHops  = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
+	// ErrRelayAllowAnyWithKeyless is returned when MCP_RELAY_ALLOW_ANY is true
+	// while MCP_KEYLESS_WRITES is also true. The relay-scope escape hatch only
+	// relaxes the authenticated (self-host) broadcast path; anonymous keyless
+	// writes must always stay pinned to the anchor precompile, so allowing
+	// arbitrary destinations under keyless writes is a contradiction rejected
+	// at boot rather than silently ignored.
+	ErrRelayAllowAnyWithKeyless = errors.New(
+		"MCP_RELAY_ALLOW_ANY=true is incompatible with MCP_KEYLESS_WRITES=true " +
+			"(the relay-scope escape hatch applies only to authenticated writes; " +
+			"anonymous keyless writes are always pinned to the anchor precompile)")
+	ErrInvalidTrustedProxyHops = errors.New("NVNM_TRUSTED_PROXY_HOPS must be >= 1")
 
 	// ErrRetentionNegative rejects a negative retention window. Zero means
 	// "retain indefinitely" (the default); a negative value is always a
@@ -207,8 +217,19 @@ type Config struct {
 	// Keyless writes (HTTP only, authless connector). When true, the
 	// evm_send_raw_transaction relay is restricted to the anchor precompile
 	// (precompile-only scope) and broadcasts the canonical re-serialization.
-	// Default false: authed/self-host keeps the general-purpose relay (D9).
+	// Default false: authed/self-host is scoped to the anchor precompile too
+	// (decode-or-reject, raw passthrough) unless RelayAllowAny is set.
 	KeylessWrites bool // MCP_KEYLESS_WRITES: precompile-only authless write relay (default false)
+
+	// RelayAllowAny is the authenticated-path escape hatch. When true, the
+	// authed/self-host evm_send_raw_transaction relay skips the anchor-precompile
+	// scope check and falls back to best-effort decode + raw passthrough,
+	// restoring the pre-Option-B general-purpose relay for operators who need
+	// to broadcast non-anchor transactions (registry deploys, admin ops, or
+	// exotic tx types the decoder cannot parse). It has no effect under keyless
+	// writes and is a boot error when combined with them
+	// (ErrRelayAllowAnyWithKeyless): anonymous writes are always precompile-only.
+	RelayAllowAny bool // MCP_RELAY_ALLOW_ANY: authed-path relay-scope opt-out (default false)
 
 	// KeylessPGDSN is the dedicated Postgres DSN for the authless-bundle
 	// shared state (write_audit now; per-signer quota/blacklist later).
@@ -704,6 +725,9 @@ func (c *Config) validateKeylessWrites() error {
 	if !c.KeylessWrites {
 		return nil
 	}
+	if c.RelayAllowAny {
+		return ErrRelayAllowAnyWithKeyless
+	}
 	if !c.KeylessReads {
 		return ErrKeylessWritesRequiresReads
 	}
@@ -841,6 +865,12 @@ func (c *Config) loadKeylessConfig() error {
 	}
 	c.KeylessWrites = keylessW
 	c.KeylessPGDSN = os.Getenv("MCP_KEYLESS_PG_DSN")
+
+	allowAny, err := envBool("MCP_RELAY_ALLOW_ANY", false)
+	if err != nil {
+		return err
+	}
+	c.RelayAllowAny = allowAny
 
 	anonLimitStr := envOrDefault("MCP_ANON_RATE_LIMIT", "5")
 	anonLimit, err := strconv.ParseFloat(anonLimitStr, 64)

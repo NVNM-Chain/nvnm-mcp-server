@@ -148,7 +148,8 @@ func NewServer(
 			// now left nil -> time.Now in production
 		}
 		registerEVMWriteTools(
-			mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, writeAudit, metrics, gates, logger,
+			mcpSrv, evmClient, cfg.AnchorAddress, cfg.KeylessWrites, cfg.RelayAllowAny,
+			writeAudit, metrics, gates, logger,
 		)
 		registerAnchorWriteTools(mcpSrv, anchorClient, logger)
 		logger.Info("write tools enabled (anchor_prepare_*, evm_send_raw_transaction)")

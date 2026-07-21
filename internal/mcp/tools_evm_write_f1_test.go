@@ -27,7 +27,7 @@ func TestSendRawTx_RecordsWriteAuditInAuthedMode(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// keylessWrites = false (authed mode), audit store configured.
-	h := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, fa, nil, signerGates{}, logger)
+	h := makeSendRawTxHandler(&captureClient{txHash: "0xdef"}, anchorHex, false, false, fa, nil, signerGates{}, logger)
 	_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
 	if err != nil {
 		t.Fatalf("handler: %v", err)

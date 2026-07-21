@@ -493,7 +493,10 @@ func TestHandler_CallContract_InvalidFromRejected(t *testing.T) {
 
 func TestHandler_SendRawTx_Happy(t *testing.T) {
 	m := &mockEVM{sendTxHash: "0xdeadbeef"}
-	handler := makeSendRawTxHandler(m, testAddr, false, nil, nil, signerGates{}, testLogger())
+	// relayAllowAny=true: this test broadcasts a placeholder hex that does not
+	// decode, exercising the escape-hatch best-effort passthrough. The
+	// scoped-default path is covered in tools_evm_write_test.go.
+	handler := makeSendRawTxHandler(m, testAddr, false, true, nil, nil, signerGates{}, testLogger())
 
 	stubReq := &mcp.CallToolRequest{}
 	_, out, err := handler(ctx, stubReq, sendRawTxInput{SignedTxHex: "0xf86c..."})
@@ -506,7 +509,7 @@ func TestHandler_SendRawTx_Happy(t *testing.T) {
 }
 
 func TestHandler_SendRawTx_Empty(t *testing.T) {
-	handler := makeSendRawTxHandler(&mockEVM{}, testAddr, false, nil, nil, signerGates{}, testLogger())
+	handler := makeSendRawTxHandler(&mockEVM{}, testAddr, false, false, nil, nil, signerGates{}, testLogger())
 
 	_, _, err := handler(ctx, nil, sendRawTxInput{SignedTxHex: ""})
 	if err == nil {

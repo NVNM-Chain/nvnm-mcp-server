@@ -539,7 +539,13 @@ increase(mcp_write_relay_scope_rejected_total{cause="relay_scope"}[5m]) > <thres
 Callers are submitting signed transactions whose `to` is not the
 anchor precompile — the relay-scope guard is rejecting off-target
 broadcasts. A sustained spike on `cause="relay_scope"` is the primary
-relay-abuse signal. `cause="decode"` indicates malformed-input
+relay-abuse signal. Note the guard now runs on **both** the keyless and
+the authenticated/self-host paths, so on a self-hosted deployment these
+rejections can come from an authenticated caller too. If a self-host
+operator is *legitimately* broadcasting non-anchor transactions (e.g. a
+registry-contract deploy), that is the intended signal to set
+`MCP_RELAY_ALLOW_ANY=true` (authed path only) rather than a sign of abuse —
+see `docs/RUNBOOK.md` § "Anonymous writes". `cause="decode"` indicates malformed-input
 probing; `cause="anchor_misconfig"` is a server misconfiguration that
 boot-time validation makes **provably unreachable** at runtime (see
 `docs/RUNBOOK.md` § "Anonymous writes" for the guard) — treat any

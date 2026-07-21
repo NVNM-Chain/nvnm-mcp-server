@@ -446,8 +446,10 @@ alerting posture.
   only captured keyless-mode broadcasts. `evm_send_raw_transaction` now
   audits **both** modes: under `MCP_KEYLESS_WRITES=true` the handler decodes,
   enforces relay-scope, and audits; with keyless writes **off**, the handler
-  still decodes the signed transaction best-effort solely to record a
-  signer-keyed `write_audit` row (no relay-scope enforcement, raw passthrough)
+  decodes and enforces the **same** anchor-precompile relay-scope gate before
+  recording a signer-keyed `write_audit` row and broadcasting the caller's raw
+  bytes (shared `decodeAndScope`; the escape hatch `MCP_RELAY_ALLOW_ANY=true`
+  reverts the authed path to best-effort decode with no scope enforcement)
   — see `internal/mcp/tools_evm_write.go` `resolveBroadcast`.
 - **Per-call telemetry.** The middleware in `internal/telemetry/middleware.go`
   logs every tool call with `method`, `tool`, `request_id`, `client_id`,
