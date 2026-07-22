@@ -24,8 +24,17 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    # Health/metrics -- allow Prometheus scraper and kubelet probes.
-    - from: []
+    # Metrics -- scope to the monitoring namespace rather than "from: []"
+    # (which exposed the unauthenticated /metrics endpoint to every pod in the
+    # cluster). Adjust the namespaceSelector label to match where your
+    # Prometheus runs (K8-1). Kubelet liveness/readiness probes on this port
+    # originate from the node, not a pod, and bypass NetworkPolicy in most CNIs;
+    # if your CNI enforces policy on node-sourced traffic, add a rule admitting
+    # the node CIDR to port 9090.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - protocol: TCP
           port: 9090
@@ -37,18 +46,27 @@ spec:
     # narrow ingress rule here scoped to their ops tooling
     # (namespaceSelector + podSelector), NOT "from: []".
   egress:
-    # Outbound to EVM RPC (HTTPS)
+    # Outbound to EVM RPC (HTTPS). Destination is operator-specific (an external
+    # endpoint), so "to: []" is left as the default -- but harden it: restrict
+    # to your RPC provider's CIDR via an ipBlock once known, so a compromised pod
+    # cannot exfiltrate to arbitrary HTTPS hosts (K8-1).
     - to: []
       ports:
         - protocol: TCP
           port: 443
-    # Outbound to OTLP collector (gRPC, typically 4317)
+    # Outbound to OTLP collector (gRPC, typically 4317). If your collector runs
+    # in-cluster, scope this to its namespaceSelector; if external, restrict to
+    # its CIDR via ipBlock rather than "to: []" (K8-1).
     - to: []
       ports:
         - protocol: TCP
           port: 4317
-    # DNS resolution
-    - to: []
+    # DNS resolution -- scoped to kube-system (kube-dns / CoreDNS) rather than
+    # "to: []" (K8-1). Adjust if your cluster DNS runs in another namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
       ports:
         - protocol: UDP
           port: 53

@@ -23,17 +23,21 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # Confine syscalls to the runtime default profile. Present in the Helm
+        # chart (values.yaml) but previously omitted here -- required for the
+        # Pod Security Standards "restricted" profile (K8-2).
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: nvnm-mcp-server
-          # Pin to an immutable digest in production. ":latest" is a
-          # mutable tag; a registry-side overwrite or supply-chain push
-          # silently propagates on every pod restart. Generate the
-          # digest from the signed release image and substitute below:
-          #   image: ghcr.io/nvnm-chain/nvnm-mcp-server@sha256:<digest>
-          # The Dockerfile already digest-pins both base images; the
-          # deployment is the missing link in the chain. CI does not
-          # yet push a digest-stable image, so :latest is left here
-          # explicitly as a TODO for the release pipeline (#image-pin).
+          # ":latest" here is OVERRIDDEN by the `images:` transformer in
+          # kustomization.yaml, which pins the tag (interim) or digest (SC-1) at
+          # a single point -- edit the pin there, not this line. ":latest" is a
+          # mutable tag; a registry-side overwrite or supply-chain push would
+          # otherwise silently propagate on every pod restart. The Dockerfile
+          # already digest-pins both base images; the kustomize pin closes the
+          # remaining link. Production should pin a digest and enforce signature
+          # verification at admission (see kustomization.yaml).
           image: ghcr.io/nvnm-chain/nvnm-mcp-server:latest
           imagePullPolicy: IfNotPresent
           args:
