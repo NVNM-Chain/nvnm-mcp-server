@@ -53,6 +53,57 @@ func TestSafeAddr(t *testing.T) {
 	}
 }
 
+func TestSafeEmail(t *testing.T) {
+	tests := []struct {
+		name  string
+		email string
+		want  string
+	}{
+		{
+			name:  "standard address keeps first char and domain",
+			email: "alice@example.com",
+			want:  "a***@example.com",
+		},
+		{
+			name:  "subdomain preserved",
+			email: "bob@mail.corp.example.io",
+			want:  "b***@mail.corp.example.io",
+		},
+		{
+			name:  "no at-sign is fully redacted",
+			email: "not-an-email",
+			want:  "[redacted_email]",
+		},
+		{
+			name:  "empty is fully redacted",
+			email: "",
+			want:  "[redacted_email]",
+		},
+		{
+			name:  "missing domain is fully redacted",
+			email: "alice@",
+			want:  "[redacted_email]",
+		},
+		{
+			name:  "missing local part is fully redacted",
+			email: "@example.com",
+			want:  "[redacted_email]",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			attr := SafeEmail("email", tc.email)
+			if attr.Value.String() != tc.want {
+				t.Errorf("SafeEmail(%q) = %q, want %q", tc.email, attr.Value.String(), tc.want)
+			}
+			if attr.Key != "email" {
+				t.Errorf("key = %q, want %q", attr.Key, "email")
+			}
+		})
+	}
+}
+
 func TestSafeURL(t *testing.T) {
 	tests := []struct {
 		name string

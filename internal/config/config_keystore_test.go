@@ -49,7 +49,7 @@ func TestLoad_ReadsKeyStoreEnv(t *testing.T) {
 	setMinimalEnv(t) // mirror the helper used by existing Load tests
 	t.Setenv("KEY_STORE_BACKEND", "postgres")
 	t.Setenv("KEY_STORE_DSN", "postgres://u:p@h:5432/db")
-	t.Setenv("KEY_HMAC_PEPPER", "active")
+	t.Setenv("KEY_HMAC_PEPPER", "an-active-pepper-of-at-least-32-chars!!")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
