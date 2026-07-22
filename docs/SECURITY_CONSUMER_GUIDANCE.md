@@ -47,7 +47,11 @@ The server **does**:
 - Apply rate limiting and authentication so an attacker cannot
   brute-force a destination to publish poisoned strings.
 - Audit-log every write so a post-incident investigator can trace
-  which API key created or modified an offending record.
+  which on-chain signer created or modified an offending record. The
+  persisted write-audit is keyed by the recovered signer address, not an
+  API key — anonymous keyless writes carry no key at all; for
+  authenticated writes the caller's `client_id` additionally appears in
+  the audit log line.
 
 ### What consumers should do
 
