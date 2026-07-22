@@ -10,6 +10,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Masked the caller email in the public key-request log line
+  ([internal/mcp/keys_request_http.go](internal/mcp/keys_request_http.go)).** The
+  unauthenticated `POST /api/v1/keys/request` handler logged the full requester
+  email at INFO; it now logs only a masked form (`a***@example.com`) via a new
+  `logging.SafeEmail` helper. `request_id` already links to the full stored
+  record, so no operator capability is lost. Surfaced by the security assessment
+  (finding LG-3).
+- **Bounded the upstream broadcast error persisted to the write-audit trail
+  ([internal/mcp/tools_evm_write.go](internal/mcp/tools_evm_write.go)).** The
+  node-returned error string on a failed broadcast is now capped at 512
+  characters before it reaches `write_audit.Error` or the audit log. The client
+  never sees this error (`SafeForClient` collapses it), but an unbounded reply
+  from a hostile/MITM'd node could otherwise bloat the audit column and log sink.
+  Surfaced by the security assessment (finding LG-2).
 - **`KEY_HMAC_PEPPER` now has a boot-time length floor
   ([internal/config/config.go](internal/config/config.go)).** A set pepper
   (active or previous) shorter than 32 characters fails boot with

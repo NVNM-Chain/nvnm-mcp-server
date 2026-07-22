@@ -10,6 +10,8 @@ import (
 	"net/mail"
 	"strings"
 	"unicode"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
 
 // KeyRequestPath is the URL path the public self-serve endpoint
@@ -162,9 +164,12 @@ func NewKeyRequestHandler(cfg KeyRequestHandlerConfig) http.Handler {
 			return
 		}
 
+		// Redact the caller email: this is a public unauthenticated path, and
+		// request_id already links to the full stored record for follow-up. Only
+		// a masked form (first char + domain) reaches the log sink (LG-3).
 		cfg.Logger.Info("key request: accepted",
 			slog.String("request_id", req.ID),
-			slog.String("email", req.Email),
+			logging.SafeEmail("email", req.Email),
 			slog.String("ip", ip),
 		)
 		writeKeyRequestJSON(w, cfg.Logger, http.StatusAccepted, KeyRequestResponse{
