@@ -71,9 +71,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a malformed-response panic into an `ErrNodeResponseDecode` error instead of
   crashing the stdio process. This mirrors the `recover()` + size cap already on
   the caller-transaction decode path and satisfies supplement invariant INV-6.
-  The `defiweb` ABI decoder was found bounds-checked in testing; its guard is
-  precautionary defense-in-depth. Surfaced by the pre-red-team security
-  assessment (findings EV-1, EV-2).
+  Surfaced by the pre-red-team security assessment (findings EV-1, EV-2).
+- **Fuzz-hardened the untrusted decode boundary
+  ([internal/evm/decode_fuzz_test.go](internal/evm/decode_fuzz_test.go),
+  [internal/anchor/decode_fuzz_test.go](internal/anchor/decode_fuzz_test.go)).**
+  Go native fuzz targets for the caller-tx decode (11.3M execs) and the anchor
+  ABI decode (3.4M execs). The caller path held every invariant (no panic
+  escapes `recover()`; `CanonicalRaw` is a signer fixed-point — the
+  parser-differential defense). Fuzzing also **corrects an earlier
+  characterization**: the `defiweb` ABI decoder is *not* bounds-checked — an
+  unguarded probe panicked it in 1.6s with a 29-byte input (`slice bounds out of
+  range [-8388608:]`, a length prefix decoded as a negative index). The EV-2
+  anchor guard therefore defends a **real, trivially-craftable hostile-node DoS**,
+  not a hypothetical one; that crashing input is now a regression seed.
 - **Pinned the CI license-check tool: `go-licenses@latest` → `@v1.6.0`
   ([.github/workflows/ci.yml](.github/workflows/ci.yml)).** An unpinned
   `go install ...@latest` resolves to whatever the module proxy serves at run
