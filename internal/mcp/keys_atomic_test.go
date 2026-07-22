@@ -51,6 +51,10 @@ func TestSaveKeysFile_AtomicNoTempLeak(t *testing.T) {
 // (if any) should remain untouched. This is the property that motivated
 // atomic-rename in the first place.
 func TestSaveKeysFile_KeepsExistingOnFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory does not block writes, so the failure path cannot be exercised")
+	}
+
 	dir := t.TempDir()
 	target := filepath.Join(dir, "keys.json")
 
