@@ -6,13 +6,15 @@ on:
       - 'v*'
 
 permissions:
-  contents: write   # required to create the GitHub Release and upload assets
-  id-token: write   # required for Cosign keyless signing via Sigstore OIDC
+  contents: read
 
 jobs:
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Cosign keyless signing via Sigstore OIDC (SC-3: scoped to the signing job)
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +85,8 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: write  # create the GitHub Release and upload assets (SC-3: no id-token; this job does not sign)
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:

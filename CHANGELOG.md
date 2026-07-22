@@ -10,6 +10,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Scoped `id-token: write` (and `packages`/`contents: write`) from workflow
+  level down to the specific jobs that need them
+  ([.github/workflows/ci.yml](.github/workflows/ci.yml),
+  [image.yml](.github/workflows/image.yml),
+  [release.yml](.github/workflows/release.yml)).** All three workflows granted
+  `id-token: write` at workflow scope, so *every* job in them could mint a
+  Sigstore-attributable OIDC token — including jobs that never sign. Job-level
+  `permissions` blocks replace workflow inheritance, so the token now reaches
+  only the Cosign signing jobs (`check`, `image`, `build`); the publish job
+  (`release`) keeps `contents: write` but not `id-token`, and any future job
+  added without a block inherits the minimal `contents: read` default. Surfaced
+  by the pre-red-team security assessment (finding SC-3). No image change.
 - **Bumped `google.golang.org/grpc` v1.80.0 → v1.82.1 to clear a High
   Dependabot alert (GHSA gRPC-Go xDS RBAC / HTTP/2, CVSS 8.8).** gRPC is an
   indirect dependency pulled transitively via `goose` and the OTLP/gRPC
