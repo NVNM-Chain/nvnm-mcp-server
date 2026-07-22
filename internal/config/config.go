@@ -89,6 +89,14 @@ var (
 	ErrPepperRequired = errors.New(
 		"KEY_HMAC_PEPPER is required when KEY_STORE_BACKEND is \"postgres\" and " +
 			"AUTH_PROVIDER is \"apikey\" (a peppered Postgres store must not run unpeppered)")
+	// ErrPepperTooShort is returned when KEY_HMAC_PEPPER (or its previous
+	// value) is set but shorter than MinKeyHMACPepperLen. A short pepper is
+	// brute-forceable and gives false confidence -- arguably worse than none --
+	// so a set-but-weak pepper fails boot rather than silently weakening the
+	// key-hash MAC. The length floor is the actionable proxy for entropy that
+	// can be checked at startup (KS-2).
+	ErrPepperTooShort = errors.New(
+		"KEY_HMAC_PEPPER must be at least 32 characters of high-entropy secret")
 	ErrKeylessWritesRequiresDSN = errors.New(
 		"MCP_KEYLESS_PG_DSN is required when MCP_KEYLESS_WRITES is true " +
 			"(keyless writes without a shared-state audit backend is not a supported mode; " +
@@ -673,6 +681,9 @@ func (c *Config) Validate() error {
 	if err := c.validateAuth(); err != nil {
 		return err
 	}
+	if err := c.validatePepperStrength(); err != nil {
+		return err
+	}
 	if err := c.validateKeyStore(); err != nil {
 		return err
 	}
@@ -762,6 +773,25 @@ func (c *Config) validateKeyStore() error {
 	default:
 		return fmt.Errorf("%w: got %q", ErrInvalidKeyStoreBackend, c.KeyStoreBackend)
 	}
+}
+
+// MinKeyHMACPepperLen is the minimum accepted length for KEY_HMAC_PEPPER. A
+// 32-character random secret carries >=128 bits of entropy; the length floor
+// is the actionable proxy for entropy that can be enforced at boot (KS-2).
+const MinKeyHMACPepperLen = 32
+
+// validatePepperStrength enforces a boot-time length floor on a set
+// KEY_HMAC_PEPPER (active or previous). A set-but-weak pepper is
+// brute-forceable and worse than none, so it fails boot rather than silently
+// running a weak MAC (KS-2). Unset (unpeppered) mode remains allowed.
+func (c *Config) validatePepperStrength() error {
+	if n := len(c.KeyHMACPepper); n > 0 && n < MinKeyHMACPepperLen {
+		return fmt.Errorf("%w: got %d characters", ErrPepperTooShort, n)
+	}
+	if n := len(c.KeyHMACPepperPrevious); n > 0 && n < MinKeyHMACPepperLen {
+		return fmt.Errorf("%w: KEY_HMAC_PEPPER_PREVIOUS has %d characters", ErrPepperTooShort, n)
+	}
+	return nil
 }
 
 func (c *Config) validateAuth() error {

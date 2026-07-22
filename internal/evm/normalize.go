@@ -22,7 +22,12 @@ func NewClient(ctx context.Context, rpcURL string, timeout time.Duration) (Clien
 	defer cancel()
 	_ = dialCtx // reserved for future use (defiweb's HTTP transport does not currently take a connect-context)
 
-	tport, err := transport.NewHTTP(transport.HTTPOptions{URL: rpcURL})
+	// Cap every RPC response body: node responses are untrusted and an
+	// unbounded reply from a hostile/MITM'd node would OOM the process (EV-1).
+	tport, err := transport.NewHTTP(transport.HTTPOptions{
+		URL:        rpcURL,
+		HTTPClient: newLimitedHTTPClient(),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build HTTP transport: %w", err)
 	}

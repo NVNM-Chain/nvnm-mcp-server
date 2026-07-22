@@ -19,6 +19,27 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
+// maxAuditErrLen bounds an upstream (node-controlled) error string before it is
+// persisted to write_audit.Error or written to the audit log. The client never
+// sees this error -- SafeForClient collapses it at the tool boundary -- but a
+// hostile or MITM'd node could return an arbitrarily large error body that
+// would otherwise bloat the audit column and log sink (LG-2). The bounded
+// message stays diagnostic for operators.
+const maxAuditErrLen = 512
+
+// boundAuditErr returns err's message capped at maxAuditErrLen, with a marker
+// when truncated. Empty for a nil error.
+func boundAuditErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	if len(s) > maxAuditErrLen {
+		return s[:maxAuditErrLen] + "...[truncated]"
+	}
+	return s
+}
+
 // signerGates bundles the Phase-5 per-signer enforcement dependencies +
 // policy for the keyless write path (blacklist + quota). Zero value (nil
 // stores) disables the gates -- used by non-keyless/self-host call sites and
@@ -175,10 +196,10 @@ func makeSendRawTxHandler(
 				slog.String("tool", "evm_send_raw_transaction"),
 				slog.String("phase", "broadcast_failed"),
 				slog.Int("signed_tx_len", len(input.SignedTxHex)),
-				slog.String("error", err.Error()),
+				slog.String("error", boundAuditErr(err)),
 			}, identityAttrs()...)
 			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup(failAttrs))
-			recordAudit("broadcast_failed", "", err.Error())
+			recordAudit("broadcast_failed", "", boundAuditErr(err))
 			recordBroadcast("failed")
 			return nil, sendRawTxOutput{}, err
 		}

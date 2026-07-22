@@ -22,6 +22,58 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`release`) keeps `contents: write` but not `id-token`, and any future job
   added without a block inherits the minimal `contents: read` default. Surfaced
   by the pre-red-team security assessment (finding SC-3). No image change.
+- **Bumped `google.golang.org/grpc` v1.80.0 → v1.82.1 to clear a High
+  Dependabot alert (GHSA gRPC-Go xDS RBAC / HTTP/2, CVSS 8.8).** gRPC is an
+  indirect dependency pulled transitively via `goose` and the OTLP/gRPC
+  telemetry exporters. The advisory affects gRPC's xDS RBAC authorization engine
+  and HTTP/2 transport *server*; this server never runs a gRPC server and does
+  not use xDS (our only gRPC use is the OTLP exporter client), so the vulnerable
+  code is not reachable — this is a hygiene bump to keep the public alert page
+  clean. Pulled `golang.org/x/oauth2` and `genproto/googleapis/api` forward in
+  step (MVS; both permissively licensed). No first-party code change.
+- **Made the Docker image build hermetic ([Dockerfile](Dockerfile)).** The
+  builder stage now compiles with `-mod=vendor` against the committed `vendor/`
+  tree and no longer runs `go mod download`, so the image build never contacts
+  the module proxy. This removes the proxy-flake failure mode that hit PR #47's
+  image job and makes the compiled dependency set supply-chain-deterministic
+  (what is reviewed in `vendor/` is exactly what is built). No change to the
+  compiled binary. Spotted during the pre-red-team security assessment.
+- **Masked the caller email in the public key-request log line
+  ([internal/mcp/keys_request_http.go](internal/mcp/keys_request_http.go)).** The
+  unauthenticated `POST /api/v1/keys/request` handler logged the full requester
+  email at INFO; it now logs only a masked form (`a***@example.com`) via a new
+  `logging.SafeEmail` helper. `request_id` already links to the full stored
+  record, so no operator capability is lost. Surfaced by the security assessment
+  (finding LG-3).
+- **Bounded the upstream broadcast error persisted to the write-audit trail
+  ([internal/mcp/tools_evm_write.go](internal/mcp/tools_evm_write.go)).** The
+  node-returned error string on a failed broadcast is now capped at 512
+  characters before it reaches `write_audit.Error` or the audit log. The client
+  never sees this error (`SafeForClient` collapses it), but an unbounded reply
+  from a hostile/MITM'd node could otherwise bloat the audit column and log sink.
+  Surfaced by the security assessment (finding LG-2).
+- **`KEY_HMAC_PEPPER` now has a boot-time length floor
+  ([internal/config/config.go](internal/config/config.go)).** A set pepper
+  (active or previous) shorter than 32 characters fails boot with
+  `ErrPepperTooShort`. Previously any non-empty value was accepted, so a weak,
+  brute-forceable pepper silently weakened the key-hash MAC while giving the
+  false confidence of "peppered." Unset (unpeppered) mode is unchanged. Operators
+  running a pepper shorter than 32 characters must rotate to a ≥ 32-character
+  high-entropy secret before upgrading. Surfaced by the pre-red-team security
+  assessment (finding KS-2).
+- **Hardened the untrusted RPC-node boundary against denial of service
+  ([internal/evm](internal/evm), [internal/anchor](internal/anchor)).** Node/RPC
+  responses are untrusted (a plaintext `http://` endpoint is permitted, so a
+  hostile or MITM'd node controls the bytes). Two gaps are closed: (EV-1) every
+  response body is now capped at 32 MiB via a limiting `http.RoundTripper`, so an
+  unbounded reply can no longer exhaust process memory before decode; and (EV-2)
+  the node-response decode/normalize paths now run under `recover()`, converting
+  a malformed-response panic into an `ErrNodeResponseDecode` error instead of
+  crashing the stdio process. This mirrors the `recover()` + size cap already on
+  the caller-transaction decode path and satisfies supplement invariant INV-6.
+  The `defiweb` ABI decoder was found bounds-checked in testing; its guard is
+  precautionary defense-in-depth. Surfaced by the pre-red-team security
+  assessment (findings EV-1, EV-2).
 - **Pinned the CI license-check tool: `go-licenses@latest` → `@v1.6.0`
   ([.github/workflows/ci.yml](.github/workflows/ci.yml)).** An unpinned
   `go install ...@latest` resolves to whatever the module proxy serves at run

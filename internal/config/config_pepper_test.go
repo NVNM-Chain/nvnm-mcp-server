@@ -23,11 +23,39 @@ func TestValidateAuth_PreviousPepperWithoutActive_FailsLoud(t *testing.T) {
 func TestValidateAuth_BothPeppersSet_OK(t *testing.T) {
 	c := &Config{
 		AuthProvider:          "apikey",
-		KeyHMACPepper:         "active",
-		KeyHMACPepperPrevious: "old",
+		KeyHMACPepper:         "an-active-pepper-of-at-least-32-chars!!",
+		KeyHMACPepperPrevious: "a-previous-pepper-of-at-least-32-chars!",
 	}
 	if err := c.validateAuth(); err != nil {
 		t.Fatalf("validateAuth with both peppers = %v, want nil", err)
+	}
+}
+
+func TestValidatePepperStrength_ShortActivePepper_FailsLoud(t *testing.T) {
+	c := &Config{AuthProvider: "apikey", KeyHMACPepper: "too-short"}
+	if err := c.validatePepperStrength(); !errors.Is(err, ErrPepperTooShort) {
+		t.Fatalf("err = %v, want ErrPepperTooShort", err)
+	}
+}
+
+func TestValidatePepperStrength_ShortPreviousPepper_FailsLoud(t *testing.T) {
+	c := &Config{
+		AuthProvider:          "apikey",
+		KeyHMACPepper:         "an-active-pepper-of-at-least-32-chars!!",
+		KeyHMACPepperPrevious: "short-prev",
+	}
+	if err := c.validatePepperStrength(); !errors.Is(err, ErrPepperTooShort) {
+		t.Fatalf("err = %v, want ErrPepperTooShort for a short previous pepper", err)
+	}
+}
+
+func TestValidatePepperStrength_LongPeppers_OK(t *testing.T) {
+	c := &Config{
+		KeyHMACPepper:         "an-active-pepper-of-at-least-32-chars!!",
+		KeyHMACPepperPrevious: "a-previous-pepper-of-at-least-32-chars!",
+	}
+	if err := c.validatePepperStrength(); err != nil {
+		t.Fatalf("validatePepperStrength with long peppers = %v, want nil", err)
 	}
 }
 
@@ -41,14 +69,15 @@ func TestValidateAuth_NoPepper_OK(t *testing.T) {
 func TestLoad_ReadsPepperEnv(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)
-	t.Setenv("KEY_HMAC_PEPPER", "active-pepper")
-	t.Setenv("KEY_HMAC_PEPPER_PREVIOUS", "prev-pepper")
+	t.Setenv("KEY_HMAC_PEPPER", "an-active-pepper-of-at-least-32-chars!!")
+	t.Setenv("KEY_HMAC_PEPPER_PREVIOUS", "a-previous-pepper-of-at-least-32-chars!")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.KeyHMACPepper != "active-pepper" || cfg.KeyHMACPepperPrevious != "prev-pepper" {
+	if cfg.KeyHMACPepper != "an-active-pepper-of-at-least-32-chars!!" ||
+		cfg.KeyHMACPepperPrevious != "a-previous-pepper-of-at-least-32-chars!" {
 		t.Fatalf("peppers not loaded: %q / %q", cfg.KeyHMACPepper, cfg.KeyHMACPepperPrevious)
 	}
 }
