@@ -84,6 +84,24 @@ func (c *client) withTimeout(ctx context.Context) (context.Context, context.Canc
 	return context.WithTimeout(ctx, c.timeout)
 }
 
+// guardNodeDecode runs fn -- which reads and normalizes an untrusted node/RPC
+// response -- and converts any panic into an ErrNodeResponseDecode error.
+// defiweb/go-eth can panic (nil *big.Int dereference, slice bounds) when
+// decoding malformed input, and node responses are untrusted: config permits a
+// plaintext http:// endpoint, so a hostile or MITM'd node controls these bytes.
+// On the stdio transport an unrecovered panic would crash the process, a
+// denial of service. This mirrors the recover() on the caller-input decode
+// path (decode.go) for the node-response direction (EV-2). Deliberately narrow
+// -- it wraps only node-response decode/normalize, never our own trusted logic.
+func guardNodeDecode(op string, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%s: %w", op, apperrors.ErrNodeResponseDecode)
+		}
+	}()
+	return fn()
+}
+
 // ChainID returns the chain identifier.
 func (c *client) ChainID(ctx context.Context) (*big.Int, error) {
 	ctx, cancel := c.withTimeout(ctx)
@@ -99,11 +117,16 @@ func (c *client) ChainID(ctx context.Context) (*big.Int, error) {
 func (c *client) LatestBlockNumber(ctx context.Context) (uint64, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	n, err := c.rpc.BlockNumber(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return n.Uint64(), nil
+	var out uint64
+	err := guardNodeDecode("get latest block number", func() error {
+		n, err := c.rpc.BlockNumber(ctx)
+		if err != nil {
+			return err
+		}
+		out = n.Uint64()
+		return nil
+	})
+	return out, err
 }
 
 // GetChainInfo returns chain ID and latest block number.
@@ -126,69 +149,94 @@ func (c *client) GetChainInfo(ctx context.Context) (*ChainInfo, error) {
 func (c *client) BlockByNumber(ctx context.Context, number *big.Int, fullTx bool) (*NormalizedBlock, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	block, err := c.rpc.BlockByNumber(ctx, blockNumOrLatest(number), fullTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block by number: %w", err)
-	}
-	return normalizeBlock(block, fullTx), nil
+	var out *NormalizedBlock
+	err := guardNodeDecode("get block by number", func() error {
+		block, err := c.rpc.BlockByNumber(ctx, blockNumOrLatest(number), fullTx)
+		if err != nil {
+			return fmt.Errorf("failed to get block by number: %w", err)
+		}
+		out = normalizeBlock(block, fullTx)
+		return nil
+	})
+	return out, err
 }
 
 // BlockByHash returns a normalized block by hash.
 func (c *client) BlockByHash(ctx context.Context, hash defitypes.Hash, fullTx bool) (*NormalizedBlock, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	block, err := c.rpc.BlockByHash(ctx, hash, fullTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block by hash: %w", err)
-	}
-	return normalizeBlock(block, fullTx), nil
+	var out *NormalizedBlock
+	err := guardNodeDecode("get block by hash", func() error {
+		block, err := c.rpc.BlockByHash(ctx, hash, fullTx)
+		if err != nil {
+			return fmt.Errorf("failed to get block by hash: %w", err)
+		}
+		out = normalizeBlock(block, fullTx)
+		return nil
+	})
+	return out, err
 }
 
 // TransactionByHash returns a normalized transaction by hash.
 func (c *client) TransactionByHash(ctx context.Context, hash defitypes.Hash) (*NormalizedTransaction, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	tx, err := c.rpc.GetTransactionByHash(ctx, hash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %w", err)
-	}
-	// A missing hash yields either a nil tx or (with some RPC/decoder
-	// combinations) a non-nil zero-value struct with no Hash. Treat both as
-	// not-found: a real transaction -- pending or mined -- always carries a
-	// hash. Without the Hash check a garbage hash decoded into an empty
-	// struct, whose nil BlockNumber then read as "pending" with an empty hash.
-	if tx == nil || tx.Hash == nil {
-		return nil, apperrors.ErrTxNotFound
-	}
-	// defiweb's OnChainTransaction surfaces BlockNumber/BlockHash; a
-	// pending transaction has them as nil/zero.
-	isPending := tx.BlockNumber == nil
-	return normalizeOnChainTransaction(tx, isPending), nil
+	var out *NormalizedTransaction
+	err := guardNodeDecode("get transaction by hash", func() error {
+		tx, err := c.rpc.GetTransactionByHash(ctx, hash)
+		if err != nil {
+			return fmt.Errorf("failed to get transaction: %w", err)
+		}
+		// A missing hash yields either a nil tx or (with some RPC/decoder
+		// combinations) a non-nil zero-value struct with no Hash. Treat both as
+		// not-found: a real transaction -- pending or mined -- always carries a
+		// hash. Without the Hash check a garbage hash decoded into an empty
+		// struct, whose nil BlockNumber then read as "pending" with an empty hash.
+		if tx == nil || tx.Hash == nil {
+			return apperrors.ErrTxNotFound
+		}
+		// defiweb's OnChainTransaction surfaces BlockNumber/BlockHash; a
+		// pending transaction has them as nil/zero.
+		isPending := tx.BlockNumber == nil
+		out = normalizeOnChainTransaction(tx, isPending)
+		return nil
+	})
+	return out, err
 }
 
 // TransactionReceipt returns a normalized receipt by transaction hash.
 func (c *client) TransactionReceipt(ctx context.Context, hash defitypes.Hash) (*NormalizedReceipt, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	receipt, err := c.rpc.GetTransactionReceipt(ctx, hash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction receipt: %w", err)
-	}
-	if receipt == nil {
-		return nil, apperrors.ErrTxNotFound
-	}
-	return normalizeReceipt(receipt), nil
+	var out *NormalizedReceipt
+	err := guardNodeDecode("get transaction receipt", func() error {
+		receipt, err := c.rpc.GetTransactionReceipt(ctx, hash)
+		if err != nil {
+			return fmt.Errorf("failed to get transaction receipt: %w", err)
+		}
+		if receipt == nil {
+			return apperrors.ErrTxNotFound
+		}
+		out = normalizeReceipt(receipt)
+		return nil
+	})
+	return out, err
 }
 
 // BalanceAt returns a normalized balance for an address at a given block.
 func (c *client) BalanceAt(ctx context.Context, address defitypes.Address, block *big.Int) (*NormalizedBalance, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	balance, err := c.rpc.GetBalance(ctx, address, blockNumOrLatest(block))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get balance: %w", err)
-	}
-	return normalizeBalance(address, balance), nil
+	var out *NormalizedBalance
+	err := guardNodeDecode("get balance", func() error {
+		balance, err := c.rpc.GetBalance(ctx, address, blockNumOrLatest(block))
+		if err != nil {
+			return fmt.Errorf("failed to get balance: %w", err)
+		}
+		out = normalizeBalance(address, balance)
+		return nil
+	})
+	return out, err
 }
 
 // CodeAt returns the contract bytecode at an address.
@@ -223,15 +271,19 @@ func (c *client) CallContract(ctx context.Context, msg defitypes.Call, block *bi
 func (c *client) FilterLogs(ctx context.Context, q defitypes.FilterLogsQuery) ([]NormalizedLog, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
-	logs, err := c.rpc.GetLogs(ctx, &q)
-	if err != nil {
-		return nil, fmt.Errorf("failed to filter logs: %w", err)
-	}
-	result := make([]NormalizedLog, len(logs))
-	for i := range logs {
-		result[i] = normalizeLog(&logs[i])
-	}
-	return result, nil
+	var result []NormalizedLog
+	err := guardNodeDecode("filter logs", func() error {
+		logs, err := c.rpc.GetLogs(ctx, &q)
+		if err != nil {
+			return fmt.Errorf("failed to filter logs: %w", err)
+		}
+		result = make([]NormalizedLog, len(logs))
+		for i := range logs {
+			result[i] = normalizeLog(&logs[i])
+		}
+		return nil
+	})
+	return result, err
 }
 
 // PendingNonceAt returns the pending nonce for an address (for transaction construction).

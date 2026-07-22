@@ -10,6 +10,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Hardened the untrusted RPC-node boundary against denial of service
+  ([internal/evm](internal/evm), [internal/anchor](internal/anchor)).** Node/RPC
+  responses are untrusted (a plaintext `http://` endpoint is permitted, so a
+  hostile or MITM'd node controls the bytes). Two gaps are closed: (EV-1) every
+  response body is now capped at 32 MiB via a limiting `http.RoundTripper`, so an
+  unbounded reply can no longer exhaust process memory before decode; and (EV-2)
+  the node-response decode/normalize paths now run under `recover()`, converting
+  a malformed-response panic into an `ErrNodeResponseDecode` error instead of
+  crashing the stdio process. This mirrors the `recover()` + size cap already on
+  the caller-transaction decode path and satisfies supplement invariant INV-6.
+  The `defiweb` ABI decoder was found bounds-checked in testing; its guard is
+  precautionary defense-in-depth. Surfaced by the pre-red-team security
+  assessment (findings EV-1, EV-2).
 - **Pinned the CI license-check tool: `go-licenses@latest` → `@v1.6.0`
   ([.github/workflows/ci.yml](.github/workflows/ci.yml)).** An unpinned
   `go install ...@latest` resolves to whatever the module proxy serves at run
