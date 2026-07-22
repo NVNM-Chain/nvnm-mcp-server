@@ -122,6 +122,12 @@ make help
 # Build
 make build
 
+# Run the test suite (unit + MCP E2E; hermetic, no chain access needed)
+make test
+
+# Verify the same coverage gate CI enforces (-race + >=80% total coverage)
+make coverage-check
+
 # Configure (minimum required)
 export NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io
 export NVNM_CHAIN_ID=787111
@@ -428,6 +434,7 @@ make run-local      # Build and run locally with HTTP + testnet config
 make test           # Run all tests
 make test-unit      # Unit tests only (-short)
 make test-coverage  # Tests with -race + coverage report
+make coverage-check # test-coverage + enforce the 80% total coverage gate (same as CI)
 make test-verbose   # Verbose test output
 make check-all      # format + vet + lint
 make format         # gofmt + goimports
@@ -460,6 +467,35 @@ make key-enable NAME=my-agent                            # Re-enable a disabled 
 ```
 
 Keys are stored in `.mcp-keys.json` (gitignored). Set `MCP_API_KEYS_FILE=.mcp-keys.json` to use them.
+
+### Local testing
+
+The default suite is hermetic — no chain access, no credentials — and is the
+same one CI runs on every PR:
+
+```bash
+make test             # Unit + golden + MCP E2E tests (fast, no network)
+make coverage-check   # -race + coverage report + the 80% total-coverage gate
+open coverage.html    # Inspect per-line coverage after coverage-check/test-coverage
+```
+
+CI fails any PR whose total statement coverage drops below **80%**
+(`scripts/check_coverage.sh`), so run `make coverage-check` before pushing.
+Every new feature needs unit tests for its success/error paths and, if it
+changes the MCP surface, E2E tests through the HTTP transport — see
+[AGENTS.md](AGENTS.md) for the full requirements.
+
+Optional local layers:
+
+```bash
+# Postgres-backed internal/mcp tests (audit log, quotas, migrations) —
+# they skip unless a DSN is set. Any disposable Postgres 16 works:
+export NVNM_TEST_PG_DSN='postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable'
+make test
+
+make test-integration # Live-testnet integration tests (needs network + .env credentials)
+make docker-smoke     # Build image, boot container, verify healthz/readyz + MCP init
+```
 
 For comprehensive testing documentation, including test architecture, framework details, and latest results, see [docs/TESTING.md](docs/TESTING.md).
 
