@@ -10,6 +10,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Bumped `google.golang.org/grpc` v1.80.0 → v1.82.1 to clear a High
+  Dependabot alert (GHSA gRPC-Go xDS RBAC / HTTP/2, CVSS 8.8).** gRPC is an
+  indirect dependency pulled transitively via `goose` and the OTLP/gRPC
+  telemetry exporters. The advisory affects gRPC's xDS RBAC authorization engine
+  and HTTP/2 transport *server*; this server never runs a gRPC server and does
+  not use xDS (our only gRPC use is the OTLP exporter client), so the vulnerable
+  code is not reachable — this is a hygiene bump to keep the public alert page
+  clean. Pulled `golang.org/x/oauth2` and `genproto/googleapis/api` forward in
+  step (MVS; both permissively licensed). No first-party code change.
 - **Made the Docker image build hermetic ([Dockerfile](Dockerfile)).** The
   builder stage now compiles with `-mod=vendor` against the committed `vendor/`
   tree and no longer runs `go mod download`, so the image build never contacts
