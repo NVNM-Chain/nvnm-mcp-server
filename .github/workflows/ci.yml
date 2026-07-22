@@ -8,12 +8,14 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # required for Cosign keyless signing on push to main
 
 jobs:
   check:
     name: Lint & Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required for Cosign keyless signing on push to main (SC-3: scoped to this job)
     services:
       postgres:
         image: postgres:16
