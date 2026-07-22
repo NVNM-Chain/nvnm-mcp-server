@@ -28,6 +28,21 @@ func SafeURL(key, rawURL string) slog.Attr {
 	return slog.String(key, u.Scheme+"://"+u.Host)
 }
 
+// SafeEmail redacts an email address to its first local-part character and
+// full domain, dropping the rest of the local part. Example:
+// "alice@example.com" -> "a***@example.com". An address without exactly the
+// shape local@domain (no "@", empty local part, or empty domain) is fully
+// redacted -- such input should never reach a log because the request handler
+// validates the address first, so a malformed value here is treated as
+// untrusted and hidden entirely.
+func SafeEmail(key, email string) slog.Attr {
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return slog.String(key, "[redacted_email]")
+	}
+	return slog.String(key, email[:1]+"***"+email[at:])
+}
+
 // SafeTxData logs the length of transaction data rather than its content.
 func SafeTxData(key, data string) slog.Attr {
 	data = strings.TrimPrefix(data, "0x")

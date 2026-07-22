@@ -66,6 +66,17 @@ var (
 	ErrCircuitOpen        = errors.New("circuit breaker is open")
 	ErrRateLimited        = errors.New("upstream rate limit exceeded")
 	ErrUnexpectedType     = errors.New("unexpected result type")
+	// ErrNodeResponseDecode marks a node/RPC response that could not be
+	// decoded -- including a decode that panicked in the underlying
+	// defiweb/go-eth library on malformed input. Node responses are untrusted
+	// (plaintext http:// is permitted); an unrecovered panic on the stdio
+	// transport would crash the process, so decode panics on node responses
+	// are converted to this error (EV-2).
+	ErrNodeResponseDecode = errors.New("decode of node response failed")
+	// ErrNodeResponseTooLarge marks a node/RPC response body that exceeded the
+	// maximum size the client will read. A hostile or MITM'd node could
+	// otherwise stream an unbounded reply and exhaust process memory (EV-1).
+	ErrNodeResponseTooLarge = errors.New("node response exceeds maximum allowed size")
 )
 
 // Client-safe sentinel errors returned by SafeForClient to avoid dynamic error construction.

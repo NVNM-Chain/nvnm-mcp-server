@@ -201,7 +201,9 @@ func (c *client) GetRegistry(
 
 	var rows []abiRegistryRow
 	var page abiPaginationOutput
-	if err := c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page); err != nil {
+	if err := guardABIDecode(func() error {
+		return c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page)
+	}); err != nil {
 		return nil, fmt.Errorf("unpack registries response: %w", err)
 	}
 
@@ -261,7 +263,9 @@ func (c *client) GetRegistries(
 
 	var rows []abiRegistryRow
 	var page abiPaginationOutput
-	if err := c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page); err != nil {
+	if err := guardABIDecode(func() error {
+		return c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page)
+	}); err != nil {
 		return nil, fmt.Errorf("unpack registries response: %w", err)
 	}
 
@@ -334,7 +338,9 @@ func (c *client) GetRecords(
 
 	var rows []abiRecordRow
 	var page abiPaginationOutput
-	if err := c.parsedABI.Methods["records"].DecodeValues(output, &rows, &page); err != nil {
+	if err := guardABIDecode(func() error {
+		return c.parsedABI.Methods["records"].DecodeValues(output, &rows, &page)
+	}); err != nil {
 		return nil, fmt.Errorf("unpack records response: %w", err)
 	}
 
@@ -381,6 +387,23 @@ func (c *client) requireABI() error {
 		)
 	}
 	return nil
+}
+
+// guardABIDecode runs fn -- an ABI decode of untrusted precompile/node return
+// data -- and converts any panic into an ErrNodeResponseDecode error. defiweb's
+// ABI decoder is bounds-checked for the malformed offsets/lengths exercised in
+// tests, but it is an unaudited third-party library decoding node-controlled
+// bytes; on the stdio transport an unrecovered panic would crash the process
+// (EV-2). This is the node-side counterpart to the caller-tx decode recover()
+// in internal/evm (decode.go) and satisfies supplement invariant INV-6.
+// Deliberately narrow -- it wraps only the ABI decode, not surrounding logic.
+func guardABIDecode(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("decode precompile response panicked: %w", apperrors.ErrNodeResponseDecode)
+		}
+	}()
+	return fn()
 }
 
 func toRegistries(rows []abiRegistryRow) []Registry {
