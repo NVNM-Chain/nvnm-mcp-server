@@ -17,11 +17,14 @@ ENV GOTOOLCHAIN=go1.26.5
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
-RUN go mod download
-
+# Hermetic, vendored build: all dependencies are committed under vendor/, so the
+# build never contacts the module proxy. This makes the image build immune to
+# proxy flakes (one of which failed PR #47's image job) and keeps the dependency
+# set supply-chain-deterministic -- what is reviewed in vendor/ is exactly what
+# is compiled. COPY brings vendor/ in with the source; -mod=vendor forces its use
+# and fails the build rather than silently falling back to the network.
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=vendor \
       -ldflags="-s -w -X github.com/NVNM-Chain/nvnm-mcp-server/internal/version.Version=${VERSION}" \
       -o nvnm-mcp-server ./cmd/nvnm-mcp-server
 

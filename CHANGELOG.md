@@ -10,6 +10,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Made the Docker image build hermetic ([Dockerfile](Dockerfile)).** The
+  builder stage now compiles with `-mod=vendor` against the committed `vendor/`
+  tree and no longer runs `go mod download`, so the image build never contacts
+  the module proxy. This removes the proxy-flake failure mode that hit PR #47's
+  image job and makes the compiled dependency set supply-chain-deterministic
+  (what is reviewed in `vendor/` is exactly what is built). No change to the
+  compiled binary. Spotted during the pre-red-team security assessment.
 - **Masked the caller email in the public key-request log line
   ([internal/mcp/keys_request_http.go](internal/mcp/keys_request_http.go)).** The
   unauthenticated `POST /api/v1/keys/request` handler logged the full requester
