@@ -78,6 +78,50 @@ func TestTracingClient_Close(t *testing.T) {
 	}
 }
 
+// TestTracingClient_DelegatesAllMethods exercises every wrapped RPC
+// method once so the span/metric plumbing around each delegation is
+// covered. The stub returns zero values; only the error is asserted.
+func TestTracingClient_DelegatesAllMethods(t *testing.T) {
+	inner := &stubClient{chainID: big.NewInt(1)}
+	tc := NewTracingClient(inner, "test-host", newTestTracingMetrics(t))
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"LatestBlockNumber": func() error { _, err := tc.LatestBlockNumber(ctx); return err },
+		"GetChainInfo":      func() error { _, err := tc.GetChainInfo(ctx); return err },
+		"BlockByNumber":     func() error { _, err := tc.BlockByNumber(ctx, big.NewInt(1), true); return err },
+		"BlockByHash":       func() error { _, err := tc.BlockByHash(ctx, defitypes.Hash{}, true); return err },
+		"TransactionByHash": func() error { _, err := tc.TransactionByHash(ctx, defitypes.Hash{}); return err },
+		"TransactionReceipt": func() error {
+			_, err := tc.TransactionReceipt(ctx, defitypes.Hash{})
+			return err
+		},
+		"BalanceAt": func() error { _, err := tc.BalanceAt(ctx, defitypes.Address{}, nil); return err },
+		"CodeAt":    func() error { _, err := tc.CodeAt(ctx, defitypes.Address{}, nil); return err },
+		"CallContract": func() error {
+			_, err := tc.CallContract(ctx, defitypes.Call{}, nil)
+			return err
+		},
+		"FilterLogs": func() error {
+			_, err := tc.FilterLogs(ctx, defitypes.FilterLogsQuery{})
+			return err
+		},
+		"PendingNonceAt":   func() error { _, err := tc.PendingNonceAt(ctx, defitypes.Address{}); return err },
+		"SuggestGasPrice":  func() error { _, err := tc.SuggestGasPrice(ctx); return err },
+		"SuggestGasTipCap": func() error { _, err := tc.SuggestGasTipCap(ctx); return err },
+		"EstimateGas":      func() error { _, err := tc.EstimateGas(ctx, defitypes.Call{}); return err },
+		"SendRawTransaction": func() error {
+			_, err := tc.SendRawTransaction(ctx, "0xdeadbeef")
+			return err
+		},
+	}
+	for name, call := range calls {
+		if err := call(); err != nil {
+			t.Errorf("%s: unexpected error: %v", name, err)
+		}
+	}
+}
+
 type stubClient struct {
 	chainID    *big.Int
 	chainIDErr error

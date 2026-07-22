@@ -7,11 +7,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	defitypes "github.com/defiweb/go-eth/types"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
@@ -224,6 +228,159 @@ func TestResilientClient_DelegatesPing(t *testing.T) {
 	rc := NewResilientClient(inner, testResilientConfig(), newTestMetrics(t), slog.Default())
 	if err := rc.Ping(context.Background()); err != nil {
 		t.Fatalf("Ping: %v", err)
+	}
+}
+
+// TestResilientClient_DelegatesAllMethods exercises every wrapped RPC
+// method once so the resilientCall plumbing around each delegation is
+// covered. The stub returns zero values; only the error is asserted.
+func TestResilientClient_DelegatesAllMethods(t *testing.T) {
+	inner := &stubClient{chainID: big.NewInt(1)}
+	rc := NewResilientClient(inner, testResilientConfig(), newTestMetrics(t), slog.Default())
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"LatestBlockNumber": func() error { _, err := rc.LatestBlockNumber(ctx); return err },
+		"GetChainInfo":      func() error { _, err := rc.GetChainInfo(ctx); return err },
+		"BlockByNumber":     func() error { _, err := rc.BlockByNumber(ctx, big.NewInt(1), true); return err },
+		"BlockByHash":       func() error { _, err := rc.BlockByHash(ctx, defitypes.Hash{}, true); return err },
+		"TransactionByHash": func() error { _, err := rc.TransactionByHash(ctx, defitypes.Hash{}); return err },
+		"TransactionReceipt": func() error {
+			_, err := rc.TransactionReceipt(ctx, defitypes.Hash{})
+			return err
+		},
+		"BalanceAt": func() error { _, err := rc.BalanceAt(ctx, defitypes.Address{}, nil); return err },
+		"CodeAt":    func() error { _, err := rc.CodeAt(ctx, defitypes.Address{}, nil); return err },
+		"CallContract": func() error {
+			_, err := rc.CallContract(ctx, defitypes.Call{}, nil)
+			return err
+		},
+		"FilterLogs": func() error {
+			_, err := rc.FilterLogs(ctx, defitypes.FilterLogsQuery{})
+			return err
+		},
+		"PendingNonceAt":   func() error { _, err := rc.PendingNonceAt(ctx, defitypes.Address{}); return err },
+		"SuggestGasPrice":  func() error { _, err := rc.SuggestGasPrice(ctx); return err },
+		"SuggestGasTipCap": func() error { _, err := rc.SuggestGasTipCap(ctx); return err },
+		"EstimateGas":      func() error { _, err := rc.EstimateGas(ctx, defitypes.Call{}); return err },
+	}
+	for name, call := range calls {
+		if err := call(); err != nil {
+			t.Errorf("%s: unexpected error: %v", name, err)
+		}
+	}
+}
+
+func TestResilientClient_SendRawTransactionSuccess(t *testing.T) {
+	inner := &failingClient{} // sendFailCount=0: succeeds immediately
+	rc := NewResilientClient(inner, testResilientConfig(), newTestMetrics(t), slog.Default())
+
+	got, err := rc.SendRawTransaction(context.Background(), "0xdeadbeef")
+	if err != nil {
+		t.Fatalf("SendRawTransaction: %v", err)
+	}
+	if got != "0xabc123" {
+		t.Errorf("hash = %q, want 0xabc123", got)
+	}
+}
+
+func TestResilientClient_SendRawTransactionRateLimited(t *testing.T) {
+	inner := &failingClient{}
+	cfg := testResilientConfig()
+	cfg.RateLimit = 0.001
+	cfg.RateBurst = 1
+	rc := NewResilientClient(inner, cfg, newTestMetrics(t), slog.Default())
+
+	// Consume the single burst token.
+	if _, err := rc.SendRawTransaction(context.Background(), "0xdeadbeef"); err != nil {
+		t.Fatalf("first send should succeed using burst token: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := rc.SendRawTransaction(ctx, "0xdeadbeef")
+	if !errors.Is(err, ierrors.ErrRateLimited) {
+		t.Errorf("error = %v, want ErrRateLimited", err)
+	}
+}
+
+func TestResilientClient_SendRawTransactionCircuitOpen(t *testing.T) {
+	inner := &failingClient{
+		failCount:     100,
+		failErr:       fmt.Errorf("%w: connection refused", ierrors.ErrUpstreamRPC),
+		sendFailCount: 100,
+		sendFailErr:   fmt.Errorf("%w: connection refused", ierrors.ErrUpstreamRPC),
+	}
+	cfg := testResilientConfig()
+	cfg.MaxRetries = 0
+	cfg.BreakerThreshold = 2
+	cfg.BreakerTimeout = 5 * time.Second
+	rc := NewResilientClient(inner, cfg, newTestMetrics(t), slog.Default())
+
+	for i := 0; i < 2; i++ {
+		_, _ = rc.ChainID(context.Background())
+	}
+
+	_, err := rc.SendRawTransaction(context.Background(), "0xdeadbeef")
+	if !errors.Is(err, ierrors.ErrCircuitOpen) {
+		t.Errorf("error = %v, want ErrCircuitOpen", err)
+	}
+}
+
+// TestResilientClient_BreakerRecovers drives the breaker through the
+// full open -> half-open -> closed cycle so every OnStateChange arm is
+// exercised.
+func TestResilientClient_BreakerRecovers(t *testing.T) {
+	inner := &failingClient{
+		failCount:    2,
+		failErr:      fmt.Errorf("%w: connection refused", ierrors.ErrUpstreamRPC),
+		chainIDValue: big.NewInt(58887),
+	}
+	cfg := testResilientConfig()
+	cfg.MaxRetries = 0
+	cfg.BreakerThreshold = 2
+	cfg.BreakerTimeout = 20 * time.Millisecond
+	rc := NewResilientClient(inner, cfg, newTestMetrics(t), slog.Default())
+
+	// Two failures trip the breaker (closed -> open).
+	for i := 0; i < 2; i++ {
+		_, _ = rc.ChainID(context.Background())
+	}
+	if _, err := rc.ChainID(context.Background()); !errors.Is(err, ierrors.ErrCircuitOpen) {
+		t.Fatalf("error = %v, want ErrCircuitOpen while breaker is open", err)
+	}
+
+	// After the timeout the breaker moves to half-open; the stub now
+	// succeeds, closing it again (open -> half-open -> closed).
+	time.Sleep(cfg.BreakerTimeout + 10*time.Millisecond)
+	got, err := rc.ChainID(context.Background())
+	if err != nil {
+		t.Fatalf("expected success once breaker half-opens: %v", err)
+	}
+	if got.Cmp(big.NewInt(58887)) != 0 {
+		t.Errorf("ChainID = %v, want 58887", got)
+	}
+}
+
+func TestIsTransientRPCError_Classification(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"deadline exceeded", context.DeadlineExceeded, true},
+		{"net error", &net.DNSError{Err: "no such host", IsTimeout: true}, true},
+		{"eof", io.EOF, true},
+		{"unexpected eof", io.ErrUnexpectedEOF, true},
+		{"wrapped upstream sentinel", fmt.Errorf("%w: boom", ierrors.ErrUpstreamRPC), true},
+		{"permanent app error", ierrors.ErrInvalidAddress, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTransientRPCError(tc.err); got != tc.want {
+				t.Errorf("isTransientRPCError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 
