@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc15] - 2026-07-22
+
 ### Security
 - **Scoped `id-token: write` (and `packages`/`contents: write`) from workflow
   level down to the specific jobs that need them
