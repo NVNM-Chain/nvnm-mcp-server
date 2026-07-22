@@ -428,6 +428,8 @@ Two additional Postgres tables enforce per-signer abuse limits on the keyless (`
 
 A signer's writes are permitted while `count < MCP_SIGNER_WRITE_RATE` (default `500`) within the current `MCP_SIGNER_WRITE_WINDOW` (default `24h`). Exceeding it rejects the broadcast (`ErrSignerQuotaExceeded`, `cause="signer_quota"` — § 7.1). Env-var reference: `docs/RUNBOOK.md` § "Anonymous writes."
 
+**The quota is a soft ceiling under concurrency.** The check is not atomic with the increment: `Count` is read *before* the broadcast and `Increment` runs *after* it (a successful broadcast must not be double-counted, and a failed one must not count at all, so the increment cannot precede the broadcast). Between that read and that increment, other concurrent broadcasts by the same signer can pass the same `count < RATE` test, so a burst of simultaneous requests can over-admit past `MCP_SIGNER_WRITE_RATE` by roughly the concurrency width. This is an accepted trade-off, not a bug: the quota is a coarse anti-abuse throttle, the over-admission is bounded (it cannot run away — each admitted write still costs gas) and self-corrects once the increments land, and closing it would require a per-signer advisory lock or a serialized transaction on the hot path of every broadcast. Treat the limit as approximate, not exact, for a signer driving high concurrency (assessment finding EA-1).
+
 **`signer_blacklist`:**
 
 | Column | Type | Purpose |
@@ -471,6 +473,8 @@ Values are Go durations; days and months are not units (90 days = `2160h`, 12 mo
 - A `grantRole` window configured while the **anchor ABI is unavailable** is rejected: the selector cannot be derived, `grantRole` rows could not be told apart from ordinary ones, and every one of them would be purged on the shorter window while the server reported success.
 
 **Operational notes.** Deletes are batched (5,000 rows per statement, capped per table per tick) so a large backlog cannot hold long row locks or starve live traffic; the remainder is picked up on the next tick. A failing sweep is logged and retried rather than killing the goroutine. Rows written before migration 0005 carry an empty `method_selector` and are treated as ordinary writes.
+
+**Logs are a second sink, outside the purge.** The retention purge deletes rows from the Postgres tables only. The same broadcast identifiers it governs — the recovered signer, destination, and value — also appear in the structured **audit log lines** (§ 6) that every broadcast emits (`broadcast_ok` / `broadcast_failed`), and those lines are written to the operator's log sink, **not** to any table the purge can reach. Logging these identifiers is deliberate: they are the operator-side abuse-investigation trail (a signer hammering the quota or hitting the blacklist shows up as repeated log lines keyed by the full signer address), and the values are already public on-chain. But because the purge cannot reach them, an operator who *publishes* a retention period must configure their log-pipeline retention to match the windows above — the in-process purge covers the DB copy, not the log copy. A retention claim is only true if it accounts for both sinks. These identifiers never reach the caller (`SafeForClient` collapses client-facing errors); this is an operator-side concern only.
 
 ## 9. Outbound network destinations
 

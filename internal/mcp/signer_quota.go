@@ -17,6 +17,17 @@ import (
 // SignerQuotaStore is the shared-state per-signer write counter. Count reads
 // the current window's tally; Increment adds one to it. Fixed-window: the
 // caller passes a WindowStart-truncated timestamp.
+//
+// Soft ceiling (accepted, EA-1): the read (Count) and the write (Increment) are
+// deliberately separate calls -- Count is checked before the broadcast and
+// Increment runs only after a successful one, so a failed broadcast never
+// consumes quota and a success is never double-counted. The gap between them is
+// not locked, so concurrent broadcasts by the same signer can each pass the same
+// count < RATE check and over-admit past the limit by roughly the concurrency
+// width. This is intentional: the quota is a coarse anti-abuse throttle, the
+// over-admission is gas-bounded and self-correcting, and an exact cap would need
+// a per-signer advisory lock / serialized transaction on every broadcast. See
+// docs/DATA_HANDLING.md § 8.2.
 type SignerQuotaStore interface {
 	Count(ctx context.Context, signer string, windowStart time.Time) (int, error)
 	Increment(ctx context.Context, signer string, windowStart time.Time) error

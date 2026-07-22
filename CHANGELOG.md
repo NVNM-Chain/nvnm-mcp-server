@@ -79,8 +79,29 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on-chain signer, destination, and value in full (public on-chain data forming
   the audit trail). README now matches the code and cross-references
   `docs/DATA_HANDLING.md`. Surfaced by the security assessment (finding LG-1,
-  doc leg). The in-code decision of whether to redact those identifiers in the
-  broadcast logs is deferred to a future code RC.
+  doc leg). The in-code posture is now resolved (see Documentation below):
+  logging these identifiers is retained by design; the log sink's retention is
+  documented as the operator's responsibility.
+
+### Documentation
+- **Corrected the audit-attribution claim in `docs/SECURITY_CONSUMER_GUIDANCE.md`**
+  (finding CG-1). "Trace which API key created or modified an offending record"
+  was false: the write-audit is keyed by the recovered on-chain **signer** (there
+  is no `client_id` column, and anonymous keyless writes carry no API key). The
+  claim now describes signer-based attribution, with the authenticated caller's
+  `client_id` in the audit log line.
+- **Documented the write-audit log sink as outside the retention purge**
+  (finding LG-1, `docs/DATA_HANDLING.md` § 8.3). The in-process purge deletes DB
+  rows only; the same signer/destination/value appear in structured audit log
+  lines governed by the operator's log-pipeline retention. Logging them is
+  deliberate (operator abuse-forensics; values are already public on-chain) and
+  accepted — a published retention period must configure log retention to match.
+- **Documented the per-signer quota as a soft ceiling under concurrency**
+  (finding EA-1, `docs/DATA_HANDLING.md` § 8.2 + `SignerQuotaStore` godoc). The
+  non-atomic `Count`→`Increment` can over-admit past `MCP_SIGNER_WRITE_RATE` by
+  roughly the concurrency width; an accepted trade-off for a coarse, gas-bounded
+  anti-abuse throttle (an exact cap would need a per-signer lock on every
+  broadcast). No behavior change.
 
 ## [1.0.0-rc14] - 2026-07-21
 
