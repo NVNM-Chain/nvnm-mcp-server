@@ -1193,7 +1193,7 @@ zero-config deployments are byte-for-byte unchanged.
 | `HashKey` / `keyhash.go` | `sha256(rawKey)` → hex | `hash_version`-tagged digest: `v0` = plain SHA-256 (unchanged, default); `v1` = HMAC-SHA256 under `KEY_HMAC_PEPPER` when set. |
 | `KeyEntry.KeyHash` on disk | plain SHA-256 hex | same field; value is a plain 64-char hex digest in both versions — the scheme is identified by the adjacent `hash_version` field (omitted/0 = v0, 1 = v1), not by a prefix inside the hash string. |
 | `APIKeyValidator.Validate` | single candidate compare | versioned candidate lookup: computes v1 candidate when pepper active, v0 always; constant-time compare on the matching candidate. |
-| Boot validation | n/a | `ErrPepperPreviousWithoutActive`: server refuses to start if `KEY_HMAC_PEPPER_PREVIOUS` is set without `KEY_HMAC_PEPPER`. |
+| Boot validation | n/a | `ErrPepperPreviousWithoutActive`: server refuses to start if `KEY_HMAC_PEPPER_PREVIOUS` is set without `KEY_HMAC_PEPPER`. `ErrPepperTooShort`: a set pepper (active or previous) shorter than 32 characters fails boot — a short pepper is brute-forceable and worse than none (KS-2). |
 | Boot logging | n/a | Logs `peppered: true` / `rotation_window: true` booleans at INFO on startup; never logs pepper material. |
 
 ### Scope

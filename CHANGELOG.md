@@ -10,6 +10,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **`KEY_HMAC_PEPPER` now has a boot-time length floor
+  ([internal/config/config.go](internal/config/config.go)).** A set pepper
+  (active or previous) shorter than 32 characters fails boot with
+  `ErrPepperTooShort`. Previously any non-empty value was accepted, so a weak,
+  brute-forceable pepper silently weakened the key-hash MAC while giving the
+  false confidence of "peppered." Unset (unpeppered) mode is unchanged. Operators
+  running a pepper shorter than 32 characters must rotate to a ≥ 32-character
+  high-entropy secret before upgrading. Surfaced by the pre-red-team security
+  assessment (finding KS-2).
 - **Hardened the untrusted RPC-node boundary against denial of service
   ([internal/evm](internal/evm), [internal/anchor](internal/anchor)).** Node/RPC
   responses are untrusted (a plaintext `http://` endpoint is permitted, so a
