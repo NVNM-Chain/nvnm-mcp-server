@@ -103,6 +103,12 @@ jobs:
           NVNM_TEST_PG_DSN: postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable  # pragma: allowlist secret -- ephemeral CI service
         run: go test -mod=vendor -race -coverprofile=coverage.out ./...
 
+      - name: Coverage gate
+        # Enforce the minimum total statement coverage. The threshold
+        # lives in one more place -- the Makefile's COVERAGE_THRESHOLD
+        # (used by `make coverage-check`); keep the two in sync.
+        run: bash scripts/check_coverage.sh coverage.out 80
+
       - name: Build
         run: go build -mod=vendor -o bin/nvnm-mcp-server ./cmd/nvnm-mcp-server
 
