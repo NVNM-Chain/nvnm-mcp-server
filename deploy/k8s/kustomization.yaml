@@ -12,3 +12,18 @@ resources:
   - servicemonitor.yaml
   - networkpolicy.yaml
   - hpa.yaml
+
+# Single-point image pin (SC-1). deployment.yaml references the image by the
+# mutable ":latest" tag; this transformer overrides it here so the pin lives in
+# one place. newTag below is an interim improvement over ":latest" -- pin a
+# concrete released version. In production prefer a DIGEST over a tag: a tag is
+# mutable, so a registry-side overwrite or supply-chain push silently propagates
+# on the next pod pull. Replace `newTag` with the digest of the Cosign-verified
+# release image and drop newTag:
+#   digest: sha256:<digest-of-signed-release-image>
+# Belt-and-suspenders: enforce signature verification at admission (Sigstore
+# policy-controller / Kyverno verifyImages) so an unsigned or wrong-digest image
+# is rejected cluster-side, not merely pinned in this manifest.
+images:
+  - name: ghcr.io/nvnm-chain/nvnm-mcp-server
+    newTag: "1.0.0-rc14"
