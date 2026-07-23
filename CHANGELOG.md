@@ -10,6 +10,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Bumped `actions/checkout` v6.0.3 → v7.0.1 across all workflows**,
+  superseding Dependabot PR #60 (whose SHA update left the stale `# v6`
+  comments on the pins). v7's breaking change only affects
+  `pull_request_target`/`workflow_run` triggers, which no workflow here uses.
+  CI-only, no image change.
 - **Bumped the OpenTelemetry module family v1.43.0 → v1.44.0 (Prometheus
   exporter v0.65.0 → v0.66.0) and `modelcontextprotocol/go-sdk` v1.6.0 →
   v1.6.1** in one batch, superseding Dependabot PRs #4–#13. Transitive lifts:
