@@ -9,6 +9,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Bumped the OpenTelemetry module family v1.43.0 → v1.44.0 (Prometheus
+  exporter v0.65.0 → v0.66.0) and `modelcontextprotocol/go-sdk` v1.6.0 →
+  v1.6.1** in one batch, superseding Dependabot PRs #4–#13. Transitive lifts:
+  `grpc-ecosystem/grpc-gateway/v2` v2.28.0 → v2.29.0, `genproto` pins, and the
+  new `go.opentelemetry.io/otel/metric/x` v0.66.0 module (all Apache-2.0 /
+  BSD-3). Routine version-update hygiene, no security advisories involved;
+  vendor tree regenerated.
+- **Grouped future Dependabot OpenTelemetry updates into a single PR**
+  ([.github/dependabot.yml](.github/dependabot.yml) `groups:` stanza) so the
+  otel module family no longer arrives as 8+ interlocking PRs that conflict on
+  `go.sum`/`vendor/`.
+
 ## [1.0.0-rc15] - 2026-07-22
 
 ### Security
