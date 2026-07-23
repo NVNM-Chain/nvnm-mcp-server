@@ -52,15 +52,22 @@ This README is the technical entry point. For deeper context, follow the links b
 
 | File | Purpose |
 |---|---|
+| [`docs/ONBOARDING.md`](docs/ONBOARDING.md) | New-contributor orientation — reading order, intentional design decisions, local quality gate (start here) |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture decisions; multi-chain deployment model; target-chain reference |
+| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
+| [`docs/METAMASK_GUIDE.md`](docs/METAMASK_GUIDE.md) | Signing and submitting anchor writes with MetaMask (step-by-step) |
+| [`docs/standards/CODING_STANDARDS.md`](docs/standards/CODING_STANDARDS.md) | Go coding standards and conventions for contributors |
+| [`docs/TESTING.md`](docs/TESTING.md) | Layered testing strategy — unit, golden, integration, HTTP E2E, load, and Docker smoke |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational guide — startup, env-var migration, admin REST API |
 | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) | Per-alert investigation playbook; what to do when each Prometheus rule fires |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
+| [`docs/OWASP_AUDIT.md`](docs/OWASP_AUDIT.md) | OWASP Top 10:2021 audit — per-category findings and remediation status |
+| [`docs/SECURITY_CONSUMER_GUIDANCE.md`](docs/SECURITY_CONSUMER_GUIDANCE.md) | Threats that fall on the consuming LLM agent / application, not the server |
 | [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
 | [`docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf`](docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf) | Counsel-finalized Privacy Policy for the hosted Service (published legal artifact) |
 | [`docs/TERMS.md`](docs/TERMS.md) | Terms of Service for the hosted Service (Apache 2.0 governs the Software) |
 | [`docs/KEY_CUSTODY_THREAT_MODEL.md`](docs/KEY_CUSTODY_THREAT_MODEL.md) | Rationale for the zero-key-custody design — no agent-mediated signing |
-| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
+| [`docs/LICENSE_EXCEPTIONS.md`](docs/LICENSE_EXCEPTIONS.md) | Dependency-license policy and recorded GPL/LGPL/AGPL exception dispositions |
 
 ## What this server is not
 
