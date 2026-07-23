@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      # The otel modules version in lockstep; separate PRs conflict on
+      # go.sum/vendor and cannot merge independently.
+      opentelemetry:
+        patterns:
+          - "go.opentelemetry.io/*"
 
   - package-ecosystem: docker
     directory: /
