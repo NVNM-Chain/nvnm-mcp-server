@@ -490,7 +490,7 @@ Optional local layers:
 ```bash
 # Postgres-backed internal/mcp tests (audit log, quotas, migrations) —
 # they skip unless a DSN is set. Any disposable Postgres 16 works:
-export NVNM_TEST_PG_DSN='postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable'
+export NVNM_TEST_PG_DSN='postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable'  # pragma: allowlist secret -- throwaway local dev creds
 make test
 
 make test-integration # Live-testnet integration tests (needs network + .env credentials)

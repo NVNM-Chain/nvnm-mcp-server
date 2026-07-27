@@ -63,10 +63,10 @@ func TestRunHTTP_ServesAndShutsDownOnCancel(t *testing.T) {
 	}
 	krh := NewKeyRequestHandler(KeyRequestHandlerConfig{Store: store, Logger: testLogger()})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.RunHTTP(ctx, addr, nil, limiter, anonLimiter, failLimiter,
+		errCh <- s.RunHTTP(runCtx, addr, nil, limiter, anonLimiter, failLimiter,
 			nil, nil, krh, "https://renew.example.com", true)
 	}()
 
@@ -93,14 +93,14 @@ func TestRunHTTP_ServesAndShutsDownOnCancel(t *testing.T) {
 }
 
 // TestRunStdio_ReturnsOnCanceledContext runs the stdio transport with a
-// pre-canceled context: the SDK observes ctx.Done and returns without
+// pre-canceled context: the SDK observes runCtx.Done and returns without
 // consuming the test process's stdin.
 func TestRunStdio_ReturnsOnCanceledContext(t *testing.T) {
 	s := newRunTestServer(t, testServerConfig(false))
-	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	done := make(chan error, 1)
-	go func() { done <- s.RunStdio(ctx) }()
+	go func() { done <- s.RunStdio(runCtx) }()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) {
@@ -124,11 +124,11 @@ func TestRunHTTP_ListenError(t *testing.T) {
 	}
 	defer ln.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.RunHTTP(ctx, ln.Addr().String(), nil, nil, nil, nil, nil, nil, nil, "", false)
+		errCh <- s.RunHTTP(runCtx, ln.Addr().String(), nil, nil, nil, nil, nil, nil, nil, "", false)
 	}()
 	select {
 	case runErr := <-errCh:

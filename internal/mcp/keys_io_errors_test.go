@@ -54,7 +54,7 @@ func TestSaveKeysFile_LockContention(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer f.Close()
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	if err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		t.Fatalf("flock: %v", err)
 	}
 	defer func() { _ = unix.Flock(int(f.Fd()), unix.LOCK_UN) }()
@@ -149,7 +149,7 @@ func TestManagedKeyStore_MigrationSaveFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	if err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		t.Fatalf("flock: %v", err)
 	}
 	defer func() { _ = unix.Flock(int(f.Fd()), unix.LOCK_UN) }()
@@ -295,7 +295,7 @@ func TestKeyRequestRateLimiter_Size(t *testing.T) {
 	}
 }
 
-func TestWriteJSONHelpers_WriterFailureLogged(t *testing.T) {
+func TestWriteJSONHelpers_WriterFailureLogged(_ *testing.T) {
 	// Contract: a broken writer is logged, never panics.
 	writeKeyRequestJSON(newFailingResponseWriter(), testLogger(), http.StatusOK, map[string]string{"a": "b"})
 	writeRateLimited(newFailingResponseWriter(), testLogger())

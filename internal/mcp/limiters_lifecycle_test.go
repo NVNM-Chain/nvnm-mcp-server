@@ -95,7 +95,7 @@ func TestIPFailRateLimiter_WrapBlocksExhaustedIP(t *testing.T) {
 	})
 	h := l.Wrap(next, testLogger())
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.RemoteAddr = "1.2.3.4:5678"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -111,7 +111,7 @@ func TestIPFailRateLimiter_WrapBlocksExhaustedIP(t *testing.T) {
 	h.ServeHTTP(newFailingResponseWriter(), req)
 
 	// A different IP still passes through.
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req2.RemoteAddr = "5.6.7.8:1234"
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, req2)
@@ -147,7 +147,7 @@ func TestAuthMiddleware_PenalizesFailLimiter(t *testing.T) {
 	})
 	h := AuthMiddleware(next, validator, failLimiter, false, testLogger(), "")
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.RemoteAddr = "4.4.4.4:9999"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req) // no Authorization header -> 401 + penalize

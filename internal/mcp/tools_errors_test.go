@@ -38,7 +38,7 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 	m := &mockEVM{}
 	a := &mockAnchor{}
 	cfg := testServerConfig(true)
-	ctx := deniedCtx()
+	denied := deniedCtx()
 
 	num := int64(1)
 	addr := testAddr
@@ -47,73 +47,73 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 		call func() error
 	}{
 		{"get_block", func() error {
-			_, _, err := makeGetBlockHandler(m)(ctx, nil, getBlockInput{BlockNumber: &num})
+			_, _, err := makeGetBlockHandler(m)(denied, nil, getBlockInput{BlockNumber: &num})
 			return err
 		}},
 		{"get_transaction", func() error {
-			_, _, err := makeGetTransactionHandler(m)(ctx, nil, txHashInput{TxHash: testTxHash})
+			_, _, err := makeGetTransactionHandler(m)(denied, nil, txHashInput{TxHash: testTxHash})
 			return err
 		}},
 		{"get_receipt", func() error {
-			_, _, err := makeGetReceiptHandler(m)(ctx, nil, txHashInput{TxHash: testTxHash})
+			_, _, err := makeGetReceiptHandler(m)(denied, nil, txHashInput{TxHash: testTxHash})
 			return err
 		}},
 		{"get_balance", func() error {
-			_, _, err := makeGetBalanceHandler(m)(ctx, nil, getBalanceInput{Address: testAddr})
+			_, _, err := makeGetBalanceHandler(m)(denied, nil, getBalanceInput{Address: testAddr})
 			return err
 		}},
 		{"get_code", func() error {
-			_, _, err := makeGetCodeHandler(m)(ctx, nil, getCodeInput{Address: testAddr})
+			_, _, err := makeGetCodeHandler(m)(denied, nil, getCodeInput{Address: testAddr})
 			return err
 		}},
 		{"get_logs", func() error {
-			_, _, err := makeGetLogsHandler(m)(ctx, nil, getLogsInput{Address: &addr})
+			_, _, err := makeGetLogsHandler(m)(denied, nil, getLogsInput{Address: &addr})
 			return err
 		}},
 		{"call_contract", func() error {
-			_, _, err := makeCallContractHandler(m)(ctx, nil, callContractInput{To: testAddr, Data: "0x"})
+			_, _, err := makeCallContractHandler(m)(denied, nil, callContractInput{To: testAddr, Data: "0x"})
 			return err
 		}},
 		{"anchor_info", func() error {
-			_, _, err := makeAnchorInfoHandler(a)(ctx, nil, anchorInfoInput{})
+			_, _, err := makeAnchorInfoHandler(a)(denied, nil, anchorInfoInput{})
 			return err
 		}},
 		{"get_registry", func() error {
-			_, _, err := makeGetRegistryHandler(a)(ctx, nil, getRegistryInput{})
+			_, _, err := makeGetRegistryHandler(a)(denied, nil, getRegistryInput{})
 			return err
 		}},
 		{"get_registries", func() error {
-			_, _, err := makeGetRegistriesHandler(a)(ctx, nil, getRegistriesInput{})
+			_, _, err := makeGetRegistriesHandler(a)(denied, nil, getRegistriesInput{})
 			return err
 		}},
 		{"get_records", func() error {
-			_, _, err := makeGetRecordsHandler(a)(ctx, nil, getRecordsInput{})
+			_, _, err := makeGetRecordsHandler(a)(denied, nil, getRecordsInput{})
 			return err
 		}},
 		{"verify_hash", func() error {
-			_, _, err := makeVerifyHashHandler()(ctx, nil, verifyHashInput{Address: testAddr, Hash: "0xab"})
+			_, _, err := makeVerifyHashHandler()(denied, nil, verifyHashInput{Address: testAddr, Hash: "0xab"})
 			return err
 		}},
 		{"verify_signature", func() error {
-			_, _, err := makeVerifySignatureHandler()(ctx, nil,
+			_, _, err := makeVerifySignatureHandler()(denied, nil,
 				verifySignatureInput{Address: testAddr, Signature: "0xab"})
 			return err
 		}},
 		{"setup_wizard", func() error {
-			_, _, err := makeSetupWizardHandler(m, cfg)(ctx, nil, setupWizardInput{Address: testAddr})
+			_, _, err := makeSetupWizardHandler(m, cfg)(denied, nil, setupWizardInput{Address: testAddr})
 			return err
 		}},
 		{"wallet_status", func() error {
-			_, _, err := makeWalletStatusHandler(m, cfg)(ctx, nil, walletStatusInput{Address: testAddr})
+			_, _, err := makeWalletStatusHandler(m, cfg)(denied, nil, walletStatusInput{Address: testAddr})
 			return err
 		}},
 		{"prepare_add_registry", func() error {
-			_, _, err := makePrepareAddRegistryHandler(a, testLogger())(ctx, nil,
+			_, _, err := makePrepareAddRegistryHandler(a, testLogger())(denied, nil,
 				prepareAddRegistryInput{From: testAddr, Name: "r"})
 			return err
 		}},
 		{"prepare_add_record", func() error {
-			_, _, err := makePrepareAddRecordHandler(a, testLogger())(ctx, nil,
+			_, _, err := makePrepareAddRecordHandler(a, testLogger())(denied, nil,
 				prepareAddRecordInput{From: testAddr, Registry: "r", URI: "u", Checksum: "ab", ChecksumAlgo: "sha256"})
 			return err
 		}},

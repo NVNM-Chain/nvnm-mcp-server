@@ -128,7 +128,6 @@ func TestNew_OTLPSecure(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	//nolint:errcheck,gosec // flush has nowhere to go; error is expected
 	tel.Shutdown(ctx)
 }
 

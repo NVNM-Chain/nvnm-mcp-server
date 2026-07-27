@@ -91,7 +91,7 @@ func sampleRecordRows() []abiRecordRow {
 		{
 			Registry:     "registry-one",
 			URI:          "ipfs://Qm123",
-			Checksum:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			Checksum:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // pragma: allowlist secret -- sha256 of empty input, test fixture // pragma: allowlist secret -- sha256 of empty input, test fixture
 			ChecksumAlgo: "sha256",
 			Metadata:     "{\"file\":\"a.pdf\"}",
 			Timestamp:    "2026-03-01 14:30:00.000000000 +0000 UTC",
@@ -103,7 +103,7 @@ func sampleRecordRows() []abiRecordRow {
 		{
 			Registry:     "registry-one",
 			URI:          "ipfs://Qm456",
-			Checksum:     "aa0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8bb",
+			Checksum:     "aa0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8bb", // pragma: allowlist secret -- phoney checksum, test fixture
 			ChecksumAlgo: "sha256",
 			Metadata:     "{\"file\":\"b.pdf\"}",
 			Timestamp:    "2026-03-02 14:30:00.000000000 +0000 UTC",
@@ -442,7 +442,7 @@ func TestGetRecords_Success(t *testing.T) {
 		Registry:     "registry-one",
 		RecordID:     7,
 		Index:        1,
-		Checksum:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		Checksum:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // pragma: allowlist secret -- sha256 of empty input, test fixture
 		ChecksumAlgo: "sha256",
 		URI:          "ipfs://Qm123",
 		Status:       "Active",

@@ -42,7 +42,7 @@ func TestLoadCredentials_HappyPath(t *testing.T) {
 	if creds.address != "0x00000000000000000000000000000000000000AA" {
 		t.Errorf("address = %q", creds.address)
 	}
-	if creds.privateKey == nil {
+	if creds.privateKey == nil { // pragma: allowlist secret -- field-name keyword, no secret value
 		t.Error("expected a parsed private key")
 	}
 }

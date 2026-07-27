@@ -47,7 +47,6 @@ func TestDigestBytes_PanicsOnInvalidHex(t *testing.T) {
 
 func TestPostgresKeyStore_ClosedPoolErrors(t *testing.T) {
 	p := NewPostgresKeyStore(closedTestPool(t), auth.NewKeyHasher(nil, nil))
-	ctx := context.Background()
 
 	if e, reason := p.Lookup(ctx, "any-key"); e != nil || reason != auth.RejectNotFound {
 		t.Errorf("Lookup on closed pool = (%v, %v), want (nil, RejectNotFound)", e, reason)
@@ -83,7 +82,6 @@ func TestPostgresKeyStore_ClosedPoolErrors(t *testing.T) {
 func TestPostgresKeyStore_UpdateExpiryAndNoFields(t *testing.T) {
 	pool := testPool(t)
 	p := NewPostgresKeyStore(pool, auth.NewKeyHasher([]byte("test-pepper"), nil))
-	ctx := context.Background()
 
 	created, err := p.Create(ctx, "expiry-client", []string{"reader"}, time.Now().Add(time.Hour).UTC())
 	if err != nil {
@@ -115,7 +113,6 @@ func TestPostgresKeyStore_UpdateExpiryAndNoFields(t *testing.T) {
 
 func TestPostgresSignerBlacklist_ClosedPoolErrors(t *testing.T) {
 	s := NewPostgresSignerBlacklistStore(closedTestPool(t))
-	ctx := context.Background()
 
 	if _, err := s.IsBlacklisted(ctx, "0xabc"); err == nil {
 		t.Error("IsBlacklisted on closed pool should fail")
@@ -134,7 +131,6 @@ func TestPostgresSignerBlacklist_ClosedPoolErrors(t *testing.T) {
 func TestPostgresSignerBlacklist_ListReturnsEntries(t *testing.T) {
 	pool := testPool(t)
 	s := NewPostgresSignerBlacklistStore(pool)
-	ctx := context.Background()
 
 	if err := s.Add(ctx, "0xAAAA000000000000000000000000000000000001", "first"); err != nil {
 		t.Fatalf("Add: %v", err)
@@ -161,7 +157,6 @@ func TestPostgresSignerBlacklist_ListReturnsEntries(t *testing.T) {
 
 func TestPostgresSignerQuota_ClosedPoolErrors(t *testing.T) {
 	s := NewPostgresSignerQuotaStore(closedTestPool(t))
-	ctx := context.Background()
 	ws := WindowStart(time.Now(), 24*time.Hour)
 
 	if _, err := s.Count(ctx, "0xabc", ws); err == nil {
@@ -174,7 +169,6 @@ func TestPostgresSignerQuota_ClosedPoolErrors(t *testing.T) {
 
 func TestPostgresWriteAudit_ClosedPoolErrors(t *testing.T) {
 	s := NewPostgresWriteAuditStore(closedTestPool(t))
-	ctx := context.Background()
 
 	if err := s.Record(ctx, WriteAuditEntry{Signer: "0xabc", Outcome: "broadcast_ok"}); err == nil {
 		t.Error("Record on closed pool should fail")
@@ -224,7 +218,6 @@ func TestPurger_SweepAndLog_ErrorAndCancel(t *testing.T) {
 
 func TestPurger_PerTableErrorBranches(t *testing.T) {
 	pool := closedTestPool(t)
-	ctx := context.Background()
 
 	cases := []struct {
 		name string
@@ -262,10 +255,10 @@ func TestPurger_RunSweepsAndStopsOnCancel(t *testing.T) {
 		t.Fatalf("NewPurger: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		p.Run(ctx)
+		p.Run(runCtx)
 		close(done)
 	}()
 

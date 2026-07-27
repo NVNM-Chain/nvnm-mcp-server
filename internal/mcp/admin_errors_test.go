@@ -66,6 +66,7 @@ func (f *failingEmailSender) Send(_ context.Context, _, _, _ string) error {
 // failingWriteAudit / okWriteAudit drive the /admin/write-audit branches.
 type failingWriteAudit struct{}
 
+//nolint:gocritic // hugeParam accepted (interface signature)
 func (f *failingWriteAudit) Record(_ context.Context, _ WriteAuditEntry) error {
 	return errFailingBackend
 }
@@ -77,6 +78,7 @@ type okWriteAudit struct {
 	gotFilter WriteAuditFilter
 }
 
+//nolint:gocritic // hugeParam accepted (interface signature)
 func (o *okWriteAudit) Record(_ context.Context, _ WriteAuditEntry) error { return nil }
 func (o *okWriteAudit) Query(_ context.Context, f WriteAuditFilter) ([]WriteAuditEntry, error) {
 	o.gotFilter = f
@@ -158,9 +160,9 @@ func TestAdminServer_StartAndClose(t *testing.T) {
 
 	// Close after a short delay; Start must return nil on graceful close.
 	time.Sleep(50 * time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := adminSrv.Close(ctx); err != nil {
+	if err := adminSrv.Close(closeCtx); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	select {
@@ -195,7 +197,7 @@ func TestAdminServer_StartBindError(t *testing.T) {
 
 func TestAdmin_Auth_WrongScheme(t *testing.T) {
 	ts, _ := startAdminTestServer(t)
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/keys", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/keys", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +328,7 @@ func TestAdmin_EncodeFailuresLogged(t *testing.T) {
 	adminSrv.handleCreate(newFailingResponseWriter(), req)
 
 	// handleList encode failure.
-	adminSrv.handleList(newFailingResponseWriter(), httptest.NewRequest(http.MethodGet, "/admin/keys", nil))
+	adminSrv.handleList(newFailingResponseWriter(), httptest.NewRequest(http.MethodGet, "/admin/keys", http.NoBody))
 
 	// handleUpdate success + encode failure.
 	upd := httptest.NewRequest(http.MethodPatch, "/admin/keys/c1", strings.NewReader(`{"enabled":true}`))
@@ -338,26 +340,26 @@ func TestAdmin_EncodeFailuresLogged(t *testing.T) {
 
 	// pending list encode failure.
 	adminSrv.handleListPending(newFailingResponseWriter(),
-		httptest.NewRequest(http.MethodGet, "/admin/keys/pending", nil))
+		httptest.NewRequest(http.MethodGet, "/admin/keys/pending", http.NoBody))
 
 	// approve success + encode failure.
-	appr := httptest.NewRequest(http.MethodPost, "/admin/keys/pending/req-1/approve", nil)
+	appr := httptest.NewRequest(http.MethodPost, "/admin/keys/pending/req-1/approve", http.NoBody)
 	appr.SetPathValue("id", "req-1")
 	adminSrv.handleApprovePending(newFailingResponseWriter(), appr)
 
 	// reject success + encode failure.
-	rej := httptest.NewRequest(http.MethodPost, "/admin/keys/pending/req-2/reject", nil)
+	rej := httptest.NewRequest(http.MethodPost, "/admin/keys/pending/req-2/reject", http.NoBody)
 	rej.SetPathValue("id", "req-2")
 	adminSrv.handleRejectPending(newFailingResponseWriter(), rej)
 
 	// write-audit success + encode failure.
 	adminSrv.handleWriteAudit(newFailingResponseWriter(),
-		httptest.NewRequest(http.MethodGet, "/admin/write-audit", nil))
+		httptest.NewRequest(http.MethodGet, "/admin/write-audit", http.NoBody))
 
 	// signer-blacklist list encode failure (empty store list succeeds).
 	adminSrv.blacklist = &emptyBlacklist{}
 	adminSrv.handleListBlacklist(newFailingResponseWriter(),
-		httptest.NewRequest(http.MethodGet, "/admin/signer-blacklist", nil))
+		httptest.NewRequest(http.MethodGet, "/admin/signer-blacklist", http.NoBody))
 }
 
 // emptyBlacklist succeeds with no entries; used for the encode-failure path.

@@ -4,6 +4,7 @@
 package evm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/big"
@@ -482,7 +483,7 @@ func TestClient_CallContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallContract: %v", err)
 	}
-	if string(got) != string(want) {
+	if !bytes.Equal(got, want) {
 		t.Errorf("CallContract = %x, want %x", got, want)
 	}
 }
@@ -678,7 +679,7 @@ func TestClient_Ping_Error(t *testing.T) {
 	}
 }
 
-func TestClient_Close(t *testing.T) {
+func TestClient_Close(_ *testing.T) {
 	c := newFakeClient(&fakeRPC{})
 	c.Close() // no-op for the HTTP transport; must not panic
 }

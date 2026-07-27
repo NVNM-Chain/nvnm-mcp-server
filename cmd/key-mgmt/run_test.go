@@ -70,7 +70,7 @@ func TestRun_Lifecycle(t *testing.T) {
 		t.Fatalf("expected 1 disabled entry, got %+v", entries)
 	}
 
-	if err := run([]string{"enable", "client-a"}); err != nil {
+	if err = run([]string{"enable", "client-a"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 	entries, err = mcpkeys.LoadKeysFile(path)
@@ -81,7 +81,7 @@ func TestRun_Lifecycle(t *testing.T) {
 		t.Fatal("expected entry to be re-enabled")
 	}
 
-	if err := run([]string{"set-roles", "client-a", "writer,admin"}); err != nil {
+	if err = run([]string{"set-roles", "client-a", "writer,admin"}); err != nil {
 		t.Fatalf("set-roles: %v", err)
 	}
 	entries, err = mcpkeys.LoadKeysFile(path)
@@ -94,7 +94,7 @@ func TestRun_Lifecycle(t *testing.T) {
 	}
 
 	// Clearing roles with an explicit empty string is allowed.
-	if err := run([]string{"set-roles", "client-a", ""}); err != nil {
+	if err = run([]string{"set-roles", "client-a", ""}); err != nil {
 		t.Fatalf("set-roles clear: %v", err)
 	}
 	entries, err = mcpkeys.LoadKeysFile(path)

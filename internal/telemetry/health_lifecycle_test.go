@@ -35,7 +35,7 @@ func waitForServer(t *testing.T, url string) *http.Response {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		resp, err := http.Get(url) //nolint:gosec,noctx // loopback URL built by the test
+		resp, err := http.Get(url) //nolint:noctx // loopback URL built by the test
 		if err == nil {
 			return resp
 		}
@@ -76,7 +76,7 @@ func TestHealthServer_StartServeClose(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("/readyz status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if err := resp.Body.Close(); err != nil {
+	if err = resp.Body.Close(); err != nil {
 		t.Errorf("close body: %v", err)
 	}
 
