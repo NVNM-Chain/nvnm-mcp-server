@@ -19,7 +19,7 @@ THRESHOLD="${2:-${COVERAGE_THRESHOLD:-80}}"
 
 if [[ ! -f "$PROFILE" ]]; then
     echo "ERROR: coverage profile '$PROFILE' not found." >&2
-    echo "Run: go test -race -coverprofile=$PROFILE ./..." >&2
+    echo "Run: go test -mod=vendor -race -coverprofile=$PROFILE ./..." >&2
     exit 1
 fi
 

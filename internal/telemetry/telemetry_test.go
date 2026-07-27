@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
@@ -106,11 +107,17 @@ func TestNew_OTLPConfigured(t *testing.T) {
 		t.Fatalf("New with OTLP endpoint: %v", err)
 	}
 
+	// Record a span so the shutdown flush genuinely has data to export;
+	// without one the batch processor may have nothing to send and
+	// Shutdown could legitimately return nil.
+	_, span := otel.Tracer("telemetry-test").Start(context.Background(), "flush-probe")
+	span.End()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	// Flush fails (no collector listening); the error must be reported.
 	if err := tel.Shutdown(ctx); err == nil {
-		t.Log("Shutdown returned nil; exporter dropped data silently")
+		t.Error("Shutdown returned nil; exporter dropped pending span data silently")
 	}
 }
 
