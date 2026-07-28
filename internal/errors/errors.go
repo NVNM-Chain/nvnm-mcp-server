@@ -36,6 +36,22 @@ var (
 	// surfaces the curated reason instead of collapsing it. The reason
 	// text is drawn from a fixed allowlist, never from raw chain output.
 	ErrPrecompileValidation = errors.New("precompile rejected input")
+	// ErrLogRangeTooWide marks an eth_getLogs query whose block window exceeds
+	// the upstream node's configured maximum from-to distance. Input class so
+	// SafeForClient surfaces this message instead of collapsing it; the node's
+	// raw error (including its configured limit) is never echoed. The message
+	// is the client-facing text, surfaced verbatim.
+	ErrLogRangeTooWide = errors.New(
+		"block range too wide: the upstream node caps the from_block-to_block " +
+			"distance for log queries; narrow the range and retry")
+	// ErrEmptyMetadataObject marks the literal empty JSON object "{}" passed
+	// as record metadata, which the anchoring precompile rejects on-chain.
+	// The message is the client-facing text, surfaced verbatim (input class);
+	// a classifier wrap would leak its own text into the message.
+	ErrEmptyMetadataObject = errors.New(
+		"metadata must not be the empty JSON object \"{}\" (the anchoring " +
+			"precompile rejects it); pass a non-empty value such as a short " +
+			"label or a JSON object with at least one field")
 )
 
 // Not-found errors.
@@ -86,23 +102,38 @@ var (
 	errSafeUpstreamFail = errors.New("upstream operation failed")
 )
 
+// inputErrors enumerates the input-validation sentinels. Membership means
+// SafeForClient surfaces the full error text to the client verbatim, so add
+// a sentinel here only if its message (and any wrapping context) is safe to
+// disclose.
+var inputErrors = []error{
+	ErrInvalidAddress,
+	ErrInvalidBlockRef,
+	ErrInvalidTxHash,
+	ErrInvalidTopics,
+	ErrInvalidABI,
+	ErrInvalidSignature,
+	ErrInvalidHash,
+	ErrMissingRequired,
+	ErrInvalidRegistryID,
+	ErrInvalidRecordID,
+	ErrInvalidChecksum,
+	ErrInputTooLarge,
+	ErrTxDecode,
+	ErrRelayScopeRejected,
+	ErrPrecompileValidation,
+	ErrLogRangeTooWide,
+	ErrEmptyMetadataObject,
+}
+
 // IsInputError returns true if the error is an input validation error.
 func IsInputError(err error) bool {
-	return errors.Is(err, ErrInvalidAddress) ||
-		errors.Is(err, ErrInvalidBlockRef) ||
-		errors.Is(err, ErrInvalidTxHash) ||
-		errors.Is(err, ErrInvalidTopics) ||
-		errors.Is(err, ErrInvalidABI) ||
-		errors.Is(err, ErrInvalidSignature) ||
-		errors.Is(err, ErrInvalidHash) ||
-		errors.Is(err, ErrMissingRequired) ||
-		errors.Is(err, ErrInvalidRegistryID) ||
-		errors.Is(err, ErrInvalidRecordID) ||
-		errors.Is(err, ErrInvalidChecksum) ||
-		errors.Is(err, ErrInputTooLarge) ||
-		errors.Is(err, ErrTxDecode) ||
-		errors.Is(err, ErrRelayScopeRejected) ||
-		errors.Is(err, ErrPrecompileValidation)
+	for _, target := range inputErrors {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsTransientError returns true if the error is a transient upstream error that may be retried.

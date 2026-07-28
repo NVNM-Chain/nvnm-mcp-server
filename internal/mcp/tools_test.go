@@ -241,6 +241,42 @@ func TestHandler_GetTransaction_Happy(t *testing.T) {
 	}
 }
 
+// TestHandler_GetTransaction_NotFound_MessageNotDoubled guards the
+// client-visible not-found text. The evm client already returns the
+// ErrTxNotFound sentinel ("transaction not found"); the handler re-wrapping it
+// with the same prefix produced "transaction not found: transaction not
+// found" on the wire, and mislabeled genuine upstream failures as not-found.
+func TestHandler_GetTransaction_NotFound_MessageNotDoubled(t *testing.T) {
+	handler := makeGetTransactionHandler(&mockEVM{returnErr: apperrors.ErrTxNotFound})
+
+	_, _, err := handler(ctx, nil, txHashInput{TxHash: testTxHash})
+	if err == nil {
+		t.Fatal("expected not-found error")
+	}
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("error should wrap ErrTxNotFound; got %v", err)
+	}
+	if got, want := err.Error(), apperrors.ErrTxNotFound.Error(); got != want {
+		t.Errorf("client-visible message = %q, want %q", got, want)
+	}
+}
+
+// TestHandler_GetLogs_ClientErrorNotRePrefixed verifies the handler passes
+// FilterLogs errors through untouched: the evm client already contextualizes
+// its errors ("failed to filter logs: ..."), and curated input-class sentinels
+// (e.g. the log range cap) are client-facing text that must surface verbatim.
+func TestHandler_GetLogs_ClientErrorNotRePrefixed(t *testing.T) {
+	handler := makeGetLogsHandler(&mockEVM{returnErr: apperrors.ErrLogRangeTooWide})
+
+	_, _, err := handler(ctx, nil, getLogsInput{})
+	if err == nil {
+		t.Fatal("expected error from FilterLogs")
+	}
+	if got, want := err.Error(), apperrors.ErrLogRangeTooWide.Error(); got != want {
+		t.Errorf("client-visible message = %q, want %q", got, want)
+	}
+}
+
 func TestHandler_GetTransaction_InvalidHash(t *testing.T) {
 	handler := makeGetTransactionHandler(&mockEVM{})
 

@@ -90,11 +90,7 @@ func (c *client) PrepareAddRecord(
 	// trimmed so "  {}  " is caught too; a non-empty value such as a short
 	// label or a JSON object with at least one field is accepted.
 	if strings.TrimSpace(req.Metadata) == "{}" {
-		return nil, fmt.Errorf(
-			"metadata must not be the empty JSON object \"{}\" (the anchoring "+
-				"precompile rejects it); pass a non-empty value such as a short "+
-				"label or a JSON object with at least one field: %w",
-			apperrors.ErrMissingRequired)
+		return nil, apperrors.ErrEmptyMetadataObject
 	}
 
 	// The ABI expects a single tuple struct for addRecord. Field tags

@@ -275,6 +275,9 @@ func (c *client) FilterLogs(ctx context.Context, q defitypes.FilterLogsQuery) ([
 	err := guardNodeDecode("filter logs", func() error {
 		logs, err := c.rpc.GetLogs(ctx, &q)
 		if err != nil {
+			if curated := classifyNodeRPCError(err); curated != nil {
+				return curated
+			}
 			return fmt.Errorf("failed to filter logs: %w", err)
 		}
 		result = make([]NormalizedLog, len(logs))

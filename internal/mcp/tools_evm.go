@@ -211,10 +211,13 @@ func makeGetTransactionHandler(
 			return nil, transactionOutput{},
 				fmt.Errorf("invalid tx_hash: %w", err)
 		}
+		// The client already contextualizes: not-found arrives as the
+		// ErrTxNotFound sentinel (whose text is the client-facing message),
+		// anything else as a wrapped upstream error that SafeForClient
+		// collapses. Re-prefixing here doubled the not-found text.
 		tx, err := c.TransactionByHash(ctx, hash)
 		if err != nil {
-			return nil, transactionOutput{},
-				fmt.Errorf("transaction not found: %w", err)
+			return nil, transactionOutput{}, err
 		}
 		return nil, transactionOutput{NormalizedTransaction: *tx, NextActions: evmGetTransactionNext()}, nil
 	}
@@ -333,9 +336,12 @@ func makeGetLogsHandler(
 			q.Topics = [][]defitypes.Hash{topicSet}
 		}
 
+		// The client already contextualizes ("failed to filter logs: ...")
+		// and curated input-class sentinels (e.g. the node's log-range cap)
+		// are client-facing text that must surface verbatim, un-prefixed.
 		logs, err := c.FilterLogs(ctx, q)
 		if err != nil {
-			return nil, getLogsOutput{}, fmt.Errorf("failed to filter logs: %w", err)
+			return nil, getLogsOutput{}, err
 		}
 		return nil, getLogsOutput{Logs: logs, Count: len(logs), NextActions: evmGetLogsNext()}, nil
 	}

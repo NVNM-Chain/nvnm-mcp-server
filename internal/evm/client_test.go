@@ -20,8 +20,9 @@ import (
 // exists to feed hostile/malformed node responses into the client's decode
 // paths without a live node.
 type stubRPCClient struct {
-	block   *defitypes.Block
-	balance *big.Int
+	block      *defitypes.Block
+	balance    *big.Int
+	getLogsErr error
 }
 
 func (s *stubRPCClient) ChainID(context.Context) (uint64, error) { return 0, nil }
@@ -50,6 +51,9 @@ func (s *stubRPCClient) GetTransactionCount(context.Context, defitypes.Address, 
 	return 0, nil
 }
 func (s *stubRPCClient) GetLogs(context.Context, *defitypes.FilterLogsQuery) ([]defitypes.Log, error) {
+	if s.getLogsErr != nil {
+		return nil, s.getLogsErr
+	}
 	return nil, nil
 }
 func (s *stubRPCClient) GasPrice(context.Context) (*big.Int, error) { return big.NewInt(0), nil }
@@ -84,5 +88,50 @@ func TestClient_BlockByNumber_HostileNilNumberReturnsError(t *testing.T) {
 	}
 	if !errors.Is(err, apperrors.ErrNodeResponseDecode) {
 		t.Fatalf("expected ErrNodeResponseDecode, got %v", err)
+	}
+}
+
+// TestClient_FilterLogs_RangeCapErrorCurated verifies that the node's
+// eth_getLogs block-range cap rejection (observed from the testnet node as
+// "maximum [from, to] blocks distance: 10000") is converted to the curated
+// input-class sentinel, so SafeForClient surfaces an actionable message
+// instead of collapsing it to "upstream operation failed".
+func TestClient_FilterLogs_RangeCapErrorCurated(t *testing.T) {
+	c := &client{
+		rpc: &stubRPCClient{
+			getLogsErr: errors.New("maximum [from, to] blocks distance: 10000"),
+		},
+		timeout: time.Second,
+	}
+
+	_, err := c.FilterLogs(context.Background(), defitypes.FilterLogsQuery{})
+
+	if err == nil {
+		t.Fatal("expected an error for an over-wide log range, got nil")
+	}
+	if !errors.Is(err, apperrors.ErrLogRangeTooWide) {
+		t.Fatalf("expected ErrLogRangeTooWide, got %v", err)
+	}
+	if !apperrors.IsInputError(err) {
+		t.Fatalf("range-cap error must classify as input error, got %v", err)
+	}
+}
+
+// TestClient_FilterLogs_UnrecognizedErrorNotCurated verifies that an upstream
+// GetLogs failure that matches no curated pattern keeps its generic wrap (and
+// so still collapses at SafeForClient) rather than being surfaced.
+func TestClient_FilterLogs_UnrecognizedErrorNotCurated(t *testing.T) {
+	c := &client{
+		rpc:     &stubRPCClient{getLogsErr: errors.New("connection reset by peer")},
+		timeout: time.Second,
+	}
+
+	_, err := c.FilterLogs(context.Background(), defitypes.FilterLogsQuery{})
+
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if apperrors.IsInputError(err) {
+		t.Fatalf("unrecognized upstream error must not classify as input error, got %v", err)
 	}
 }
