@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc16] - 2026-07-28
+
 ### Fixed
 - **`evm_get_logs` over-wide block ranges now return an actionable message**
   ("block range too wide … narrow the range and retry") instead of the opaque
@@ -44,6 +46,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ([.github/dependabot.yml](.github/dependabot.yml) `groups:` stanza) so the
   otel module family no longer arrives as 8+ interlocking PRs that conflict on
   `go.sum`/`vendor/`.
+- **Dependabot bumps merged since rc15** (recorded here for image
+  provenance): `pressly/goose/v3` 3.27.1 → 3.27.3 (#62),
+  `prometheus/client_golang` 1.23.2 → 1.24.0 (#61), and the
+  `distroless/static-debian12` base-image digest refresh (#58) — all three
+  change the compiled image; `docker/login-action` 4.2.0 → 4.5.0 (#59) is
+  CI-only.
 
 ## [1.0.0-rc15] - 2026-07-22
 
