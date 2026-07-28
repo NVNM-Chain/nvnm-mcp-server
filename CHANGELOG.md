@@ -9,6 +9,24 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`evm_get_logs` over-wide block ranges now return an actionable message**
+  ("block range too wide … narrow the range and retry") instead of the opaque
+  `upstream operation failed`. The upstream node's range-cap rejection
+  (observed as `maximum [from, to] blocks distance: 10000`) is recognized at
+  the RPC boundary via the same curated-allowlist pattern as precompile
+  reverts; the node's raw error text is never echoed. (dmome21 smoke
+  2026-07-28, Finding 3)
+- **`evm_get_transaction` not-found responses no longer double the message**
+  (`transaction not found: transaction not found`): the handler re-wrapped the
+  client's own sentinel with the same prefix, which also mislabeled genuine
+  upstream failures as not-found. The `evm_get_logs` handler had the same
+  latent re-prefix and was fixed alongside. (Finding 4)
+- **Empty-JSON-object metadata (`{}`) rejection no longer leaks its
+  classifier** (the trailing `: missing required parameter`): it now surfaces
+  a dedicated input-class sentinel whose text is exactly the curated message —
+  the value is present but invalid, not missing. (Finding 4)
+
 ### Changed
 - **Bumped `actions/checkout` v6.0.3 → v7.0.1 across all workflows**,
   superseding Dependabot PR #60 (whose SHA update left the stale `# v6`

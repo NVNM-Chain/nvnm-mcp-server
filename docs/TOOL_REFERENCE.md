@@ -671,7 +671,10 @@ Returns an array of log objects. Each log contains:
 
 - Invalid `address` format.
 - Invalid topic hash format at any index.
-- RPC query failure (e.g., block range too large for the node).
+- Block range wider than the node's configured from/to distance cap — surfaced
+  as an actionable "block range too wide" message telling the caller to narrow
+  `from_block`/`to_block` and retry (the node's raw error is never echoed).
+- Other RPC query failures (collapsed to the generic upstream-failure message).
 
 ### Example
 
@@ -1106,7 +1109,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ### Error Conditions
 
 - Invalid `from` address.
-- Missing/empty `checksum`, `checksum_algo`, or `metadata` (validated client-side before any RPC; wraps `missing required parameter`).
+- Missing/empty `checksum`, `checksum_algo`, or `metadata` (validated client-side before any RPC; wraps `missing required parameter`). The literal empty JSON object `{}` as metadata is rejected with its own curated message (it is present but invalid, not missing).
 - Registry not found by name.
 - ABI encoding failure.
 - Nonce lookup failure (RPC error).

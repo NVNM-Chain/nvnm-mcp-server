@@ -8,12 +8,44 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
 
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
+
+// TestPrepareAddRecord_EmptyJSONMetadata_CuratedMessageOnly verifies the "{}"
+// rejection surfaces exactly the curated client-facing text. Wrapping it with
+// ErrMissingRequired appended the classifier's own text, so clients saw the
+// message end in ": missing required parameter" -- wrong category (the value
+// is present but invalid) and machinery leaking into user-facing output.
+func TestPrepareAddRecord_EmptyJSONMetadata_CuratedMessageOnly(t *testing.T) {
+	c := NewClient(&mockEVMClient{}, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
+
+	_, err := c.PrepareAddRecord(context.Background(), PrepareAddRecordRequest{
+		From:         "0x1234567890abcdef1234567890abcdef12345678",
+		Registry:     "test-reg",
+		Checksum:     "abc123",
+		ChecksumAlgo: "sha256",
+		Metadata:     "{}",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty JSON object metadata")
+	}
+	if !errors.Is(err, apperrors.ErrEmptyMetadataObject) {
+		t.Errorf("error should be ErrEmptyMetadataObject; got %v", err)
+	}
+	if !apperrors.IsInputError(err) {
+		t.Errorf("error must classify as input error so SafeForClient surfaces it; got %v", err)
+	}
+	if strings.Contains(err.Error(), apperrors.ErrMissingRequired.Error()) {
+		t.Errorf("curated message must not carry the classifier suffix %q; got %q",
+			apperrors.ErrMissingRequired.Error(), err.Error())
+	}
+}
 
 func TestApplyGasBuffer(t *testing.T) {
 	tests := []struct {

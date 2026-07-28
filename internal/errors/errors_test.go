@@ -25,6 +25,8 @@ func TestIsInputError(t *testing.T) {
 		{"ErrInvalidRecordID", ErrInvalidRecordID, true},
 		{"ErrInvalidChecksum", ErrInvalidChecksum, true},
 		{"ErrPrecompileValidation", ErrPrecompileValidation, true},
+		{"ErrLogRangeTooWide", ErrLogRangeTooWide, true},
+		{"ErrEmptyMetadataObject", ErrEmptyMetadataObject, true},
 		{"wrapped input error", fmt.Errorf("context: %w", ErrInvalidAddress), true},
 		{"ErrBlockNotFound is not input error", ErrBlockNotFound, false},
 		{"ErrUpstreamRPC is not input error", ErrUpstreamRPC, false},
@@ -104,6 +106,7 @@ func TestSentinelErrors_AreDistinct(t *testing.T) {
 		ErrRecordNotFound, ErrAnchorABIMissing, ErrWriteDisabled,
 		ErrUpstreamRPC, ErrContractCallFailed, ErrPrecompileCall,
 		ErrCircuitOpen, ErrRateLimited,
+		ErrLogRangeTooWide, ErrEmptyMetadataObject,
 	}
 
 	for i, a := range allErrors {
@@ -123,6 +126,7 @@ func TestSentinelErrors_HaveMessages(t *testing.T) {
 		ErrRecordNotFound, ErrAnchorABIMissing, ErrWriteDisabled,
 		ErrUpstreamRPC, ErrContractCallFailed, ErrPrecompileCall,
 		ErrCircuitOpen, ErrRateLimited,
+		ErrLogRangeTooWide, ErrEmptyMetadataObject,
 	}
 
 	for _, err := range allErrors {
