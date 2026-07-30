@@ -11,7 +11,7 @@ LDFLAGS := -s -w
 
 .PHONY: all build run run-http run-local healthz readyz metrics \
         mcp-probe mcp-probe-help seed-test-data \
-        test test-unit test-integration test-coverage test-verbose \
+        test test-unit test-integration test-coverage coverage-check test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
@@ -145,6 +145,13 @@ test-coverage:
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
+# Minimum total statement coverage. CI enforces the same number via
+# scripts/check_coverage.sh; change it here and there together.
+COVERAGE_THRESHOLD ?= 80
+
+coverage-check: test-coverage
+	@COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) bash scripts/check_coverage.sh coverage.out
+
 test-verbose:
 	$(GO) test -v -count=1 ./...
 
@@ -190,10 +197,10 @@ install-dev:
 
 ## CI
 
-ci: install-dev check-all test-coverage
+ci: install-dev check-all coverage-check
 	@echo "CI passed."
 
-release-check: clean install-dev check-all test-coverage build
+release-check: clean install-dev check-all coverage-check build
 	@echo "Release check passed."
 
 ## Dependencies
@@ -328,6 +335,7 @@ help:
 	@echo "  test-unit        Unit tests only (-short)"
 	@echo "  test-integration Integration tests (-tags integration)"
 	@echo "  test-coverage    Tests with -race + coverage report"
+	@echo "  coverage-check   test-coverage + enforce the $(COVERAGE_THRESHOLD)% total coverage gate"
 	@echo "  test-verbose     Verbose test output"
 	@echo "  test-load        Run k6 load tests (requires k6)"
 	@echo ""
@@ -342,7 +350,7 @@ help:
 	@echo "Dev Setup:"
 	@echo "  install-hooks    Install pre-commit git hooks"
 	@echo "  setup-dev        Install dev deps + hooks"
-	@echo "  ci               install-dev + check-all + test-coverage"
+	@echo "  ci               install-dev + check-all + coverage-check"
 	@echo "  release-check    clean + ci + build"
 	@echo ""
 	@echo "Dependencies:"

@@ -8,6 +8,8 @@ The project uses a layered testing approach: unit tests with mocks for fast feed
 
 The suite runs via `make test`; CI enforces green on every PR. Exact test counts aren't tracked here — they drift every release. Run `go test ./...` (or check the CI job output) for current numbers.
 
+CI additionally enforces a **minimum total statement coverage of 80%** on every PR (`scripts/check_coverage.sh`, run after the test step). Reproduce the exact gate locally with `make coverage-check`; the threshold lives in the Makefile (`COVERAGE_THRESHOLD`) and the CI workflow together.
+
 ## Running Tests
 
 ### Quick Reference
@@ -17,6 +19,7 @@ make test              # All unit tests (no integration)
 make test-unit         # Unit tests with -short flag
 make test-integration  # Integration tests against live testnet (requires network)
 make test-coverage     # Unit tests with race detector + HTML coverage report
+make coverage-check    # test-coverage + enforce the 80% total-coverage gate (same check CI runs)
 make test-verbose      # Verbose output, no caching
 make test-load         # k6 load tests (requires running server + k6 installed)
 make docker-smoke      # Build Docker image, start container, verify health + MCP
