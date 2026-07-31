@@ -27,7 +27,7 @@ type abiPaginationInput struct {
 // Records support versioning: multiple records can share the same RecordID
 // but differ by Index (version number).
 type Record struct {
-	Registry     string `json:"registry"`
+	RegistryID   uint64 `json:"registry_id"`
 	RecordID     uint64 `json:"record_id"`
 	Index        uint64 `json:"index"`
 	Checksum     string `json:"checksum"`
@@ -52,16 +52,16 @@ type PageResponse struct {
 
 // --- Query request/response types ---
 
-// GetRegistryRequest specifies filters for fetching a single registry.
+// GetRegistryRequest specifies the registry to fetch by its numeric ID.
+// The anchoring precompile keys registries by ID only; registry names are
+// not guaranteed unique and cannot be queried on-chain.
 type GetRegistryRequest struct {
-	ID   *uint64 `json:"id,omitempty"`
-	Name *string `json:"name,omitempty"`
+	ID uint64 `json:"id"`
 }
 
 // GetRegistriesRequest specifies filters and pagination for listing registries.
 type GetRegistriesRequest struct {
 	RegistryID *uint64      `json:"registry_id,omitempty"`
-	Name       *string      `json:"name,omitempty"`
 	Pagination *PageRequest `json:"pagination,omitempty"`
 }
 
@@ -77,13 +77,11 @@ type GetRegistriesResponse struct {
 //   - Latest by content hash: (RegistryID, Checksum)
 //   - All latest in a registry: (RegistryID) with pagination
 //   - All matching a checksum across registries: (Checksum)
-//   - Filter by registry name: (Registry)
 type GetRecordsRequest struct {
 	RegistryID *uint64      `json:"registry_id,omitempty"`
 	RecordID   *uint64      `json:"record_id,omitempty"`
 	Index      *uint64      `json:"index,omitempty"`
 	Checksum   *string      `json:"checksum,omitempty"`
-	Registry   *string      `json:"registry,omitempty"`
 	Pagination *PageRequest `json:"pagination,omitempty"`
 }
 
@@ -190,12 +188,24 @@ type PrepareAddRegistryRequest struct {
 // addRecord transaction. From is the sender's EVM address (0x...).
 type PrepareAddRecordRequest struct {
 	From         string `json:"from"`
-	Registry     string `json:"registry"`
+	RegistryID   uint64 `json:"registry_id"`
 	URI          string `json:"uri"`
 	Checksum     string `json:"checksum"`
 	ChecksumAlgo string `json:"checksum_algo"`
 	Status       string `json:"status,omitempty"`
 	Metadata     string `json:"metadata,omitempty"`
+	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
+	PreferLegacy bool `json:"prefer_legacy,omitempty"`
+}
+
+// PrepareUpdateRecordStatusRequest contains the parameters for preparing an
+// updateRecordStatus transaction. From is the editor's EVM address (0x...).
+type PrepareUpdateRecordStatusRequest struct {
+	From       string `json:"from"`
+	RegistryID uint64 `json:"registry_id"`
+	RecordID   uint64 `json:"record_id"`
+	Index      uint64 `json:"index"`
+	Status     string `json:"status"`
 	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
 	PreferLegacy bool `json:"prefer_legacy,omitempty"`
 }
@@ -207,6 +217,18 @@ type PrepareGrantRoleRequest struct {
 	RegistryID uint64 `json:"registry_id"`
 	Checksum   string `json:"checksum,omitempty"`
 	Account    string `json:"account"` // Address receiving the role (0x...)
+	Role       string `json:"role"`    // "admin" or "editor"
+	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
+	PreferLegacy bool `json:"prefer_legacy,omitempty"`
+}
+
+// PrepareRevokeRoleRequest contains the parameters for preparing a
+// revokeRole transaction. From is the admin's EVM address (0x...).
+type PrepareRevokeRoleRequest struct {
+	From       string `json:"from"`
+	RegistryID uint64 `json:"registry_id"`
+	Checksum   string `json:"checksum,omitempty"`
+	Account    string `json:"account"` // Address losing the role (0x...)
 	Role       string `json:"role"`    // "admin" or "editor"
 	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
 	PreferLegacy bool `json:"prefer_legacy,omitempty"`

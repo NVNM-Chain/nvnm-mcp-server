@@ -62,8 +62,7 @@ func TestGetRegistry_HostilePrecompileOutputHandledGracefully(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, abiPath, logger)
 
-	id := uint64(1)
-	if _, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id}); err == nil {
+	if _, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: 1}); err == nil {
 		t.Fatal("expected an error for hostile precompile output, got nil")
 	}
 }

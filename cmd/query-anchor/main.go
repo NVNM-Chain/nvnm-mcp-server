@@ -79,7 +79,7 @@ func run() error {
 	for i := range allRegs.Registries[:limit] {
 		reg := &allRegs.Registries[i]
 		records, recErr := anchorClient.GetRecords(ctx, anchor.GetRecordsRequest{
-			Registry:   &reg.Name,
+			RegistryID: &reg.ID,
 			Pagination: &anchor.PageRequest{Limit: 5},
 		})
 		if recErr != nil {

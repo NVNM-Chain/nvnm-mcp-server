@@ -73,6 +73,28 @@ func integrationResilientEVMClient(t *testing.T) evm.Client {
 	}, mets, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
+// findRegistryIDByName scans registries looking for an exact name match. The
+// anchoring precompile keys registries by ID only (names are not unique or
+// queryable on-chain), so tests that need a well-known seeded registry
+// ("mcp-test-data") have to paginate and filter client-side.
+func findRegistryIDByName(t *testing.T, c anchor.Client, name string) uint64 {
+	t.Helper()
+	ctx := context.Background()
+	resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		Pagination: &anchor.PageRequest{Limit: 200},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistries: %v", err)
+	}
+	for i := range resp.Registries {
+		if resp.Registries[i].Name == name {
+			return resp.Registries[i].ID
+		}
+	}
+	t.Fatalf("registry %q not found among %d registries", name, len(resp.Registries))
+	return 0
+}
+
 func TestIntegration_Info(t *testing.T) {
 	c := integrationClient(t)
 	info := c.Info()
@@ -86,8 +108,8 @@ func TestIntegration_Info(t *testing.T) {
 	if !info.ABILoaded {
 		t.Error("ABILoaded should be true")
 	}
-	if info.MethodCount != 5 {
-		t.Errorf("MethodCount = %d, want 5", info.MethodCount)
+	if info.MethodCount != 7 {
+		t.Errorf("MethodCount = %d, want 7", info.MethodCount)
 	}
 }
 
@@ -131,8 +153,7 @@ func TestIntegration_GetRegistry_ByID(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	id := uint64(1)
-	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{ID: &id})
+	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{ID: 1})
 	if err != nil {
 		t.Fatalf("GetRegistry(ID=1): %v", err)
 	}
@@ -144,52 +165,28 @@ func TestIntegration_GetRegistry_ByID(t *testing.T) {
 	}
 }
 
-func TestIntegration_GetRegistry_ByName(t *testing.T) {
-	c := integrationClient(t)
-	ctx := context.Background()
-
-	// First get a registry to know a valid name
-	regs, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
-		Pagination: &anchor.PageRequest{Limit: 1},
-	})
-	if err != nil {
-		t.Fatalf("GetRegistries: %v", err)
-	}
-	if len(regs.Registries) == 0 {
-		t.Skip("no registries on chain")
-	}
-
-	name := regs.Registries[0].Name
-	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{Name: &name})
-	if err != nil {
-		t.Fatalf("GetRegistry(Name=%q): %v", name, err)
-	}
-	if reg.Name != name {
-		t.Errorf("Name = %q, want %q", reg.Name, name)
-	}
-}
-
-func TestIntegration_GetRecords_ByRegistry(t *testing.T) {
+func TestIntegration_GetRecords_ByRegistryID(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
 	// mcp-test-data is the stable registry seeded by cmd/seed-test-data;
-	// it carries 3 records.
-	name := "mcp-test-data"
+	// it carries 3 records. Registries are no longer name-queryable
+	// on-chain, so the id is resolved client-side first.
+	regID := findRegistryIDByName(t, c, "mcp-test-data")
 	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   &name,
+		RegistryID: &regID,
 		Pagination: &anchor.PageRequest{Limit: 10},
 	})
 	if err != nil {
-		t.Fatalf("GetRecords(registry=%q): %v", name, err)
+		t.Fatalf("GetRecords(registry_id=%d): %v", regID, err)
 	}
 	if len(resp.Records) == 0 {
-		t.Fatalf("expected at least one record in %q", name)
+		t.Fatalf("expected at least one record in registry %d", regID)
 	}
 
 	rec := resp.Records[0]
-	if rec.Registry != name {
-		t.Errorf("Registry = %q, want %q", rec.Registry, name)
+	if rec.RegistryID != regID {
+		t.Errorf("RegistryID = %d, want %d", rec.RegistryID, regID)
 	}
 	if rec.RecordID == 0 {
 		t.Error("RecordID should be > 0")
@@ -208,69 +205,23 @@ func TestIntegration_GetRecords_ByRegistry(t *testing.T) {
 	}
 }
 
-// TestIntegration_GetRecords_ByID verifies that querying records by numeric
-// registry_id returns the same records as querying by registry name. The
-// precompile's records query is name-keyed, so the client resolves
-// registry_id -> name internally; before that fix a registry_id filter was
-// silently ignored and returned an empty set.
-func TestIntegration_GetRecords_ByID(t *testing.T) {
-	c := integrationClient(t)
-	ctx := context.Background()
-
-	name := "mcp-test-data"
-
-	// Resolve the registry's numeric id by name.
-	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{Name: &name})
-	if err != nil {
-		t.Fatalf("GetRegistry(name=%q): %v", name, err)
-	}
-	if reg.ID == 0 {
-		t.Fatalf("registry %q has id 0", name)
-	}
-
-	byName, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   &name,
-		Pagination: &anchor.PageRequest{Limit: 10},
-	})
-	if err != nil {
-		t.Fatalf("GetRecords(registry=%q): %v", name, err)
-	}
-	if len(byName.Records) == 0 {
-		t.Fatalf("expected records in %q", name)
-	}
-
-	byID, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		RegistryID: &reg.ID,
-		Pagination: &anchor.PageRequest{Limit: 10},
-	})
-	if err != nil {
-		t.Fatalf("GetRecords(registry_id=%d): %v", reg.ID, err)
-	}
-
-	// The by-id query must return the same non-empty set as the by-name query.
-	if len(byID.Records) != len(byName.Records) {
-		t.Fatalf("by-id returned %d records, by-name returned %d (registry_id ignored?)",
-			len(byID.Records), len(byName.Records))
-	}
-	if byID.Records[0].Registry != name {
-		t.Errorf("by-id record Registry = %q, want %q", byID.Records[0].Registry, name)
-	}
-	if byID.Records[0].Checksum != byName.Records[0].Checksum {
-		t.Errorf("by-id first checksum %q != by-name %q",
-			byID.Records[0].Checksum, byName.Records[0].Checksum)
-	}
-}
-
-// TestIntegration_GetRecords_BadID confirms an unknown registry_id fails loud
-// (resolve error) rather than silently returning an empty record set.
-func TestIntegration_GetRecords_BadID(t *testing.T) {
+// TestIntegration_GetRecords_UnknownRegistryIDReturnsEmpty confirms an
+// unknown registry_id returns an empty, non-error result: the precompile's
+// records query prefix-walks within the given registry_id and a registry
+// with no records (or no such registry) simply yields nothing, matching the
+// keeper's Records handler (registry_id != 0, record_id == 0 => prefix walk,
+// never a not-found error).
+func TestIntegration_GetRecords_UnknownRegistryIDReturnsEmpty(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
 	badID := uint64(99999999)
-	_, err := c.GetRecords(ctx, anchor.GetRecordsRequest{RegistryID: &badID})
-	if err == nil {
-		t.Fatal("expected error resolving a non-existent registry_id, got nil")
+	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{RegistryID: &badID})
+	if err != nil {
+		t.Fatalf("GetRecords(registry_id=%d): unexpected error: %v", badID, err)
+	}
+	if len(resp.Records) != 0 {
+		t.Errorf("expected 0 records for unknown registry_id, got %d", len(resp.Records))
 	}
 }
 
@@ -280,25 +231,25 @@ func TestIntegration_GetRecords_Pagination(t *testing.T) {
 
 	// mcp-test-data is the stable registry seeded by cmd/seed-test-data;
 	// it carries 3 records -- enough to exercise offset/limit paging.
-	name := "mcp-test-data"
+	regID := findRegistryIDByName(t, c, "mcp-test-data")
 
 	// Confirm the registry has enough records to page through. The
 	// nvnm-testnet-1 precompile returns pagination.total=0 even with
 	// countTotal=true, so count the returned slice rather than trust Total.
 	all, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   &name,
+		RegistryID: &regID,
 		Pagination: &anchor.PageRequest{Limit: 10},
 	})
 	if err != nil {
 		t.Fatalf("GetRecords(limit=10): %v", err)
 	}
 	if len(all.Records) < 2 {
-		t.Fatalf("need >= 2 records in %q for pagination test, got %d", name, len(all.Records))
+		t.Fatalf("need >= 2 records in registry %d for pagination test, got %d", regID, len(all.Records))
 	}
 
 	// Page 1: first record only.
 	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   &name,
+		RegistryID: &regID,
 		Pagination: &anchor.PageRequest{Limit: 1},
 	})
 	if err != nil {
@@ -313,7 +264,7 @@ func TestIntegration_GetRecords_Pagination(t *testing.T) {
 
 	// Page 2: offset by 1.
 	resp2, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   &name,
+		RegistryID: &regID,
 		Pagination: &anchor.PageRequest{Offset: 1, Limit: 1},
 	})
 	if err != nil {

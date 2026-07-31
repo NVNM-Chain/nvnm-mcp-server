@@ -182,7 +182,7 @@ func TestPrepare_PackErrors(t *testing.T) {
 
 	_, err = c.PrepareAddRecord(context.Background(), PrepareAddRecordRequest{
 		From:         "0x1234567890abcdef1234567890abcdef12345678",
-		Registry:     "reg",
+		RegistryID:   1,
 		Checksum:     "abc123",
 		ChecksumAlgo: "sha256",
 		Metadata:     "smoke",

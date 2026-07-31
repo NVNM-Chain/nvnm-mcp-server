@@ -63,7 +63,7 @@ func TestGolden_Registry(t *testing.T) {
 
 func TestGolden_Record(t *testing.T) {
 	rec := Record{
-		Registry:     "test-registry-uuid",
+		RegistryID:   3,
 		RecordID:     7,
 		Index:        1,
 		Checksum:     "e4d5f79f1cfaf0cecd5f0e323a25fd08c1f64d0e1f8de349d75c77f29e51407d",
@@ -104,7 +104,7 @@ func TestGolden_GetRecordsResponse(t *testing.T) {
 	resp := GetRecordsResponse{
 		Records: []Record{
 			{
-				Registry:     "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f",
+				RegistryID:   1,
 				RecordID:     1,
 				Index:        1,
 				Checksum:     "0xabc",
@@ -126,7 +126,7 @@ func TestGolden_PrecompileInfo(t *testing.T) {
 		Address:     "0x0000000000000000000000000000000000000A00",
 		ChainID:     58887,
 		ABILoaded:   true,
-		MethodCount: 5,
+		MethodCount: 7,
 	}
 	assertGolden(t, "precompile_info", info)
 }

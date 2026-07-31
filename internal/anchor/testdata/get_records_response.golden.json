@@ -1,7 +1,7 @@
 {
   "records": [
     {
-      "registry": "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f",
+      "registry_id": 1,
       "record_id": 1,
       "index": 1,
       "checksum": "0xabc",

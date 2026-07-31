@@ -97,26 +97,47 @@ func run() error {
 
 	anchorClient := anchor.NewClient(evmClient, anchor.PrecompileAddress, chainID, abiPath, logger)
 
-	if err := ensureRegistry(ctx, anchorClient, evmClient, creds); err != nil {
+	registryID, err := ensureRegistry(ctx, anchorClient, evmClient, creds)
+	if err != nil {
 		return err
 	}
 
-	if err := seedRecords(ctx, anchorClient, evmClient, creds); err != nil {
+	if err := seedRecords(ctx, anchorClient, evmClient, creds, registryID); err != nil {
 		return err
 	}
 
-	return verifySeededData(ctx, anchorClient)
+	return verifySeededData(ctx, anchorClient, registryID)
 }
 
-func ensureRegistry(ctx context.Context, ac anchor.Client, ec evm.Client, creds *credentials) error {
+// findRegistryByName scans registries looking for an exact name match. The
+// anchoring precompile keys registries by ID only (names are not unique or
+// queryable on-chain), so this seed script has to paginate and filter
+// client-side; it returns the first match, or nil if none is found.
+func findRegistryByName(ctx context.Context, ac anchor.Client, name string) (*anchor.Registry, error) {
+	resp, err := ac.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		Pagination: &anchor.PageRequest{Limit: 200},
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range resp.Registries {
+		if resp.Registries[i].Name == name {
+			return &resp.Registries[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func ensureRegistry(ctx context.Context, ac anchor.Client, ec evm.Client, creds *credentials) (uint64, error) {
 	fmt.Printf("=== Creating registry %q ===\n", registryName)
-	existing, lookupErr := ac.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
+	existing, lookupErr := findRegistryByName(ctx, ac, registryName)
 	if lookupErr == nil && existing != nil {
 		fmt.Printf("  already exists: id=%d creator=%s (skipping)\n\n", existing.ID, existing.Creator)
-		return nil
+		return existing.ID, nil
 	}
 
-	return submitPreparedTx(ctx, ec, func() (*anchor.UnsignedTransaction, error) {
+	var registryID uint64
+	err := submitPreparedTx(ctx, ec, func() (*anchor.UnsignedTransaction, error) {
 		return ac.PrepareAddRegistry(ctx, anchor.PrepareAddRegistryRequest{
 			From:        creds.address,
 			Name:        registryName,
@@ -124,9 +145,22 @@ func ensureRegistry(ctx context.Context, ac anchor.Client, ec evm.Client, creds 
 			Metadata:    `{"seeded_by":"cmd/seed-test-data"}`,
 		})
 	}, creds, "addRegistry")
+	if err != nil {
+		return 0, err
+	}
+
+	reg, err := findRegistryByName(ctx, ac, registryName)
+	if err != nil {
+		return 0, fmt.Errorf("resolve created registry: %w", err)
+	}
+	if reg == nil {
+		return 0, fmt.Errorf("registry %q not found after creation", registryName)
+	}
+	registryID = reg.ID
+	return registryID, nil
 }
 
-func seedRecords(ctx context.Context, ac anchor.Client, ec evm.Client, creds *credentials) error {
+func seedRecords(ctx context.Context, ac anchor.Client, ec evm.Client, creds *credentials, registryID uint64) error {
 	for i, rec := range records {
 		fmt.Printf("=== Adding record %d/%d ===\n", i+1, len(records))
 		fmt.Printf("  URI: %s\n", rec.URI)
@@ -135,7 +169,7 @@ func seedRecords(ctx context.Context, ac anchor.Client, ec evm.Client, creds *cr
 		err := submitPreparedTx(ctx, ec, func() (*anchor.UnsignedTransaction, error) {
 			return ac.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
 				From:         creds.address,
-				Registry:     registryName,
+				RegistryID:   registryID,
 				URI:          rec.URI,
 				Checksum:     rec.Checksum,
 				ChecksumAlgo: rec.ChecksumAlgo,
@@ -184,16 +218,16 @@ func submitPreparedTx(
 	return nil
 }
 
-func verifySeededData(ctx context.Context, ac anchor.Client) error {
+func verifySeededData(ctx context.Context, ac anchor.Client, registryID uint64) error {
 	fmt.Println("=== Verifying ===")
-	reg, err := ac.GetRegistry(ctx, anchor.GetRegistryRequest{Name: strPtr(registryName)})
+	reg, err := ac.GetRegistry(ctx, anchor.GetRegistryRequest{ID: registryID})
 	if err != nil {
 		return fmt.Errorf("verify registry: %w", err)
 	}
 	fmt.Printf("  Registry: id=%d name=%q creator=%s\n", reg.ID, reg.Name, reg.Creator)
 
 	recs, err := ac.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   strPtr(registryName),
+		RegistryID: &registryID,
 		Pagination: &anchor.PageRequest{Limit: 10},
 	})
 	if err != nil {
@@ -296,5 +330,3 @@ func waitForReceipt(
 	}
 	return nil, fmt.Errorf("after %s for %s: %w", timeout, txHash, errReceiptTimeout)
 }
-
-func strPtr(s string) *string { return &s }

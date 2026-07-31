@@ -129,7 +129,15 @@ func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRe
 func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddRecordRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
 	return m.unsignedTx, m.returnErr
 }
+func (m *mockAnchor) PrepareUpdateRecordStatus(
+	_ context.Context, _ anchor.PrepareUpdateRecordStatusRequest,
+) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
+	return m.unsignedTx, m.returnErr
+}
 func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
+	return m.unsignedTx, m.returnErr
+}
+func (m *mockAnchor) PrepareRevokeRole(_ context.Context, _ anchor.PrepareRevokeRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
 	return m.unsignedTx, m.returnErr
 }
 
@@ -581,26 +589,11 @@ func TestHandler_AnchorInfo_Happy(t *testing.T) {
 	}
 }
 
-func TestHandler_GetRegistry_ByName(t *testing.T) {
-	m := &mockAnchor{registry: &anchor.Registry{ID: 1, Name: "test-reg", Creator: "someone"}}
-	handler := makeGetRegistryHandler(m)
-
-	name := "test-reg"
-	_, out, err := handler(ctx, nil, getRegistryInput{Name: &name})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Name != "test-reg" {
-		t.Errorf("Name = %q, want %q", out.Name, "test-reg")
-	}
-}
-
 func TestHandler_GetRegistry_ByID(t *testing.T) {
 	m := &mockAnchor{registry: &anchor.Registry{ID: 42, Name: "by-id"}}
 	handler := makeGetRegistryHandler(m)
 
-	id := uint64(42)
-	_, out, err := handler(ctx, nil, getRegistryInput{ID: &id})
+	_, out, err := handler(ctx, nil, getRegistryInput{ID: 42})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -609,12 +602,12 @@ func TestHandler_GetRegistry_ByID(t *testing.T) {
 	}
 }
 
-func TestHandler_GetRegistry_NeitherIDNorName(t *testing.T) {
+func TestHandler_GetRegistry_MissingID(t *testing.T) {
 	handler := makeGetRegistryHandler(&mockAnchor{})
 
 	_, _, err := handler(ctx, nil, getRegistryInput{})
 	if err == nil {
-		t.Fatal("expected error when neither id nor name provided")
+		t.Fatal("expected error when id not provided")
 	}
 	if !errors.Is(err, apperrors.ErrMissingRequired) {
 		t.Errorf("error = %v, want ErrMissingRequired", err)
@@ -655,15 +648,15 @@ func TestHandler_GetRegistries_WithPagination(t *testing.T) {
 	}
 }
 
-func TestHandler_GetRecords_ByRegistry(t *testing.T) {
+func TestHandler_GetRecords_ByRegistryID(t *testing.T) {
 	m := &mockAnchor{records: &anchor.GetRecordsResponse{
 		Records:    []anchor.Record{{RecordID: 1, Checksum: "abc123"}},
 		Pagination: &anchor.PageResponse{Total: 1},
 	}}
 	handler := makeGetRecordsHandler(m)
 
-	reg := "test-reg"
-	_, out, err := handler(ctx, nil, getRecordsInput{Registry: &reg})
+	regID := uint64(1)
+	_, out, err := handler(ctx, nil, getRecordsInput{RegistryID: &regID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -740,10 +733,10 @@ func TestHandler_PrepareAddRecord_Happy(t *testing.T) {
 	handler := makePrepareAddRecordHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, prepareAddRecordInput{
-		From:     testAddr,
-		Registry: "test-reg",
-		Checksum: "abc123",
-		URI:      "https://example.com/doc.pdf",
+		From:       testAddr,
+		RegistryID: 1,
+		Checksum:   "abc123",
+		URI:        "https://example.com/doc.pdf",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -786,6 +779,62 @@ func TestHandler_PrepareGrantRole_Error(t *testing.T) {
 	handler := makePrepareGrantRoleHandler(m, testLogger())
 
 	_, _, err := handler(ctx, nil, prepareGrantRoleInput{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestHandler_PrepareUpdateRecordStatus_Happy(t *testing.T) {
+	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
+	handler := makePrepareUpdateRecordStatusHandler(m, testLogger())
+
+	_, out, err := handler(ctx, nil, prepareUpdateRecordStatusInput{
+		From:       testAddr,
+		RegistryID: 1,
+		RecordID:   7,
+		Status:     "Superseded",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Gas != 63000 {
+		t.Errorf("Gas = %d, want 63000", out.Gas)
+	}
+}
+
+func TestHandler_PrepareUpdateRecordStatus_Error(t *testing.T) {
+	m := &mockAnchor{returnErr: errors.New("status required")}
+	handler := makePrepareUpdateRecordStatusHandler(m, testLogger())
+
+	_, _, err := handler(ctx, nil, prepareUpdateRecordStatusInput{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestHandler_PrepareRevokeRole_Happy(t *testing.T) {
+	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
+	handler := makePrepareRevokeRoleHandler(m, testLogger())
+
+	_, out, err := handler(ctx, nil, prepareRevokeRoleInput{
+		From:       testAddr,
+		RegistryID: 1,
+		Account:    testAddr,
+		Role:       "editor",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Gas != 63000 {
+		t.Errorf("Gas = %d, want 63000", out.Gas)
+	}
+}
+
+func TestHandler_PrepareRevokeRole_Error(t *testing.T) {
+	m := &mockAnchor{returnErr: errors.New("role required")}
+	handler := makePrepareRevokeRoleHandler(m, testLogger())
+
+	_, _, err := handler(ctx, nil, prepareRevokeRoleInput{})
 	if err == nil {
 		t.Fatal("expected error")
 	}

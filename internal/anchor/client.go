@@ -43,7 +43,9 @@ type Client interface {
 	// Write preparation (prepare-sign-submit pattern)
 	PrepareAddRegistry(ctx context.Context, req PrepareAddRegistryRequest) (*UnsignedTransaction, error)
 	PrepareAddRecord(ctx context.Context, req PrepareAddRecordRequest) (*UnsignedTransaction, error)
+	PrepareUpdateRecordStatus(ctx context.Context, req PrepareUpdateRecordStatusRequest) (*UnsignedTransaction, error)
 	PrepareGrantRole(ctx context.Context, req PrepareGrantRoleRequest) (*UnsignedTransaction, error)
+	PrepareRevokeRole(ctx context.Context, req PrepareRevokeRoleRequest) (*UnsignedTransaction, error)
 }
 
 // abiRegistryRow mirrors the on-chain tuple component layout for the
@@ -60,7 +62,6 @@ type abiRegistryRow struct {
 // abiRecordRow mirrors the on-chain tuple component layout for the
 // `records` view.
 type abiRecordRow struct {
-	Registry     string `abi:"registry"`
 	URI          string `abi:"uri"`
 	Checksum     string `abi:"checksum"`
 	ChecksumAlgo string `abi:"checksumAlgo"`
@@ -70,6 +71,7 @@ type abiRecordRow struct {
 	RecordID     uint64 `abi:"recordId"`
 	Index        uint64 `abi:"index"`
 	IsLatest     bool   `abi:"isLatest"`
+	RegistryID   uint64 `abi:"registryId"`
 }
 
 // abiPaginationOutput mirrors the on-chain pagination response tuple.
@@ -159,8 +161,9 @@ func (c *client) MethodSelector(name string) (string, bool) {
 	return "0x" + hex.EncodeToString(fb[:]), true
 }
 
-// GetRegistry fetches a single registry by ID or name.
-// It calls the "registries" view function with a filter and returns the first match.
+// GetRegistry fetches a single registry by its numeric ID.
+// It calls the "registries" view function with a registry_id filter and
+// returns the sole match.
 func (c *client) GetRegistry(
 	ctx context.Context,
 	req GetRegistryRequest,
@@ -168,14 +171,8 @@ func (c *client) GetRegistry(
 	if err := c.requireABI(); err != nil {
 		return nil, err
 	}
-
-	var registryID uint64
-	var name string
-	if req.ID != nil {
-		registryID = *req.ID
-	}
-	if req.Name != nil {
-		name = *req.Name
+	if req.ID == 0 {
+		return nil, fmt.Errorf("registry id must be > 0: %w", apperrors.ErrInvalidRegistryID)
 	}
 
 	pagination := abiPaginationInput{
@@ -186,7 +183,7 @@ func (c *client) GetRegistry(
 		Reverse:    false,
 	}
 
-	output, err := c.callPrecompile(ctx, "registries", registryID, name, pagination)
+	output, err := c.callPrecompile(ctx, "registries", req.ID, pagination)
 	if err != nil {
 		// The precompile returns a raw "collections: not found" RPC error for
 		// an unknown id, which would otherwise leak the internal Cosmos proto
@@ -224,12 +221,8 @@ func (c *client) GetRegistries(
 	}
 
 	var registryID uint64
-	var name string
 	if req.RegistryID != nil {
 		registryID = *req.RegistryID
-	}
-	if req.Name != nil {
-		name = *req.Name
 	}
 
 	pagination := abiPaginationInput{
@@ -248,7 +241,7 @@ func (c *client) GetRegistries(
 		}
 	}
 
-	output, err := c.callPrecompile(ctx, "registries", registryID, name, pagination)
+	output, err := c.callPrecompile(ctx, "registries", registryID, pagination)
 	if err != nil {
 		// The precompile returns a raw "collections: not found" RPC error for
 		// an unknown id, which would otherwise leak the internal Cosmos proto
@@ -284,10 +277,10 @@ func (c *client) GetRecords(
 		return nil, err
 	}
 
-	var registry, checksum string
-	var recordID, index uint64
-	if req.Registry != nil {
-		registry = *req.Registry
+	var checksum string
+	var registryID, recordID, index uint64
+	if req.RegistryID != nil {
+		registryID = *req.RegistryID
 	}
 	if req.Checksum != nil {
 		checksum = *req.Checksum
@@ -297,20 +290,6 @@ func (c *client) GetRecords(
 	}
 	if req.Index != nil {
 		index = *req.Index
-	}
-
-	// The precompile's records query is keyed by registry NAME, not numeric
-	// id. registry_id is a caller convenience, so resolve it to a name here.
-	// An explicit name wins; the id is only resolved when no name was given.
-	// Without this, a registry_id filter was silently ignored and the query
-	// returned an empty set (the registry_id-based modes advertised by the
-	// anchor_get_records tool never worked); a bad id now fails loud instead.
-	if registry == "" && req.RegistryID != nil {
-		reg, regErr := c.GetRegistry(ctx, GetRegistryRequest{ID: req.RegistryID})
-		if regErr != nil {
-			return nil, fmt.Errorf("resolve registry_id %d: %w", *req.RegistryID, regErr)
-		}
-		registry = reg.Name
 	}
 
 	pagination := abiPaginationInput{
@@ -330,7 +309,7 @@ func (c *client) GetRecords(
 	}
 
 	output, err := c.callPrecompile(
-		ctx, "records", registry, checksum, recordID, index, pagination,
+		ctx, "records", registryID, checksum, recordID, index, pagination,
 	)
 	if err != nil {
 		return nil, err
@@ -425,7 +404,7 @@ func toRecords(rows []abiRecordRow) []Record {
 	out := make([]Record, len(rows))
 	for i := range rows {
 		out[i] = Record{
-			Registry:     rows[i].Registry,
+			RegistryID:   rows[i].RegistryID,
 			RecordID:     rows[i].RecordID,
 			Index:        rows[i].Index,
 			Checksum:     rows[i].Checksum,
