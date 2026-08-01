@@ -3,7 +3,7 @@ module github.com/NVNM-Chain/nvnm-mcp-server
 go 1.26.5
 
 require (
-	github.com/MicahParks/keyfunc/v3 v3.8.0
+	github.com/MicahParks/keyfunc/v3 v3.8.1
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/defiweb/go-eth v0.7.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -28,7 +28,7 @@ require (
 )
 
 require (
-	github.com/MicahParks/jwkset v0.11.0 // indirect
+	github.com/MicahParks/jwkset v0.11.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/btcsuite/btcd v0.24.2 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.2 // indirect
