@@ -9,6 +9,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+- **Backed out the 80% coverage gate and AGENTS.md introduced in #55**,
+  pending team agreement on both: the threshold number originated in that PR
+  itself rather than any prior project decision, and AGENTS.md declares
+  project-wide policy that needs its own review pass. Removed
+  `scripts/check_coverage.sh`, the CI "Coverage gate" step, the
+  `make coverage-check` target (with `ci`/`release-check` reverting to
+  `test-coverage`), and gate references in README/docs/TESTING.md. All 26
+  test files from #55 are kept unchanged; CI still runs the full suite with
+  `-race` and produces a coverage profile — it just no longer fails on a
+  threshold. A deliberately chosen gate and a reviewed agent guide will land
+  as separate PRs.
+
 ## [1.0.0-rc16] - 2026-07-28
 
 ### Fixed
