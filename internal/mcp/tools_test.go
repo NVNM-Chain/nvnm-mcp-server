@@ -131,7 +131,7 @@ func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddReco
 }
 func (m *mockAnchor) PrepareUpdateRecordStatus(
 	_ context.Context, _ anchor.PrepareUpdateRecordStatusRequest,
-) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
+) (*anchor.UnsignedTransaction, error) {
 	return m.unsignedTx, m.returnErr
 }
 func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
