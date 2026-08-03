@@ -132,7 +132,7 @@ func TestE2E_Initialize_IncludesInstructions(t *testing.T) {
 	}
 }
 
-func TestE2E_ListTools_Returns21(t *testing.T) {
+func TestE2E_ListTools_Returns23(t *testing.T) {
 	session := startTestServer(t)
 
 	result, err := session.ListTools(ctx, nil)
@@ -140,8 +140,9 @@ func TestE2E_ListTools_Returns21(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	// 16 pre-8.8 tools + 5 onboarding tools registered by Phase 8.8.
-	const want = 21
+	// 16 pre-8.8 tools + 5 onboarding tools registered by Phase 8.8 +
+	// anchor_prepare_update_record_status + anchor_prepare_revoke_role.
+	const want = 23
 	if len(result.Tools) != want {
 		names := make([]string, len(result.Tools))
 		for i, tool := range result.Tools {
@@ -183,9 +184,11 @@ func TestE2E_ListTools_ContainsExpectedNames(t *testing.T) {
 		"anchor_get_registries": false,
 		"anchor_get_records":    false,
 		// Anchor writes.
-		"anchor_prepare_add_registry": false,
-		"anchor_prepare_add_record":   false,
-		"anchor_prepare_grant_role":   false,
+		"anchor_prepare_add_registry":         false,
+		"anchor_prepare_add_record":           false,
+		"anchor_prepare_update_record_status": false,
+		"anchor_prepare_grant_role":           false,
+		"anchor_prepare_revoke_role":          false,
 	}
 
 	for _, tool := range result.Tools {

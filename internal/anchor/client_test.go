@@ -172,8 +172,8 @@ func TestNewClient_WithABI(t *testing.T) {
 	if !info.ABILoaded {
 		t.Error("ABILoaded should be true")
 	}
-	if info.MethodCount != 5 {
-		t.Errorf("MethodCount = %d, want 5", info.MethodCount)
+	if info.MethodCount != 7 {
+		t.Errorf("MethodCount = %d, want 7", info.MethodCount)
 	}
 }
 
@@ -238,12 +238,12 @@ func TestLoadABI_RawArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadABI failed: %v", err)
 	}
-	if len(parsed.Methods) != 5 {
-		t.Errorf("method count = %d, want 5", len(parsed.Methods))
+	if len(parsed.Methods) != 7 {
+		t.Errorf("method count = %d, want 7", len(parsed.Methods))
 	}
 
 	expectedMethods := []string{
-		"addRecord", "addRegistry", "grantRole", "records", "registries",
+		"addRecord", "addRegistry", "updateRecordStatus", "grantRole", "revokeRole", "records", "registries",
 	}
 	for _, name := range expectedMethods {
 		if _, ok := parsed.Methods[name]; !ok {
@@ -279,8 +279,8 @@ func TestLoadABI_WrappedObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadABI with wrapper failed: %v", err)
 	}
-	if len(parsed.Methods) != 5 {
-		t.Errorf("method count = %d, want 5", len(parsed.Methods))
+	if len(parsed.Methods) != 7 {
+		t.Errorf("method count = %d, want 7", len(parsed.Methods))
 	}
 }
 
@@ -362,8 +362,7 @@ func TestGetRegistry_NotFoundMapsToSentinel(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, abiPath, logger)
 
-	id := uint64(999)
-	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id})
+	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: 999})
 	if !errors.Is(err, apperrors.ErrRegistryNotFound) {
 		t.Fatalf("want ErrRegistryNotFound, got %v", err)
 	}

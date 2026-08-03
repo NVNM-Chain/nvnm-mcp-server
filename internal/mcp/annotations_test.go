@@ -86,8 +86,9 @@ func TestConstructorsReturnDistinctPointers(t *testing.T) {
 
 // expectedToolCount is the number of tools registered when
 // enableWriteTools=true on current main. Bump when adding tools.
-// 16 pre-8.8 tools + 5 onboarding tools registered by Phase 8.8.
-const expectedToolCount = 21
+// 16 pre-8.8 tools + 5 onboarding tools registered by Phase 8.8 +
+// anchor_prepare_update_record_status + anchor_prepare_revoke_role.
+const expectedToolCount = 23
 
 func TestE2E_AllToolsAreAnnotated(t *testing.T) {
 	session := startTestServerWithConfig(t, e2eServerConfig{})

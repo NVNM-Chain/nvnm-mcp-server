@@ -62,8 +62,8 @@ func (c *client) PrepareAddRecord(
 	if req.From == "" {
 		return nil, fmt.Errorf("from address is required: %w", apperrors.ErrMissingRequired)
 	}
-	if req.Registry == "" {
-		return nil, fmt.Errorf("registry is required: %w", apperrors.ErrMissingRequired)
+	if req.RegistryID == 0 {
+		return nil, fmt.Errorf("registry_id must be > 0: %w", apperrors.ErrInvalidRegistryID)
 	}
 	// The anchoring precompile caps the checksum at 64 chars and rejects a
 	// 0x prefix (0x + 64-hex digest = 66 chars). Accept the natural
@@ -97,7 +97,6 @@ func (c *client) PrepareAddRecord(
 	// must match the on-chain component names so the encoder maps them
 	// positionally.
 	type recordTuple struct {
-		Registry     string `abi:"registry"`
 		URI          string `abi:"uri"`
 		Checksum     string `abi:"checksum"`
 		ChecksumAlgo string `abi:"checksumAlgo"`
@@ -107,6 +106,7 @@ func (c *client) PrepareAddRecord(
 		RecordID     uint64 `abi:"recordId"`
 		Index        uint64 `abi:"index"`
 		IsLatest     bool   `abi:"isLatest"`
+		RegistryID   uint64 `abi:"registryId"`
 	}
 
 	status := req.Status
@@ -115,7 +115,6 @@ func (c *client) PrepareAddRecord(
 	}
 
 	record := recordTuple{
-		Registry:     req.Registry,
 		URI:          req.URI,
 		Checksum:     checksum,
 		ChecksumAlgo: req.ChecksumAlgo,
@@ -125,11 +124,43 @@ func (c *client) PrepareAddRecord(
 		RecordID:     0,
 		Index:        0,
 		IsLatest:     false,
+		RegistryID:   req.RegistryID,
 	}
 
 	calldata, err := c.parsedABI.Methods["addRecord"].EncodeArgs(record)
 	if err != nil {
 		return nil, fmt.Errorf("pack addRecord: %w", err)
+	}
+
+	return c.buildUnsignedTx(ctx, req.From, calldata, req.PreferLegacy)
+}
+
+// PrepareUpdateRecordStatus constructs an unsigned updateRecordStatus transaction.
+func (c *client) PrepareUpdateRecordStatus(
+	ctx context.Context,
+	req PrepareUpdateRecordStatusRequest,
+) (*UnsignedTransaction, error) {
+	if err := c.requireABI(); err != nil {
+		return nil, err
+	}
+	if req.From == "" {
+		return nil, fmt.Errorf("from address is required: %w", apperrors.ErrMissingRequired)
+	}
+	if req.RegistryID == 0 {
+		return nil, fmt.Errorf("registry_id must be > 0: %w", apperrors.ErrInvalidRegistryID)
+	}
+	if req.RecordID == 0 {
+		return nil, fmt.Errorf("record_id must be > 0: %w", apperrors.ErrInvalidRecordID)
+	}
+	if req.Status == "" {
+		return nil, fmt.Errorf("status is required: %w", apperrors.ErrMissingRequired)
+	}
+
+	calldata, err := c.parsedABI.Methods["updateRecordStatus"].EncodeArgs(
+		req.RegistryID, req.RecordID, req.Index, req.Status,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("pack updateRecordStatus: %w", err)
 	}
 
 	return c.buildUnsignedTx(ctx, req.From, calldata, req.PreferLegacy)
@@ -166,6 +197,42 @@ func (c *client) PrepareGrantRole(
 	)
 	if err != nil {
 		return nil, fmt.Errorf("pack grantRole: %w", err)
+	}
+
+	return c.buildUnsignedTx(ctx, req.From, calldata, req.PreferLegacy)
+}
+
+// PrepareRevokeRole constructs an unsigned revokeRole transaction.
+//
+//nolint:gocritic // hugeParam: value-pass kept for signature symmetry across all Prepare* methods
+func (c *client) PrepareRevokeRole(
+	ctx context.Context,
+	req PrepareRevokeRoleRequest,
+) (*UnsignedTransaction, error) {
+	if err := c.requireABI(); err != nil {
+		return nil, err
+	}
+	if req.From == "" {
+		return nil, fmt.Errorf("from address is required: %w", apperrors.ErrMissingRequired)
+	}
+	if req.Account == "" {
+		return nil, fmt.Errorf("account address is required: %w", apperrors.ErrMissingRequired)
+	}
+	if req.Role == "" {
+		return nil, fmt.Errorf("role is required: %w", apperrors.ErrMissingRequired)
+	}
+
+	account, err := defitypes.AddressFromHex(req.Account)
+	if err != nil {
+		return nil, fmt.Errorf("account %q: %w", req.Account, apperrors.ErrInvalidAddress)
+	}
+	// Normalize an optional record-scoping checksum the same way as
+	// addRecord/grantRole so a 0x-prefixed digest matches the stored bare-hex form.
+	calldata, err := c.parsedABI.Methods["revokeRole"].EncodeArgs(
+		req.RegistryID, normalizeChecksum(req.Checksum), account, req.Role,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("pack revokeRole: %w", err)
 	}
 
 	return c.buildUnsignedTx(ctx, req.From, calldata, req.PreferLegacy)

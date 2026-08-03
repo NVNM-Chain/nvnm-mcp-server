@@ -63,6 +63,16 @@ func registerAnchorWriteTools(
 	}, makePrepareAddRecordHandler(anchorClient, logger))
 
 	addTool(srv, &mcp.Tool{
+		Name:  "anchor_prepare_update_record_status",
+		Title: "Prepare Update Record Status Transaction",
+		Description: "Construct an unsigned updateRecordStatus transaction to " +
+			"change the status of an existing anchored record (e.g. Active, " +
+			"Superseded, Revoked). " + walletSigningPaths +
+			accessControlReadWrite + " After confirming, verify with anchor_get_records.",
+		Annotations: newOpenWorldReadOnly(),
+	}, makePrepareUpdateRecordStatusHandler(anchorClient, logger))
+
+	addTool(srv, &mcp.Tool{
 		Name:  "anchor_prepare_grant_role",
 		Title: "Prepare Grant Role Transaction",
 		Description: "Construct an unsigned grantRole transaction to assign " +
@@ -70,6 +80,15 @@ func registerAnchorWriteTools(
 			walletSigningPaths + accessControlAdminOnly,
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareGrantRoleHandler(anchorClient, logger))
+
+	addTool(srv, &mcp.Tool{
+		Name:  "anchor_prepare_revoke_role",
+		Title: "Prepare Revoke Role Transaction",
+		Description: "Construct an unsigned revokeRole transaction to remove " +
+			"admin or editor permissions from a registry or specific record. " +
+			walletSigningPaths + accessControlAdminOnly,
+		Annotations: newOpenWorldReadOnly(),
+	}, makePrepareRevokeRoleHandler(anchorClient, logger))
 }
 
 // --- Input types ---
@@ -84,9 +103,9 @@ type prepareAddRegistryInput struct {
 }
 
 type prepareAddRecordInput struct {
-	From     string `json:"from" jsonschema:"Sender EVM address (0x...)"`
-	Registry string `json:"registry" jsonschema:"Registry name"`
-	URI      string `json:"uri" jsonschema:"Document URI"`
+	From       string `json:"from" jsonschema:"Sender EVM address (0x...)"`
+	RegistryID uint64 `json:"registry_id" jsonschema:"Registry numeric ID"`
+	URI        string `json:"uri" jsonschema:"Document URI"`
 	//nolint:lll // descriptive prose for agents
 	Checksum string `json:"checksum" jsonschema:"Document checksum as a hex digest, max 64 chars (e.g. a SHA-256 digest is 64 hex chars). A leading 0x is accepted and stripped."`
 	//nolint:lll // descriptive prose for agents
@@ -98,12 +117,32 @@ type prepareAddRecordInput struct {
 	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }
 
+type prepareUpdateRecordStatusInput struct {
+	From       string `json:"from" jsonschema:"Editor EVM address (0x...)"`
+	RegistryID uint64 `json:"registry_id" jsonschema:"Registry numeric ID"`
+	RecordID   uint64 `json:"record_id" jsonschema:"Record numeric ID"`
+	Index      uint64 `json:"index,omitempty" jsonschema:"Version index of the record (default: latest)"`
+	Status     string `json:"status" jsonschema:"New record status, e.g. Active, Superseded, Revoked"`
+	//nolint:lll // descriptive prose for agents
+	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
+}
+
 type prepareGrantRoleInput struct {
 	From       string `json:"from" jsonschema:"Admin EVM address (0x...)"`
 	RegistryID uint64 `json:"registry_id" jsonschema:"Registry numeric ID"`
 	Checksum   string `json:"checksum,omitempty" jsonschema:"Optional: scope role to a specific record checksum"`
 	Account    string `json:"account" jsonschema:"Address to grant the role to (0x...)"`
 	Role       string `json:"role" jsonschema:"Role to grant: admin or editor"`
+	//nolint:lll // descriptive prose for agents
+	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
+}
+
+type prepareRevokeRoleInput struct {
+	From       string `json:"from" jsonschema:"Admin EVM address (0x...)"`
+	RegistryID uint64 `json:"registry_id" jsonschema:"Registry numeric ID"`
+	Checksum   string `json:"checksum,omitempty" jsonschema:"Optional: scope role to a specific record checksum"`
+	Account    string `json:"account" jsonschema:"Address to revoke the role from (0x...)"`
+	Role       string `json:"role" jsonschema:"Role to revoke: admin or editor"`
 	//nolint:lll // descriptive prose for agents
 	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }
@@ -153,7 +192,7 @@ func makePrepareAddRecordHandler(
 		}
 		tx, err := c.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
 			From:         input.From,
-			Registry:     input.Registry,
+			RegistryID:   input.RegistryID,
 			URI:          input.URI,
 			Checksum:     input.Checksum,
 			ChecksumAlgo: input.ChecksumAlgo,
@@ -170,8 +209,43 @@ func makePrepareAddRecordHandler(
 				slog.String("phase", "prepared"),
 				slog.String("client_id", auth.ClientIDFromContext(ctx)),
 				logging.SafeAddr("from", input.From),
-				slog.String("registry", input.Registry),
+				slog.Uint64("registry_id", input.RegistryID),
 				slog.String("uri", input.URI),
+			),
+		)
+		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
+	}
+}
+
+func makePrepareUpdateRecordStatusHandler(
+	c anchor.Client, logger *slog.Logger,
+) mcp.ToolHandlerFor[prepareUpdateRecordStatusInput, unsignedTxOutput] {
+	return func(
+		ctx context.Context, _ *mcp.CallToolRequest, input prepareUpdateRecordStatusInput,
+	) (*mcp.CallToolResult, unsignedTxOutput, error) {
+		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
+			return nil, unsignedTxOutput{}, err
+		}
+		tx, err := c.PrepareUpdateRecordStatus(ctx, anchor.PrepareUpdateRecordStatusRequest{
+			From:         input.From,
+			RegistryID:   input.RegistryID,
+			RecordID:     input.RecordID,
+			Index:        input.Index,
+			Status:       input.Status,
+			PreferLegacy: input.PreferLegacyTx,
+		})
+		if err != nil {
+			return nil, unsignedTxOutput{}, err
+		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+			slog.Group("audit",
+				slog.String("tool", "anchor_prepare_update_record_status"),
+				slog.String("phase", "prepared"),
+				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+				logging.SafeAddr("from", input.From),
+				slog.Uint64("registry_id", input.RegistryID),
+				slog.Uint64("record_id", input.RecordID),
+				slog.String("status", input.Status),
 			),
 		)
 		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
@@ -201,6 +275,41 @@ func makePrepareGrantRoleHandler(
 		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
 			slog.Group("audit",
 				slog.String("tool", "anchor_prepare_grant_role"),
+				slog.String("phase", "prepared"),
+				slog.String("client_id", auth.ClientIDFromContext(ctx)),
+				logging.SafeAddr("from", input.From),
+				slog.Uint64("registry_id", input.RegistryID),
+				logging.SafeAddr("account", input.Account),
+				slog.String("role", input.Role),
+			),
+		)
+		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
+	}
+}
+
+func makePrepareRevokeRoleHandler(
+	c anchor.Client, logger *slog.Logger,
+) mcp.ToolHandlerFor[prepareRevokeRoleInput, unsignedTxOutput] {
+	return func(
+		ctx context.Context, _ *mcp.CallToolRequest, input prepareRevokeRoleInput,
+	) (*mcp.CallToolResult, unsignedTxOutput, error) {
+		if err := requireRole(ctx, "admin"); err != nil {
+			return nil, unsignedTxOutput{}, err
+		}
+		tx, err := c.PrepareRevokeRole(ctx, anchor.PrepareRevokeRoleRequest{
+			From:         input.From,
+			RegistryID:   input.RegistryID,
+			Checksum:     input.Checksum,
+			Account:      input.Account,
+			Role:         input.Role,
+			PreferLegacy: input.PreferLegacyTx,
+		})
+		if err != nil {
+			return nil, unsignedTxOutput{}, err
+		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+			slog.Group("audit",
+				slog.String("tool", "anchor_prepare_revoke_role"),
 				slog.String("phase", "prepared"),
 				slog.String("client_id", auth.ClientIDFromContext(ctx)),
 				logging.SafeAddr("from", input.From),

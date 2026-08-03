@@ -50,7 +50,6 @@ func capRegistryFields(r *anchor.Registry) {
 // capRecordFields caps the untrusted free-form fields of a record in place.
 // Checksum (the content hash) is deliberately never touched.
 func capRecordFields(r *anchor.Record) {
-	r.Registry = capUntrusted(r.Registry, maxUntrustedName)
 	r.URI = capUntrusted(r.URI, maxUntrustedURI)
 	r.Metadata = capUntrusted(r.Metadata, maxUntrustedMetadata)
 }

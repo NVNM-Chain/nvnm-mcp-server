@@ -114,7 +114,7 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 		}},
 		{"prepare_add_record", func() error {
 			_, _, err := makePrepareAddRecordHandler(a, testLogger())(denied, nil,
-				prepareAddRecordInput{From: testAddr, Registry: "r", URI: "u", Checksum: "ab", ChecksumAlgo: "sha256"})
+				prepareAddRecordInput{From: testAddr, RegistryID: 1, URI: "u", Checksum: "ab", ChecksumAlgo: "sha256"})
 			return err
 		}},
 	}
@@ -175,7 +175,7 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_registry", func() error {
-			_, _, err := makeGetRegistryHandler(a)(ctx, nil, getRegistryInput{ID: &regID})
+			_, _, err := makeGetRegistryHandler(a)(ctx, nil, getRegistryInput{ID: regID})
 			return err
 		}},
 		{"get_registries", func() error {

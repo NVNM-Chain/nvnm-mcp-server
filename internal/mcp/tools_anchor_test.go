@@ -49,7 +49,17 @@ func (f *fakeAnchor) PrepareAddRecord(context.Context, anchor.PrepareAddRecordRe
 	return &anchor.UnsignedTransaction{}, nil
 }
 
+func (f *fakeAnchor) PrepareUpdateRecordStatus(
+	context.Context, anchor.PrepareUpdateRecordStatusRequest,
+) (*anchor.UnsignedTransaction, error) {
+	return &anchor.UnsignedTransaction{}, nil
+}
+
 func (f *fakeAnchor) PrepareGrantRole(context.Context, anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) {
+	return &anchor.UnsignedTransaction{}, nil
+}
+
+func (f *fakeAnchor) PrepareRevokeRole(context.Context, anchor.PrepareRevokeRoleRequest) (*anchor.UnsignedTransaction, error) {
 	return &anchor.UnsignedTransaction{}, nil
 }
 
@@ -97,10 +107,9 @@ func TestGetRegistries_CapsAndLabelsUntrusted(t *testing.T) {
 func TestGetRegistry_CapsAndLabelsUntrusted(t *testing.T) {
 	big := strings.Repeat("m", maxUntrustedMetadata+500)
 	c := &fakeAnchor{registry: &anchor.Registry{ID: 1, Name: "ok", Metadata: big}}
-	id := uint64(1)
 	h := makeGetRegistryHandler(c)
 
-	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRegistryInput{ID: &id})
+	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRegistryInput{ID: 1})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}

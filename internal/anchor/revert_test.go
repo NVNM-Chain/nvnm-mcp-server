@@ -90,7 +90,7 @@ func TestBuildUnsignedTx_SurfacesPrecompileValidationReason(t *testing.T) {
 
 	_, err := c.PrepareAddRecord(context.Background(), PrepareAddRecordRequest{
 		From:         "0x1234567890abcdef1234567890abcdef12345678",
-		Registry:     "test-reg",
+		RegistryID:   1,
 		URI:          "ipfs://x",
 		Checksum:     strings.Repeat("a", 70),
 		ChecksumAlgo: "sha256",

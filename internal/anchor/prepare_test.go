@@ -27,7 +27,7 @@ func TestPrepareAddRecord_EmptyJSONMetadata_CuratedMessageOnly(t *testing.T) {
 
 	_, err := c.PrepareAddRecord(context.Background(), PrepareAddRecordRequest{
 		From:         "0x1234567890abcdef1234567890abcdef12345678",
-		Registry:     "test-reg",
+		RegistryID:   1,
 		Checksum:     "abc123",
 		ChecksumAlgo: "sha256",
 		Metadata:     "{}",
@@ -120,24 +120,24 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 		{
 			name: "missing from",
 			req: PrepareAddRecordRequest{
-				Registry: "test-reg",
-				Checksum: "0xabc",
+				RegistryID: 1,
+				Checksum:   "0xabc",
 			},
 			wantErr: "from address",
 		},
 		{
-			name: "missing registry",
+			name: "missing registry_id",
 			req: PrepareAddRecordRequest{
 				From:     "0x1234567890abcdef1234567890abcdef12345678",
 				Checksum: "0xabc",
 			},
-			wantErr: "registry is required",
+			wantErr: "registry_id must be > 0",
 		},
 		{
 			name: "missing checksum",
 			req: PrepareAddRecordRequest{
-				From:     "0x1234567890abcdef1234567890abcdef12345678",
-				Registry: "test-reg",
+				From:       "0x1234567890abcdef1234567890abcdef12345678",
+				RegistryID: 1,
 			},
 			wantErr: "checksum is required",
 		},
@@ -147,10 +147,10 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			// a precise message (E2E rc8 finding).
 			name: "missing checksum_algo",
 			req: PrepareAddRecordRequest{
-				From:     "0x1234567890abcdef1234567890abcdef12345678",
-				Registry: "test-reg",
-				Checksum: "abc123",
-				Metadata: "{}",
+				From:       "0x1234567890abcdef1234567890abcdef12345678",
+				RegistryID: 1,
+				Checksum:   "abc123",
+				Metadata:   "{}",
 			},
 			wantErr: "checksum_algo is required",
 		},
@@ -160,7 +160,7 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			name: "missing metadata",
 			req: PrepareAddRecordRequest{
 				From:         "0x1234567890abcdef1234567890abcdef12345678",
-				Registry:     "test-reg",
+				RegistryID:   1,
 				Checksum:     "abc123",
 				ChecksumAlgo: "sha256",
 			},
@@ -176,7 +176,7 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			name: "metadata is empty JSON object",
 			req: PrepareAddRecordRequest{
 				From:         "0x1234567890abcdef1234567890abcdef12345678",
-				Registry:     "test-reg",
+				RegistryID:   1,
 				Checksum:     "abc123",
 				ChecksumAlgo: "sha256",
 				Metadata:     "{}",
@@ -188,7 +188,7 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			name: "metadata is empty JSON object with whitespace",
 			req: PrepareAddRecordRequest{
 				From:         "0x1234567890abcdef1234567890abcdef12345678",
-				Registry:     "test-reg",
+				RegistryID:   1,
 				Checksum:     "abc123",
 				ChecksumAlgo: "sha256",
 				Metadata:     "  {}  ",
@@ -201,7 +201,7 @@ func TestPrepareAddRecord_Validation(t *testing.T) {
 			name: "checksum is only 0x prefix",
 			req: PrepareAddRecordRequest{
 				From:         "0x1234567890abcdef1234567890abcdef12345678",
-				Registry:     "test-reg",
+				RegistryID:   1,
 				Checksum:     "0x",
 				ChecksumAlgo: "sha256",
 				Metadata:     "{}",
@@ -337,7 +337,7 @@ func TestPrepareAddRecord_BuildsUnsignedTx(t *testing.T) {
 
 	tx, err := c.PrepareAddRecord(context.Background(), PrepareAddRecordRequest{
 		From:         "0x1234567890abcdef1234567890abcdef12345678",
-		Registry:     "test-registry",
+		RegistryID:   1,
 		URI:          "https://example.com/doc",
 		Checksum:     "abc123",
 		ChecksumAlgo: "sha256",
@@ -394,7 +394,7 @@ func TestPrepareAddRecord_StripsChecksumPrefix(t *testing.T) {
 	const digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	base := PrepareAddRecordRequest{
 		From:         "0x1234567890abcdef1234567890abcdef12345678",
-		Registry:     "test-registry",
+		RegistryID:   1,
 		URI:          "https://example.com/doc",
 		ChecksumAlgo: "sha256",
 		Metadata:     "{\"file\":\"test.pdf\"}",
@@ -457,9 +457,9 @@ func TestPrepareWithoutABI_ReturnsError(t *testing.T) {
 	}
 
 	_, err = c.PrepareAddRecord(context.Background(), PrepareAddRecordRequest{
-		From:     "0x1234567890abcdef1234567890abcdef12345678",
-		Registry: "r",
-		Checksum: "c",
+		From:       "0x1234567890abcdef1234567890abcdef12345678",
+		RegistryID: 1,
+		Checksum:   "c",
 	})
 	if err == nil {
 		t.Fatal("expected error when ABI not loaded")

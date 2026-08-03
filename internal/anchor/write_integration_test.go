@@ -193,9 +193,10 @@ func TestIntegration_PrepareSignSubmit_AddRegistry(t *testing.T) {
 
 	// Step 5: Verify the registry was created
 	t.Log("verifying registry on chain...")
-	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{Name: &registryName})
+	regID := findRegistryIDByName(t, c, registryName)
+	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{ID: regID})
 	if err != nil {
-		t.Fatalf("GetRegistry(name=%q): %v", registryName, err)
+		t.Fatalf("GetRegistry(id=%d): %v", regID, err)
 	}
 
 	if reg.Name != registryName {
@@ -244,6 +245,8 @@ func TestIntegration_PrepareSignSubmit_AddRecord(t *testing.T) {
 	}
 	t.Logf("  registry created in block %d", regReceipt.BlockNumber)
 
+	regID := findRegistryIDByName(t, c, registryName)
+
 	// Prepare and submit an addRecord
 	testChecksum := fmt.Sprintf("sha256:e2etest%x", time.Now().UnixNano())
 	testURI := fmt.Sprintf("https://test.inveniam.io/docs/%d", time.Now().UnixNano())
@@ -251,7 +254,7 @@ func TestIntegration_PrepareSignSubmit_AddRecord(t *testing.T) {
 	t.Log("preparing addRecord transaction...")
 	recUTX, err := c.PrepareAddRecord(ctx, anchor.PrepareAddRecordRequest{
 		From:         creds.Address,
-		Registry:     registryName,
+		RegistryID:   regID,
 		URI:          testURI,
 		Checksum:     testChecksum,
 		ChecksumAlgo: "sha256",
@@ -278,7 +281,7 @@ func TestIntegration_PrepareSignSubmit_AddRecord(t *testing.T) {
 	// Verify the record
 	t.Log("verifying record on chain...")
 	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
-		Registry:   &registryName,
+		RegistryID: &regID,
 		Pagination: &anchor.PageRequest{Limit: 10},
 	})
 	if err != nil {
@@ -334,7 +337,8 @@ func TestIntegration_PrepareSignSubmit_GrantRole(t *testing.T) {
 	}
 	t.Logf("  registry created in block %d", regReceipt.BlockNumber)
 
-	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{Name: &registryName})
+	regID := findRegistryIDByName(t, c, registryName)
+	reg, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{ID: regID})
 	if err != nil {
 		t.Fatalf("GetRegistry: %v", err)
 	}

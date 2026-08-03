@@ -141,12 +141,3 @@ func TestSignTx_NegativeChainID(t *testing.T) {
 		t.Fatalf("err = %v, want errNegativeChainID", err)
 	}
 }
-
-// --- strPtr ---
-
-func TestStrPtr(t *testing.T) {
-	p := strPtr("hello")
-	if p == nil || *p != "hello" {
-		t.Fatalf("strPtr = %v", p)
-	}
-}

@@ -89,7 +89,6 @@ func sampleRegistryRows() []abiRegistryRow {
 func sampleRecordRows() []abiRecordRow {
 	return []abiRecordRow{
 		{
-			Registry:     "registry-one",
 			URI:          "ipfs://Qm123",
 			Checksum:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // pragma: allowlist secret -- sha256 of empty input, test fixture
 			ChecksumAlgo: "sha256",
@@ -99,9 +98,9 @@ func sampleRecordRows() []abiRecordRow {
 			RecordID:     7,
 			Index:        1,
 			IsLatest:     true,
+			RegistryID:   1,
 		},
 		{
-			Registry:     "registry-one",
 			URI:          "ipfs://Qm456",
 			Checksum:     "aa0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8bb", // pragma: allowlist secret -- phoney checksum, test fixture
 			ChecksumAlgo: "sha256",
@@ -111,6 +110,7 @@ func sampleRecordRows() []abiRecordRow {
 			RecordID:     7,
 			Index:        0,
 			IsLatest:     false,
+			RegistryID:   1,
 		},
 	}
 }
@@ -134,7 +134,9 @@ func TestMethodSelector_KnownMethods(t *testing.T) {
 	parsed := parsedTestABI(t)
 
 	seen := map[string]string{}
-	for _, name := range []string{"addRecord", "addRegistry", "grantRole", "records", "registries"} {
+	for _, name := range []string{
+		"addRecord", "addRegistry", "updateRecordStatus", "grantRole", "revokeRole", "records", "registries",
+	} {
 		sel, ok := c.MethodSelector(name)
 		if !ok {
 			t.Fatalf("MethodSelector(%q) not found", name)
@@ -169,8 +171,7 @@ func TestGetRegistry_Success(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	id := uint64(1)
-	reg, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id})
+	reg, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: 1})
 	if err != nil {
 		t.Fatalf("GetRegistry: %v", err)
 	}
@@ -189,49 +190,25 @@ func TestGetRegistry_Success(t *testing.T) {
 
 	// The single-registry lookup must request exactly one row.
 	var reqID uint64
-	var reqName string
 	var reqPage abiPaginationInput
 	m := parsedTestABI(t).Methods["registries"]
-	if decErr := m.DecodeArgs(gotInput, &reqID, &reqName, &reqPage); decErr != nil {
+	if decErr := m.DecodeArgs(gotInput, &reqID, &reqPage); decErr != nil {
 		t.Fatalf("decode call input: %v", decErr)
 	}
-	if reqID != 1 || reqName != "" {
-		t.Errorf("filter = (id=%d, name=%q), want (1, \"\")", reqID, reqName)
+	if reqID != 1 {
+		t.Errorf("filter id = %d, want 1", reqID)
 	}
 	if reqPage.Limit != 1 || reqPage.CountTotal {
 		t.Errorf("pagination = %+v, want limit=1 countTotal=false", reqPage)
 	}
 }
 
-func TestGetRegistry_ByName(t *testing.T) {
-	rows := sampleRegistryRows()[1:]
-	var gotInput []byte
-	mock := &mockEVMClient{
-		callContractFn: func(_ context.Context, msg defitypes.Call, _ *big.Int) ([]byte, error) {
-			gotInput = msg.Input
-			return encodeRegistriesOutput(t, rows, abiPaginationOutput{Total: 1}), nil
-		},
-	}
-	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
+func TestGetRegistry_ZeroIDRejected(t *testing.T) {
+	c := NewClient(&mockEVMClient{}, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	name := "registry-two"
-	reg, err := c.GetRegistry(context.Background(), GetRegistryRequest{Name: &name})
-	if err != nil {
-		t.Fatalf("GetRegistry: %v", err)
-	}
-	if reg.Name != "registry-two" || reg.ID != 2 {
-		t.Errorf("registry = %+v", *reg)
-	}
-
-	var reqID uint64
-	var reqName string
-	var reqPage abiPaginationInput
-	m := parsedTestABI(t).Methods["registries"]
-	if decErr := m.DecodeArgs(gotInput, &reqID, &reqName, &reqPage); decErr != nil {
-		t.Fatalf("decode call input: %v", decErr)
-	}
-	if reqID != 0 || reqName != "registry-two" {
-		t.Errorf("filter = (id=%d, name=%q), want (0, registry-two)", reqID, reqName)
+	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{})
+	if !errors.Is(err, apperrors.ErrInvalidRegistryID) {
+		t.Fatalf("want ErrInvalidRegistryID for id=0, got %v", err)
 	}
 }
 
@@ -243,8 +220,7 @@ func TestGetRegistry_EmptyResultIsNotFound(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	id := uint64(999)
-	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id})
+	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: 999})
 	if !errors.Is(err, apperrors.ErrRegistryNotFound) {
 		t.Fatalf("want ErrRegistryNotFound for empty result, got %v", err)
 	}
@@ -261,8 +237,7 @@ func TestGetRegistry_CallError(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	id := uint64(1)
-	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id})
+	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: 1})
 	if err == nil || !strings.Contains(err.Error(), "registries call failed") {
 		t.Fatalf("want wrapped call failure, got %v", err)
 	}
@@ -279,8 +254,7 @@ func TestGetRegistry_MalformedResponse(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	id := uint64(1)
-	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: &id})
+	_, err := c.GetRegistry(context.Background(), GetRegistryRequest{ID: 1})
 	if err == nil || !strings.Contains(err.Error(), "unpack registries response") {
 		t.Fatalf("want unpack error, got %v", err)
 	}
@@ -316,11 +290,13 @@ func TestGetRegistries_Success(t *testing.T) {
 
 	// Defaults: limit 100, offset 0, countTotal true.
 	var reqID uint64
-	var reqName string
 	var reqPage abiPaginationInput
 	m := parsedTestABI(t).Methods["registries"]
-	if decErr := m.DecodeArgs(gotInput, &reqID, &reqName, &reqPage); decErr != nil {
+	if decErr := m.DecodeArgs(gotInput, &reqID, &reqPage); decErr != nil {
 		t.Fatalf("decode call input: %v", decErr)
+	}
+	if reqID != 0 {
+		t.Errorf("filter id = %d, want 0 (no filter)", reqID)
 	}
 	if reqPage.Limit != 100 || reqPage.Offset != 0 || !reqPage.CountTotal {
 		t.Errorf("pagination = %+v, want limit=100 offset=0 countTotal=true", reqPage)
@@ -338,10 +314,8 @@ func TestGetRegistries_PaginationAndFiltersForwarded(t *testing.T) {
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
 	regID := uint64(42)
-	name := "filter-name"
 	resp, err := c.GetRegistries(context.Background(), GetRegistriesRequest{
 		RegistryID: &regID,
-		Name:       &name,
 		Pagination: &PageRequest{Offset: 5, Limit: 7},
 	})
 	if err != nil {
@@ -355,14 +329,13 @@ func TestGetRegistries_PaginationAndFiltersForwarded(t *testing.T) {
 	}
 
 	var reqID uint64
-	var reqName string
 	var reqPage abiPaginationInput
 	m := parsedTestABI(t).Methods["registries"]
-	if decErr := m.DecodeArgs(gotInput, &reqID, &reqName, &reqPage); decErr != nil {
+	if decErr := m.DecodeArgs(gotInput, &reqID, &reqPage); decErr != nil {
 		t.Fatalf("decode call input: %v", decErr)
 	}
-	if reqID != 42 || reqName != "filter-name" {
-		t.Errorf("filter = (id=%d, name=%q), want (42, filter-name)", reqID, reqName)
+	if reqID != 42 {
+		t.Errorf("filter id = %d, want 42", reqID)
 	}
 	if reqPage.Offset != 5 || reqPage.Limit != 7 {
 		t.Errorf("pagination = %+v, want offset=5 limit=7", reqPage)
@@ -429,8 +402,8 @@ func TestGetRecords_Success(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	registry := "registry-one"
-	resp, err := c.GetRecords(context.Background(), GetRecordsRequest{Registry: &registry})
+	regID := uint64(1)
+	resp, err := c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
 	if err != nil {
 		t.Fatalf("GetRecords: %v", err)
 	}
@@ -439,7 +412,7 @@ func TestGetRecords_Success(t *testing.T) {
 	}
 
 	want := Record{
-		Registry:     "registry-one",
+		RegistryID:   1,
 		RecordID:     7,
 		Index:        1,
 		Checksum:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // pragma: allowlist secret -- sha256 of empty input, test fixture
@@ -460,15 +433,15 @@ func TestGetRecords_Success(t *testing.T) {
 		t.Errorf("Pagination = %+v, want Total=2", resp.Pagination)
 	}
 
-	var reqRegistry, reqChecksum string
-	var reqRecordID, reqIndex uint64
+	var reqRegistryID, reqRecordID, reqIndex uint64
+	var reqChecksum string
 	var reqPage abiPaginationInput
 	m := parsedTestABI(t).Methods["records"]
-	if decErr := m.DecodeArgs(gotInput, &reqRegistry, &reqChecksum, &reqRecordID, &reqIndex, &reqPage); decErr != nil {
+	if decErr := m.DecodeArgs(gotInput, &reqRegistryID, &reqChecksum, &reqRecordID, &reqIndex, &reqPage); decErr != nil {
 		t.Fatalf("decode call input: %v", decErr)
 	}
-	if reqRegistry != "registry-one" {
-		t.Errorf("registry filter = %q, want registry-one", reqRegistry)
+	if reqRegistryID != 1 {
+		t.Errorf("registry_id filter = %d, want 1", reqRegistryID)
 	}
 	if reqPage.Limit != 100 || !reqPage.CountTotal {
 		t.Errorf("pagination = %+v, want limit=100 countTotal=true", reqPage)
@@ -485,12 +458,12 @@ func TestGetRecords_FiltersAndPaginationForwarded(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	registry := "reg"
+	regID := uint64(9)
 	checksum := "abc123"
 	recordID := uint64(9)
 	index := uint64(3)
 	resp, err := c.GetRecords(context.Background(), GetRecordsRequest{
-		Registry:   &registry,
+		RegistryID: &regID,
 		Checksum:   &checksum,
 		RecordID:   &recordID,
 		Index:      &index,
@@ -503,111 +476,51 @@ func TestGetRecords_FiltersAndPaginationForwarded(t *testing.T) {
 		t.Errorf("got %d records, want 0", len(resp.Records))
 	}
 
-	var reqRegistry, reqChecksum string
-	var reqRecordID, reqIndex uint64
+	var reqRegistryID, reqRecordID, reqIndex uint64
+	var reqChecksum string
 	var reqPage abiPaginationInput
 	m := parsedTestABI(t).Methods["records"]
-	if decErr := m.DecodeArgs(gotInput, &reqRegistry, &reqChecksum, &reqRecordID, &reqIndex, &reqPage); decErr != nil {
+	if decErr := m.DecodeArgs(gotInput, &reqRegistryID, &reqChecksum, &reqRecordID, &reqIndex, &reqPage); decErr != nil {
 		t.Fatalf("decode call input: %v", decErr)
 	}
-	if reqRegistry != "reg" || reqChecksum != "abc123" || reqRecordID != 9 || reqIndex != 3 {
-		t.Errorf("filters = (%q, %q, %d, %d)", reqRegistry, reqChecksum, reqRecordID, reqIndex)
+	if reqRegistryID != 9 || reqChecksum != "abc123" || reqRecordID != 9 || reqIndex != 3 {
+		t.Errorf("filters = (%d, %q, %d, %d)", reqRegistryID, reqChecksum, reqRecordID, reqIndex)
 	}
 	if reqPage.Offset != 11 || reqPage.Limit != 13 {
 		t.Errorf("pagination = %+v, want offset=11 limit=13", reqPage)
 	}
 }
 
-// TestGetRecords_ResolvesRegistryIDToName verifies the registry_id
-// convenience filter: the id is first resolved to a registry name via the
-// registries view, and the records query is keyed by that name.
-func TestGetRecords_ResolvesRegistryIDToName(t *testing.T) {
-	parsed := parsedTestABI(t)
-	registriesFB := parsed.Methods["registries"].FourBytes()
-	recordsFB := parsed.Methods["records"].FourBytes()
-
-	var recordsInput []byte
+// TestGetRecords_NoFilterQueriesAcrossAllRegistries verifies that omitting
+// RegistryID forwards registry_id=0, which the precompile treats as "no
+// filter" (latest records across all registries).
+func TestGetRecords_NoFilterQueriesAcrossAllRegistries(t *testing.T) {
+	var gotInput []byte
 	mock := &mockEVMClient{
 		callContractFn: func(_ context.Context, msg defitypes.Call, _ *big.Int) ([]byte, error) {
-			switch {
-			case len(msg.Input) >= 4 && registriesFB.Match(msg.Input[:4]):
-				rows := []abiRegistryRow{{ID: 5, Name: "resolved-name"}}
-				return encodeRegistriesOutput(t, rows, abiPaginationOutput{Total: 1}), nil
-			case len(msg.Input) >= 4 && recordsFB.Match(msg.Input[:4]):
-				recordsInput = msg.Input
-				return encodeRecordsOutput(t, sampleRecordRows()[:1], abiPaginationOutput{Total: 1}), nil
-			default:
-				return nil, errors.New("unexpected call")
-			}
+			gotInput = msg.Input
+			return encodeRecordsOutput(t, sampleRecordRows(), abiPaginationOutput{Total: 2}), nil
 		},
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	regID := uint64(5)
-	resp, err := c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
+	resp, err := c.GetRecords(context.Background(), GetRecordsRequest{})
 	if err != nil {
 		t.Fatalf("GetRecords: %v", err)
 	}
-	if len(resp.Records) != 1 {
-		t.Fatalf("got %d records, want 1", len(resp.Records))
+	if len(resp.Records) != 2 {
+		t.Fatalf("got %d records, want 2", len(resp.Records))
 	}
 
-	var reqRegistry, reqChecksum string
-	var reqRecordID, reqIndex uint64
+	var reqRegistryID, reqRecordID, reqIndex uint64
+	var reqChecksum string
 	var reqPage abiPaginationInput
-	m := parsed.Methods["records"]
-	if decErr := m.DecodeArgs(recordsInput, &reqRegistry, &reqChecksum, &reqRecordID, &reqIndex, &reqPage); decErr != nil {
-		t.Fatalf("decode records call input: %v", decErr)
+	m := parsedTestABI(t).Methods["records"]
+	if decErr := m.DecodeArgs(gotInput, &reqRegistryID, &reqChecksum, &reqRecordID, &reqIndex, &reqPage); decErr != nil {
+		t.Fatalf("decode call input: %v", decErr)
 	}
-	if reqRegistry != "resolved-name" {
-		t.Errorf("records query keyed by %q, want resolved-name", reqRegistry)
-	}
-}
-
-// TestGetRecords_ExplicitNameWinsOverRegistryID: when both a name and an id
-// are given, the name is used directly and no registries lookup happens.
-func TestGetRecords_ExplicitNameWinsOverRegistryID(t *testing.T) {
-	parsed := parsedTestABI(t)
-	registriesFB := parsed.Methods["registries"].FourBytes()
-
-	mock := &mockEVMClient{
-		callContractFn: func(_ context.Context, msg defitypes.Call, _ *big.Int) ([]byte, error) {
-			if len(msg.Input) >= 4 && registriesFB.Match(msg.Input[:4]) {
-				t.Error("registries lookup must not happen when a registry name is given")
-			}
-			return encodeRecordsOutput(t, []abiRecordRow{}, abiPaginationOutput{Total: 0}), nil
-		},
-	}
-	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
-
-	regID := uint64(5)
-	name := "explicit-name"
-	if _, err := c.GetRecords(context.Background(), GetRecordsRequest{
-		RegistryID: &regID,
-		Registry:   &name,
-	}); err != nil {
-		t.Fatalf("GetRecords: %v", err)
-	}
-}
-
-func TestGetRecords_RegistryIDResolutionFails(t *testing.T) {
-	mock := &mockEVMClient{
-		callContractFn: func(_ context.Context, _ defitypes.Call, _ *big.Int) ([]byte, error) {
-			return nil, errors.New("collections: not found: key '404'")
-		},
-	}
-	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
-
-	regID := uint64(404)
-	_, err := c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
-	if err == nil {
-		t.Fatal("expected error when registry_id cannot be resolved")
-	}
-	if !strings.Contains(err.Error(), "resolve registry_id 404") {
-		t.Errorf("error = %v, want resolve registry_id context", err)
-	}
-	if !errors.Is(err, apperrors.ErrRegistryNotFound) {
-		t.Errorf("error must wrap ErrRegistryNotFound, got %v", err)
+	if reqRegistryID != 0 {
+		t.Errorf("registry_id filter = %d, want 0 (no filter)", reqRegistryID)
 	}
 }
 
@@ -619,8 +532,8 @@ func TestGetRecords_CallError(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	registry := "reg"
-	_, err := c.GetRecords(context.Background(), GetRecordsRequest{Registry: &registry})
+	regID := uint64(1)
+	_, err := c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
 	if err == nil || !strings.Contains(err.Error(), "records call failed") {
 		t.Fatalf("want wrapped call failure, got %v", err)
 	}
@@ -634,8 +547,8 @@ func TestGetRecords_MalformedResponse(t *testing.T) {
 	}
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
-	registry := "reg"
-	_, err := c.GetRecords(context.Background(), GetRecordsRequest{Registry: &registry})
+	regID := uint64(1)
+	_, err := c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
 	if err == nil || !strings.Contains(err.Error(), "unpack records response") {
 		t.Fatalf("want unpack error, got %v", err)
 	}
@@ -654,8 +567,8 @@ func TestCallPrecompile_MethodMissing(t *testing.T) {
 	}
 
 	// GetRecords surfaces the sentinel unmapped.
-	registry := "reg"
-	_, err := c.GetRecords(context.Background(), GetRecordsRequest{Registry: &registry})
+	regID := uint64(1)
+	_, err := c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
 	if !errors.Is(err, apperrors.ErrAnchorABIMethodMissing) {
 		t.Fatalf("want ErrAnchorABIMethodMissing, got %v", err)
 	}
@@ -677,7 +590,7 @@ func TestCallPrecompile_PackError(t *testing.T) {
 	  {"type":"function","name":"registries","stateMutability":"view",
 	   "inputs":[{"name":"registryId","type":"uint64"}],"outputs":[]},
 	  {"type":"function","name":"records","stateMutability":"view",
-	   "inputs":[{"name":"registry","type":"string"}],"outputs":[]}
+	   "inputs":[{"name":"registryId","type":"uint64"}],"outputs":[]}
 	]`)
 	c := NewClient(&mockEVMClient{}, PrecompileAddress, 58887, abiPath, logging.New("error"))
 
@@ -686,8 +599,8 @@ func TestCallPrecompile_PackError(t *testing.T) {
 		t.Fatalf("want pack error for registries, got %v", err)
 	}
 
-	registry := "reg"
-	_, err = c.GetRecords(context.Background(), GetRecordsRequest{Registry: &registry})
+	regID := uint64(1)
+	_, err = c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
 	if err == nil || !strings.Contains(err.Error(), "failed to pack records call") {
 		t.Fatalf("want pack error for records, got %v", err)
 	}
