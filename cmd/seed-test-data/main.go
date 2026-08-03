@@ -30,10 +30,11 @@ const (
 )
 
 var (
-	errTxReverted       = errors.New("transaction reverted")
-	errMissingCredField = errors.New("file missing Address or PrivateKey fields")
-	errReceiptTimeout   = errors.New("timed out waiting for transaction receipt")
-	errNegativeChainID  = errors.New("negative chain ID")
+	errTxReverted           = errors.New("transaction reverted")
+	errMissingCredField     = errors.New("file missing Address or PrivateKey fields")
+	errReceiptTimeout       = errors.New("timed out waiting for transaction receipt")
+	errNegativeChainID      = errors.New("negative chain ID")
+	errRegistryNotFoundPost = errors.New("registry not found after creation")
 )
 
 type testRecord struct {
@@ -154,7 +155,7 @@ func ensureRegistry(ctx context.Context, ac anchor.Client, ec evm.Client, creds 
 		return 0, fmt.Errorf("resolve created registry: %w", err)
 	}
 	if reg == nil {
-		return 0, fmt.Errorf("registry %q not found after creation", registryName)
+		return 0, fmt.Errorf("%q: %w", registryName, errRegistryNotFoundPost)
 	}
 	registryID = reg.ID
 	return registryID, nil
