@@ -230,7 +230,7 @@ func registryNameMatcher(target, mode string) (func(name string) bool, error) {
 	target = strings.ToLower(target)
 	switch mode {
 	case "", "exact":
-		return func(name string) bool { return strings.ToLower(name) == target }, nil
+		return func(name string) bool { return strings.EqualFold(name, target) }, nil
 	case "prefix":
 		return func(name string) bool { return strings.HasPrefix(strings.ToLower(name), target) }, nil
 	case "suffix":

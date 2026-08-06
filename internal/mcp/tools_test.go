@@ -829,7 +829,7 @@ func TestScanRegistriesByName_StopsOnExactlyFullLastPage(t *testing.T) {
 		full[i] = anchor.Registry{ID: uint64(i), Name: "target-registry"}
 	}
 	pages := []*anchor.GetRegistriesResponse{
-		{Registries: []anchor.Registry{{ID: uint64(nameScanPageSize)}}}, // peek: reconciles with totalScanned
+		{Registries: []anchor.Registry{{ID: uint64(nameScanPageSize)}}},    // peek: reconciles with totalScanned
 		{Registries: full, Pagination: &anchor.PageResponse{NextKey: nil}}, // exactly full, but NextKey empty: done
 	}
 	m := &mockAnchor{registriesPages: pages}
