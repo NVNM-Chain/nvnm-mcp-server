@@ -110,21 +110,43 @@ func run() error {
 	return verifySeededData(ctx, anchorClient, registryID)
 }
 
+// findRegistryByNameMaxPages bounds the scan below against a live testnet
+// that keeps growing -- 100 pages * 200/page = 20,000 registries, far more
+// than this table has ever held.
+const findRegistryByNameMaxPages = 100
+
 // findRegistryByName scans registries looking for an exact name match. The
 // anchoring precompile keys registries by ID only (names are not unique or
 // queryable on-chain), so this seed script has to paginate and filter
-// client-side; it returns the first match, or nil if none is found.
+// client-side; it returns the first match, or nil if none is found. Cursors
+// via NextKey (not Offset -- an Offset-based walk costs the chain an O(n)
+// linear skip per page; NextKey seeks directly) and pages until a
+// short/NextKey-empty page ends the walk. Previously capped at a single
+// 200-row page, which silently stopped finding "mcp-test-data" once it
+// passed ID 200 as the live table grew -- ensureRegistry would then create
+// a duplicate registry on every subsequent run instead of reusing it.
 func findRegistryByName(ctx context.Context, ac anchor.Client, name string) (*anchor.Registry, error) {
-	resp, err := ac.GetRegistries(ctx, anchor.GetRegistriesRequest{
-		Pagination: &anchor.PageRequest{Limit: 200},
-	})
-	if err != nil {
-		return nil, err
-	}
-	for i := range resp.Registries {
-		if resp.Registries[i].Name == name {
-			return &resp.Registries[i], nil
+	var cursorKey []byte
+	for page := 0; page < findRegistryByNameMaxPages; page++ {
+		resp, err := ac.GetRegistries(ctx, anchor.GetRegistriesRequest{
+			Pagination: &anchor.PageRequest{Key: cursorKey, Limit: 200},
+		})
+		if err != nil {
+			return nil, err
 		}
+		for i := range resp.Registries {
+			if resp.Registries[i].Name == name {
+				return &resp.Registries[i], nil
+			}
+		}
+		var nextKey []byte
+		if resp.Pagination != nil {
+			nextKey = resp.Pagination.NextKey
+		}
+		if len(resp.Registries) < 200 || len(nextKey) == 0 {
+			return nil, nil
+		}
+		cursorKey = nextKey
 	}
 	return nil, nil
 }
