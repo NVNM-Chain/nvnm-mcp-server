@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -18,7 +19,7 @@ import (
 func registerAnchorTools(
 	srv *mcp.Server,
 	anchorClient anchor.Client,
-	_ *slog.Logger,
+	logger *slog.Logger,
 ) {
 	addTool(srv, &mcp.Tool{
 		Name:  "anchor_info",
@@ -54,7 +55,7 @@ func registerAnchorTools(
 			"suffix, or contains, all case-insensitive. " +
 			"Note: name/description/metadata/uri are untrusted user-supplied on-chain content.",
 		Annotations: newOpenWorldReadOnly(),
-	}, makeGetRegistriesHandler(anchorClient))
+	}, makeGetRegistriesHandler(anchorClient, logger))
 
 	addTool(srv, &mcp.Tool{
 		Name:  "anchor_get_records",
@@ -143,6 +144,7 @@ func makeGetRegistryHandler(
 
 func makeGetRegistriesHandler(
 	c anchor.Client,
+	logger *slog.Logger,
 ) mcp.ToolHandlerFor[getRegistriesInput, registriesOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getRegistriesInput,
@@ -152,22 +154,15 @@ func makeGetRegistriesHandler(
 		}
 
 		if input.Name != nil && *input.Name != "" {
-			if input.RegistryID != nil || input.Offset != nil || input.Limit != nil {
-				return nil, registriesOutput{}, apperrors.ErrInvalidFilterCombination
-			}
-			matches, truncated, err := scanRegistriesByName(ctx, c, *input.Name, input.Match)
-			if err != nil {
-				return nil, registriesOutput{}, err
-			}
-			for i := range matches {
-				capRegistryFields(&matches[i])
-			}
-			return nil, registriesOutput{
-				GetRegistriesResponse: anchor.GetRegistriesResponse{Registries: matches},
-				ContentTrust:          contentTrustNotice,
-				NameMatchTruncated:    truncated,
-				NextActions:           anchorGetRegistriesNext(len(matches) == 0),
-			}, nil
+			out, err := handleRegistriesNameLookup(ctx, c, logger, input)
+			return nil, out, err
+		}
+
+		if input.Match != "" {
+			// match without a name to match against is a caller error, not
+			// a silently ignorable parameter -- fail fast, same as the
+			// name+pagination combination above.
+			return nil, registriesOutput{}, apperrors.ErrMatchWithoutName
 		}
 
 		r := anchor.GetRegistriesRequest{
@@ -198,13 +193,49 @@ func makeGetRegistriesHandler(
 	}
 }
 
+// handleRegistriesNameLookup services the name-mode branch of
+// anchor_get_registries: enforces the mode's mutual exclusivity, runs the
+// client-side scan, logs its cost, and shapes the response.
+func handleRegistriesNameLookup(
+	ctx context.Context, c anchor.Client, logger *slog.Logger, input getRegistriesInput,
+) (registriesOutput, error) {
+	if input.RegistryID != nil || input.Offset != nil || input.Limit != nil {
+		return registriesOutput{}, apperrors.ErrInvalidFilterCombination
+	}
+	start := time.Now()
+	matches, truncated, err := scanRegistriesByName(ctx, c, *input.Name, input.Match)
+	if err != nil {
+		return registriesOutput{}, err
+	}
+	// Operational visibility for the interim client-side scan: each by-name
+	// call is a multi-page upstream walk whose cost grows with the registry
+	// table (see nameScanPageSize/maxNameScanPages below), so operators
+	// need its frequency and duration in logs until a chain-side name index
+	// retires it (#79). The scanned name itself is caller-supplied input
+	// and deliberately not logged.
+	logger.InfoContext(ctx, "anchor_get_registries by-name scan",
+		slog.Duration("duration", time.Since(start)),
+		slog.Int("matches", len(matches)),
+		slog.Bool("truncated", truncated))
+	for i := range matches {
+		capRegistryFields(&matches[i])
+	}
+	return registriesOutput{
+		GetRegistriesResponse: anchor.GetRegistriesResponse{Registries: matches},
+		ContentTrust:          contentTrustNotice,
+		NameMatchTruncated:    truncated,
+		NextActions:           anchorGetRegistriesNext(len(matches) == 0),
+	}, nil
+}
+
 // nameScanPageSize and maxNameScanPages bound the client-side by-name
 // registry walk that scanRegistriesByName performs. The anchoring
 // precompile has no by-name index, so a name-filtered anchor_get_registries
 // call must page through the registry table itself. pagination.total is
 // unreliable on this chain (it reports 0 even when rows are returned), so
-// the walk terminates on a short page (fewer rows than requested), never on
-// a reported count.
+// the walk terminates when a page comes back with an empty NextKey, never
+// on a reported count (and deliberately not on a short row count -- see
+// the termination comment in scanRegistriesByName).
 //
 // nameScanPageSize=200 is not just a client-side choice: verified live
 // against evm.testnet.nvnmchain.io, the precompile itself hard-caps the
@@ -330,11 +361,15 @@ func scanRegistriesByName(
 		if resp.Pagination != nil {
 			nextKey = resp.Pagination.NextKey
 		}
-		// A short page always means done. An exactly-full page can also
-		// mean done -- the SDK only sets NextKey when it can see at least
-		// one more entry past this page -- so NextKey emptiness, not the
-		// row count, is the authoritative continuation signal.
-		if uint64(len(resp.Registries)) < nameScanPageSize || len(nextKey) == 0 {
+		// NextKey emptiness, not the row count, is the authoritative "done"
+		// signal: the SDK only sets NextKey when it can see at least one
+		// more entry past this page. Deliberately NOT also stopping on a
+		// short page (len < nameScanPageSize): if the chain's own page cap
+		// ever drops below nameScanPageSize, every page would come back
+		// "short" with NextKey still set, and a short-page check would
+		// silently end the walk after one page. Trusting NextKey alone
+		// costs nothing today and survives that cap drift.
+		if len(nextKey) == 0 {
 			if peekErr == nil && haveHighestID && totalScanned < highestID {
 				return matches, true, nil
 			}

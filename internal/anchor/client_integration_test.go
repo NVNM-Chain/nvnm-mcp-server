@@ -112,7 +112,10 @@ func findRegistryIDByName(t *testing.T, c anchor.Client, name string) uint64 {
 		if resp.Pagination != nil {
 			nextKey = resp.Pagination.NextKey
 		}
-		if len(resp.Registries) < 200 || len(nextKey) == 0 {
+		// NextKey emptiness is the authoritative "done" signal (a short-page
+		// check would misfire if the chain's page cap ever dropped below the
+		// requested limit -- see the scan in internal/mcp/tools_anchor.go).
+		if len(nextKey) == 0 {
 			t.Fatalf("registry %q not found among %d registries", name, scanned)
 			return 0
 		}

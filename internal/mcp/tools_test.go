@@ -640,7 +640,7 @@ func TestHandler_GetRegistries_NoFilter(t *testing.T) {
 		Registries: []anchor.Registry{{ID: 1}, {ID: 2}},
 		Pagination: &anchor.PageResponse{Total: 2},
 	}}
-	handler := makeGetRegistriesHandler(m)
+	handler := makeGetRegistriesHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, getRegistriesInput{})
 	if err != nil {
@@ -656,7 +656,7 @@ func TestHandler_GetRegistries_WithPagination(t *testing.T) {
 		Registries: []anchor.Registry{{ID: 5}},
 		Pagination: &anchor.PageResponse{Total: 100},
 	}}
-	handler := makeGetRegistriesHandler(m)
+	handler := makeGetRegistriesHandler(m, testLogger())
 
 	offset := uint64(4)
 	limit := uint64(1)
@@ -680,7 +680,7 @@ func TestHandler_GetRegistries_ByName_ReturnsAllMatches(t *testing.T) {
 			{ID: 3, Name: "fund-documents", Creator: "0xccc"},
 		},
 	}}
-	handler := makeGetRegistriesHandler(m)
+	handler := makeGetRegistriesHandler(m, testLogger())
 
 	name := "fund-documents"
 	_, out, err := handler(ctx, nil, getRegistriesInput{Name: &name})
@@ -720,7 +720,7 @@ func TestHandler_GetRegistries_ByName_MatchModesCaseInsensitive(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &mockAnchor{registries: &anchor.GetRegistriesResponse{Registries: registries}}
-			handler := makeGetRegistriesHandler(m)
+			handler := makeGetRegistriesHandler(m, testLogger())
 
 			_, out, err := handler(ctx, nil, getRegistriesInput{Name: &tc.query, Match: tc.match})
 			if err != nil {
@@ -740,7 +740,7 @@ func TestHandler_GetRegistries_ByName_MatchModesCaseInsensitive(t *testing.T) {
 
 func TestHandler_GetRegistries_ByName_InvalidMatchMode(t *testing.T) {
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
-	handler := makeGetRegistriesHandler(m)
+	handler := makeGetRegistriesHandler(m, testLogger())
 
 	name := "anything"
 	_, _, err := handler(ctx, nil, getRegistriesInput{Name: &name, Match: "fuzzy"})
@@ -769,13 +769,39 @@ func TestHandler_GetRegistries_ByName_CombinedWithOtherFiltersErrors(t *testing.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
-			handler := makeGetRegistriesHandler(m)
+			handler := makeGetRegistriesHandler(m, testLogger())
 
 			name := "anything"
 			tc.input.Name = &name
 			_, _, err := handler(ctx, nil, tc.input)
 			if !errors.Is(err, apperrors.ErrInvalidFilterCombination) {
 				t.Errorf("error = %v, want ErrInvalidFilterCombination", err)
+			}
+		})
+	}
+}
+
+// TestHandler_GetRegistries_MatchWithoutNameRejected proves a match mode
+// with no name to match against is rejected outright rather than silently
+// ignored -- silently dropping a supplied parameter would leave the caller
+// believing a filter was applied when none was.
+func TestHandler_GetRegistries_MatchWithoutNameRejected(t *testing.T) {
+	empty := ""
+	tests := []struct {
+		name  string
+		input getRegistriesInput
+	}{
+		{"match alone", getRegistriesInput{Match: "prefix"}},
+		{"match with empty name", getRegistriesInput{Name: &empty, Match: "prefix"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
+			handler := makeGetRegistriesHandler(m, testLogger())
+
+			_, _, err := handler(ctx, nil, tc.input)
+			if !errors.Is(err, apperrors.ErrMatchWithoutName) {
+				t.Errorf("error = %v, want ErrMatchWithoutName", err)
 			}
 		})
 	}
@@ -846,6 +872,42 @@ func TestScanRegistriesByName_StopsOnExactlyFullLastPage(t *testing.T) {
 	}
 	if m.registriesCallCount != 2 {
 		t.Errorf("registriesCallCount = %d, want 2 (peek + the one exactly-full page, no wasted extra call)", m.registriesCallCount)
+	}
+}
+
+// TestScanRegistriesByName_ShortPageWithNextKeyContinues guards the
+// cap-drift case: if the chain's own page cap ever drops below
+// nameScanPageSize, every page comes back short (fewer rows than requested)
+// with NextKey still set. The walk must continue on NextKey -- row count is
+// not a termination signal -- or a by-name scan would silently cover only
+// the first page of the table.
+func TestScanRegistriesByName_ShortPageWithNextKeyContinues(t *testing.T) {
+	shortPage := make([]anchor.Registry, 100) // chain cap 100 < nameScanPageSize
+	for i := range shortPage {
+		shortPage[i] = anchor.Registry{ID: uint64(i + 1), Name: "filler"}
+	}
+	pages := []*anchor.GetRegistriesResponse{
+		// Peek: 101 reconciles with the 101 rows the walk scans below.
+		{Registries: []anchor.Registry{{ID: 101}}},
+		// Short page (100 < nameScanPageSize) with NextKey set: keep going.
+		{Registries: shortPage, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		// Final page: no NextKey, walk ends.
+		{Registries: []anchor.Registry{{ID: 101, Name: "target-registry"}}},
+	}
+	m := &mockAnchor{registriesPages: pages}
+
+	matches, truncated, err := scanRegistriesByName(ctx, m, "target-registry", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if truncated {
+		t.Error("expected truncated=false; the walk ended on an empty NextKey and reconciled with the peek")
+	}
+	if len(matches) != 1 || matches[0].ID != 101 {
+		t.Errorf("matches = %+v, want a single match with ID 101", matches)
+	}
+	if m.registriesCallCount != 3 {
+		t.Errorf("registriesCallCount = %d, want 3 (peek + short-but-continuing page + final page)", m.registriesCallCount)
 	}
 }
 

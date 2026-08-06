@@ -67,6 +67,14 @@ var (
 		"name cannot be combined with registry_id, offset, or limit: " +
 			"the name filter scans and returns all matches, which is a " +
 			"different query shape from a registry_id/offset/limit page")
+	// ErrMatchWithoutName marks an anchor_get_registries call that supplied
+	// a match mode with no name to match against. Silently ignoring the
+	// parameter would leave the caller believing a filter was applied when
+	// none was. The message is the client-facing text, surfaced verbatim
+	// (input class).
+	ErrMatchWithoutName = errors.New(
+		"match requires name: the match mode only applies to a name lookup; " +
+			"supply name, or omit match for a paged listing")
 )
 
 // Not-found errors.
@@ -141,6 +149,7 @@ var inputErrors = []error{
 	ErrEmptyMetadataObject,
 	ErrInvalidMatchMode,
 	ErrInvalidFilterCombination,
+	ErrMatchWithoutName,
 }
 
 // IsInputError returns true if the error is an input validation error.

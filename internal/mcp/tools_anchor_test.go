@@ -87,7 +87,7 @@ func TestGetRecords_CapsAndLabelsUntrusted(t *testing.T) {
 func TestGetRegistries_CapsAndLabelsUntrusted(t *testing.T) {
 	big := strings.Repeat("d", maxUntrustedDescription+500)
 	c := &fakeAnchor{registries: []anchor.Registry{{ID: 1, Name: "ok", Description: big}}}
-	h := makeGetRegistriesHandler(c)
+	h := makeGetRegistriesHandler(c, testLogger())
 
 	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRegistriesInput{})
 	if err != nil {

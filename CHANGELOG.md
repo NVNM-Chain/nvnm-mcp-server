@@ -34,6 +34,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`anchor_get_registries`' `next_actions` hint now accurately describes
   `anchor_get_registry` as ID-only**, and separately points callers who
   want a name-based lookup at `anchor_get_registries(name=...)`. (W4)
+- **`match` without `name` is rejected** with a curated input error instead
+  of being silently ignored -- silently dropping a supplied parameter would
+  leave the caller believing a filter was applied when none was.
+- **The by-name scan's pagination trusts `NextKey` emptiness alone** as its
+  end-of-table signal (previously it also stopped on a short page, which
+  would silently end the walk after one page if the chain's own page cap
+  ever dropped below the client's requested page size). Same fix applied to
+  the seed script's and integration helper's walks.
+- **Each by-name scan emits a structured log line** (duration, match count,
+  truncated flag) so operators can watch the interim client-side scan's
+  frequency and cost until an on-chain name index retires it (#79).
 
 ## [1.0.0-rc17] - 2026-08-04
 
