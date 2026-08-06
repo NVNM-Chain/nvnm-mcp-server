@@ -1,10 +1,11 @@
 # MCP Tool Reference
 
-Complete schema reference for all 21 tools exposed by the NVNM Chain MCP Server.
+Complete schema reference for all 23 tools exposed by the NVNM Chain MCP Server.
 
 > **Write tools require `ENABLE_WRITE_TOOLS=true`.**
-> The four write tools (`anchor_prepare_add_registry`, `anchor_prepare_add_record`,
-> `anchor_prepare_grant_role`, `evm_send_raw_transaction`) are only registered
+> The six write tools (`anchor_prepare_add_registry`, `anchor_prepare_add_record`,
+> `anchor_prepare_update_record_status`, `anchor_prepare_grant_role`,
+> `anchor_prepare_revoke_role`, `evm_send_raw_transaction`) are only registered
 > when the `ENABLE_WRITE_TOOLS` environment variable is set to `true`.
 > Without it the server exposes 17 read-only tools (5 onboarding, 8 EVM reads, 4 anchor reads).
 >
@@ -19,7 +20,8 @@ Complete schema reference for all 21 tools exposed by the NVNM Chain MCP Server.
 > default-deny: an authenticated key authorizes only the tools its assigned
 > roles permit; a key with no roles authorizes nothing. Reads require `reader`,
 > `writer`, `admin`, or `automation`. Writes require `writer`, `admin`, or
-> `automation`. `anchor_prepare_grant_role` requires `admin`. Calls without
+> `automation`. `anchor_prepare_grant_role` and `anchor_prepare_revoke_role`
+> require `admin`. Calls without
 > sufficient role return `permission denied`. No-identity callers (stdio, or
 > anonymous keyless reads gated upstream by the authentication allowlist) are
 > allowed by the upstream authentication allowlist, not by RBAC. Under keyless
@@ -43,8 +45,8 @@ The following apply to every tool registered after Phase 8.2–8.5 and are not r
 Every tool carries an MCP `ToolAnnotations` payload so clients (and connector-directory reviewers) can tell read-only tools from state-changing ones without inferring spec defaults. Three profiles cover the surface:
 
 | Profile | `ReadOnlyHint` | `DestructiveHint` | `OpenWorldHint` | Tools |
-|---|---|---|---|---|
-| `newOpenWorldReadOnly` | true | _(unset)_ | true | `evm_get_*` (8), `anchor_get_*` (3), `anchor_prepare_*` (3), `wallet_status`, `nvnm_setup_wizard` |
+| --- | --- | --- | --- | --- |
+| `newOpenWorldReadOnly` | true | _(unset)_ | true | `evm_get_*` (8), `anchor_get_*` (3), `anchor_prepare_*` (5), `wallet_status`, `nvnm_setup_wizard` |
 | `newClosedWorldReadOnly` | true | _(unset)_ | false | `anchor_info`, `nvnm_overview`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature` |
 | `newDestructiveWriteTool` | false | true | true | `evm_send_raw_transaction` |
 
@@ -68,10 +70,10 @@ The field is additive: existing JSON consumers that ignore unknown fields see no
 
 ### EIP-1559 default on prepare tools (8.4)
 
-`anchor_prepare_add_registry`, `anchor_prepare_add_record`, and `anchor_prepare_grant_role` now build EIP-1559 (type-2) transactions by default. The response shape gains three new fields:
+All `anchor_prepare_*` tools now build EIP-1559 (type-2) transactions by default. The response shape gains three new fields:
 
 | Field | Type | Populated when |
-|---|---|---|
+| --- | --- | --- |
 | `type` | int | Always; omitted in JSON when value is `0` |
 | `max_fee_per_gas` | string (decimal wei) | Type-2 only (omitempty) |
 | `max_priority_fee_per_gas` | string (decimal wei) | Type-2 only (omitempty) |
@@ -105,17 +107,19 @@ Each prepare tool gains an optional `prefer_legacy_tx` (bool, default `false`) i
 
 ### Phase 2 -- Anchor Reads
 
-9. [anchor\_info](#9-anchor_info)
-10. [anchor\_get\_registry](#10-anchor_get_registry)
-11. [anchor\_get\_registries](#11-anchor_get_registries)
-12. [anchor\_get\_records](#12-anchor_get_records)
+1. [anchor\_info](#9-anchor_info)
+2. [anchor\_get\_registry](#10-anchor_get_registry)
+3. [anchor\_get\_registries](#11-anchor_get_registries)
+4. [anchor\_get\_records](#12-anchor_get_records)
 
 ### Phase 3 -- Anchor Writes (require ENABLE\_WRITE\_TOOLS=true)
 
-13. [anchor\_prepare\_add\_registry](#13-anchor_prepare_add_registry)
-14. [anchor\_prepare\_add\_record](#14-anchor_prepare_add_record)
-15. [anchor\_prepare\_grant\_role](#15-anchor_prepare_grant_role)
-16. [evm\_send\_raw\_transaction](#16-evm_send_raw_transaction)
+ 1. [anchor\_prepare\_add\_registry](#13-anchor_prepare_add_registry)
+ 2. [anchor\_prepare\_add\_record](#14-anchor_prepare_add_record)
+ 3. [anchor\_prepare\_update\_record\_status](#15-anchor_prepare_update_record_status)
+ 4. [anchor\_prepare\_grant\_role](#16-anchor_prepare_grant_role)
+ 5. [anchor\_prepare\_revoke\_role](#17-anchor_prepare_revoke_role)
+ 6. [evm\_send\_raw\_transaction](#18-evm_send_raw_transaction)
 
 ---
 
@@ -130,7 +134,7 @@ _No parameters._
 ### Output Fields
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `chain_name` | `string` | Human-readable chain name. |
 | `chain_environment` | `string` | One of `mainnet` / `testnet` / `local`. |
 | `chain_id` | `int64` | EIP-155 chain ID. |
@@ -165,7 +169,7 @@ One-shot snapshot for an EVM address. Returns balance, nonce, and a three-state 
 ### Output Fields
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `address` | `string` | EIP-55 checksummed address. |
 | `balance_wei` | `string` | Balance as decimal-wei string (`"0"` when unfunded). |
 | `balance_human` | `string` | Balance in the env-aware wrapped-token unit (e.g. `"1.5 WINVE"`). |
@@ -198,7 +202,7 @@ Four-state prose-guided onboarding flow: `needs_wallet` / `unfunded` / `funded_u
 ### Output Fields
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `state` | `string` | One of `needs_wallet` / `unfunded` / `funded_unused` / `funded_active`. |
 | `message` | `string` | State-specific prose guidance. |
 | `wallet` | `object` | Snapshot (`address`, `balance_wei`, `balance_human`, `nonce`, `has_sent_tx`, `chain_id`, `chain_environment`, `token_native`, `token_wrapped`) -- omitted when `state=needs_wallet`. |
@@ -226,14 +230,14 @@ Stateless hashing challenge. The server derives a deterministic per-address chal
 ### Input Parameters
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `address` | `string` | yes | EVM address (`0x...`) the challenge is bound to. |
 | `hash` | `string` | yes | Caller's SHA-256 of the challenge bytes, 0x-prefixed hex. |
 
 ### Output Fields
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `ok` | `bool` | True iff `hash` matches the expected digest. |
 | `address` | `string` | EIP-55 checksummed address. |
 | `challenge` | `string` | The deterministic challenge string. |
@@ -263,14 +267,14 @@ Stateless signing challenge. Uses the same per-address challenge as `nvnm_setup_
 ### Input Parameters
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `address` | `string` | yes | EVM address the caller claims to control; also the address that should be recovered from the signature. |
 | `signature` | `string` | yes | EIP-191 `personal_sign` output over the challenge, 0x-prefixed hex (65 bytes / 132 hex chars). |
 
 ### Output Fields
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `ok` | `bool` | True iff the recovered signer matches `address`. |
 | `address` | `string` | EIP-55 checksummed address (what the caller claimed). |
 | `challenge` | `string` | The deterministic challenge string. |
@@ -805,16 +809,13 @@ This tool reads local configuration only and does not make RPC calls. It should 
 
 ## 10. anchor\_get\_registry
 
-Fetch a single anchoring registry by its numeric ID or unique name. A registry is a logical container for anchored records.
+Fetch a single anchoring registry by its numeric ID. A registry is a logical container for anchored records. The anchoring precompile keys registries by ID only; registry names are caller-supplied, not guaranteed unique, and cannot be queried on-chain, so lookup is by ID only.
 
 ### Input Parameters
 
 | Name   | Type     | Required | Description                  |
 |--------|----------|----------|------------------------------|
-| `id`   | `uint64` | optional | Registry numeric ID          |
-| `name` | `string` | optional | Registry unique name         |
-
-At least one of `id` or `name` must be provided. If both are provided, the server uses both as lookup criteria.
+| `id`   | `uint64` | required | Registry numeric ID          |
 
 ### Output Fields
 
@@ -829,8 +830,8 @@ At least one of `id` or `name` must be provided. If both are provided, the serve
 
 ### Error Conditions
 
-- Neither `id` nor `name` provided (missing required parameter).
-- Registry not found for the given ID or name.
+- `id` not provided (missing required parameter).
+- Registry not found for the given ID.
 - ABI encoding/decoding failure.
 - RPC connection failure.
 
@@ -840,7 +841,7 @@ At least one of `id` or `name` must be provided. If both are provided, the serve
 
 ```json
 {
-  "name": "fund-documents"
+  "id": 1
 }
 ```
 
@@ -861,33 +862,42 @@ At least one of `id` or `name` must be provided. If both are provided, the serve
 
 ## 11. anchor\_get\_registries
 
-Fetch a paginated list of anchoring registries. Optionally filter by registry\_id or name.
+Fetch a paginated list of anchoring registries, or look one up by name. Two mutually exclusive modes:
+
+1. **`registry_id` / `offset` / `limit`** -- a single page of the registry table (chain-side pagination).
+2. **`name` (+ optional `match`)** -- scans the entire registry table client-side (the precompile has no by-name index) and returns **every** match, never just the first.
+
+> Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all returned matches (check `creator` / `created_at` to disambiguate), not just take the first.
 
 ### Input Parameters
 
 | Name          | Type     | Required | Description                   |
 |---------------|----------|----------|-------------------------------|
-| `registry_id` | `uint64` | optional | Filter by registry ID         |
-| `name`        | `string` | optional | Filter by registry name       |
-| `offset`      | `uint64` | optional | Pagination offset             |
-| `limit`       | `uint64` | optional | Pagination limit              |
+| `registry_id` | `uint64` | optional | Filter by registry ID. Mutually exclusive with `name`. |
+| `offset`      | `uint64` | optional | Pagination offset. Mutually exclusive with `name`. |
+| `limit`       | `uint64` | optional | Pagination limit. Mutually exclusive with `name`. |
+| `name`        | `string` | optional | Look up registries by name (client-side scan, returns all matches). Mutually exclusive with `registry_id`, `offset`, and `limit`. |
+| `match`       | `string` | optional | Match mode for `name`: `exact` (default), `prefix`, `suffix`, or `contains`. All case-insensitive. |
 
 ### Output Fields
 
 | Field                   | Type         | Description                              |
 |-------------------------|--------------|------------------------------------------|
 | `registries`            | `Registry[]` | Array of registry objects                |
-| `pagination`            | `object`     | Pagination metadata (omitted if no pagination requested)|
+| `pagination`            | `object`     | Pagination metadata (omitted in `name` mode, and omitted in `registry_id`/`offset`/`limit` mode if no pagination requested) |
 | `pagination.total`      | `uint64`     | Chain-reported total. **Note:** the nvnm-testnet-1 anchoring precompile returns `0` here even when registries are present (it does not honor `countTotal`); do not treat `total` as authoritative. |
+| `name_match_truncated`  | `bool`       | `name` mode only, omitted otherwise. `true` if the client-side scan hit its internal safety cap before confirming it reached the end of the registry table -- treat `registries` as a possibly-incomplete match set when this is `true`. |
 
 Each element in `registries` has the same fields as [anchor\_get\_registry](#10-anchor_get_registry) output.
 
 ### Error Conditions
 
+- `name` combined with `registry_id`, `offset`, or `limit` (the two modes cannot be mixed).
+- Invalid `match` value (must be `exact`, `prefix`, `suffix`, or `contains`).
 - ABI encoding/decoding failure.
 - RPC connection failure.
 
-### Example
+### Example: paginated listing
 
 **Request:**
 
@@ -926,6 +936,42 @@ Each element in `registries` has the same fields as [anchor\_get\_registry](#10-
 }
 ```
 
+### Example: lookup by name
+
+**Request:**
+
+```json
+{
+  "name": "fund-documents",
+  "match": "exact"
+}
+```
+
+**Response:** (two registries share this exact name -- both are returned, not just the first)
+
+```json
+{
+  "registries": [
+    {
+      "id": 1,
+      "name": "fund-documents",
+      "description": "Anchored fund documentation",
+      "creator": "0xaaa...111",
+      "created_at": "2024-01-15T10:30:00Z",
+      "metadata": ""
+    },
+    {
+      "id": 57,
+      "name": "fund-documents",
+      "description": "A different registry, same name",
+      "creator": "0xccc...333",
+      "created_at": "2024-05-02T09:00:00Z",
+      "metadata": ""
+    }
+  ]
+}
+```
+
 ---
 
 ## 12. anchor\_get\_records
@@ -938,12 +984,6 @@ Flexibly query anchored records. Supports multiple lookup modes:
 4. **All latest records in a registry:** `registry_id` (with optional pagination)
 5. **All records matching a checksum across registries:** `checksum`
 
-> In any registry-scoped mode you may pass either `registry_id` (numeric) or
-> `registry` (name). The precompile is name-keyed; a `registry_id` is resolved
-> to its name server-side, so the two are interchangeable. If both are given,
-> the explicit `registry` name is used. An unknown `registry_id` fails with a
-> "resolve registry_id" error rather than silently returning an empty set.
-
 ### Input Parameters
 
 | Name          | Type     | Required | Description                                 |
@@ -952,7 +992,6 @@ Flexibly query anchored records. Supports multiple lookup modes:
 | `record_id`  | `uint64` | optional | Record ID within the registry               |
 | `index`      | `uint64` | optional | Version index (starts at 1)                 |
 | `checksum`   | `string` | optional | Content hash to search for                  |
-| `registry`   | `string` | optional | Registry name                               |
 | `offset`     | `uint64` | optional | Pagination offset                           |
 | `limit`      | `uint64` | optional | Pagination limit                            |
 
@@ -968,7 +1007,7 @@ Flexibly query anchored records. Supports multiple lookup modes:
 
 | Field           | Type     | Description                                 |
 |-----------------|----------|---------------------------------------------|
-| `registry`      | `string` | Registry name                               |
+| `registry_id`   | `uint64` | Registry numeric ID                         |
 | `record_id`     | `uint64` | Record ID within the registry               |
 | `index`         | `uint64` | Version index (1-based)                     |
 | `checksum`      | `string` | Content hash of the anchored document       |
@@ -1002,7 +1041,7 @@ Flexibly query anchored records. Supports multiple lookup modes:
 {
   "records": [
     {
-      "registry": "fund-documents",
+      "registry_id": 1,
       "record_id": 42,
       "index": 3,
       "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -1095,7 +1134,7 @@ Construct an unsigned `addRecord` transaction to anchor a document checksum and 
 | Name            | Type     | Required | Description                                    |
 |-----------------|----------|----------|------------------------------------------------|
 | `from`          | `string` | required | Sender EVM address (0x-prefixed)               |
-| `registry`      | `string` | required | Registry name                                  |
+| `registry_id`   | `uint64` | required | Registry numeric ID                            |
 | `uri`           | `string` | required | Document URI                                   |
 | `checksum`      | `string` | required | Document checksum as a hex digest, **max 64 chars** (a SHA-256 digest is 64 hex chars). A leading `0x` is accepted and stripped server-side. |
 | `checksum_algo` | `string` | required | Hash algorithm (e.g., `sha256`). The anchoring precompile rejects an empty value, so it is validated as required. |
@@ -1109,8 +1148,9 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ### Error Conditions
 
 - Invalid `from` address.
+- `registry_id` is 0 (validated client-side before any RPC; wraps `invalid registry id`).
 - Missing/empty `checksum`, `checksum_algo`, or `metadata` (validated client-side before any RPC; wraps `missing required parameter`). The literal empty JSON object `{}` as metadata is rejected with its own curated message (it is present but invalid, not missing).
-- Registry not found by name.
+- Registry not found for the given ID.
 - ABI encoding failure.
 - Nonce lookup failure (RPC error).
 - Gas estimation failure (RPC error or EVM revert, e.g., insufficient permissions).
@@ -1122,7 +1162,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 ```json
 {
   "from": "0xaaa...111",
-  "registry": "fund-documents",
+  "registry_id": 1,
   "uri": "ipfs://QmXyz...",
   "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "checksum_algo": "sha256",
@@ -1157,7 +1197,76 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 
 ---
 
-## 15. anchor\_prepare\_grant\_role
+## 15. anchor\_prepare\_update\_record\_status
+
+> Requires `ENABLE_WRITE_TOOLS=true`
+
+Construct an unsigned `updateRecordStatus` transaction to change the status of an existing anchored record (e.g. `Active`, `Superseded`, `Revoked`). Returns a complete unsigned transaction for the caller to sign and submit.
+
+### Input Parameters
+
+| Name            | Type     | Required | Description                                    |
+|-----------------|----------|----------|------------------------------------------------|
+| `from`          | `string` | required | Editor EVM address (0x-prefixed)               |
+| `registry_id`   | `uint64` | required | Registry numeric ID                            |
+| `record_id`     | `uint64` | required | Record numeric ID                              |
+| `index`         | `uint64` | optional | Version index of the record (default: latest)  |
+| `status`        | `string` | required | New record status, e.g. `Active`, `Superseded`, `Revoked` |
+
+### Output Fields
+
+Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
+
+### Error Conditions
+
+- Invalid `from` address.
+- Missing/empty `status` (validated client-side before any RPC; wraps `missing required parameter`).
+- ABI encoding failure.
+- Nonce lookup failure (RPC error).
+- Gas estimation failure (RPC error or EVM revert, e.g., record not found, or caller lacks the editor role).
+
+### Example
+
+**Request:**
+
+```json
+{
+  "from": "0xaaa...111",
+  "registry_id": 1,
+  "record_id": 42,
+  "status": "Superseded"
+}
+```
+
+**Response:**
+
+```json
+{
+  "raw_tx": "0xf8a80185...",
+  "to": "0x0000000000000000000000000000000000000A00",
+  "data": "0x11223344...",
+  "nonce": 8,
+  "gas": 180000,
+  "gas_price": "1000000000",
+  "value": "0",
+  "chain_id": 787111,
+  "wallet_tx_request": {
+    "from": "0xaaa...111",
+    "to": "0x0000000000000000000000000000000000000A00",
+    "data": "0x11223344...",
+    "value": "0x0",
+    "chainId": "0xc02a7",
+    "gas": "0x2bf20",
+    "gasPrice": "0x3b9aca00"
+  }
+}
+```
+
+After confirming, verify with [anchor\_get\_records](#12-anchor_get_records).
+
+---
+
+## 16. anchor\_prepare\_grant\_role
 
 > Requires `ENABLE_WRITE_TOOLS=true`
 
@@ -1224,13 +1333,80 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 
 ---
 
-## 16. evm\_send\_raw\_transaction
+## 17. anchor\_prepare\_revoke\_role
+
+> Requires `ENABLE_WRITE_TOOLS=true`
+
+Construct an unsigned `revokeRole` transaction to remove admin or editor permissions from a registry. Returns a complete unsigned transaction for the caller to sign and submit.
+
+### Input Parameters
+
+| Name          | Type     | Required | Description                                          |
+|---------------|----------|----------|------------------------------------------------------|
+| `from`        | `string` | required | Admin EVM address (0x-prefixed)                      |
+| `registry_id` | `uint64` | required | Registry numeric ID                                  |
+| `checksum`    | `string` | optional | Scope role to a specific record checksum             |
+| `account`     | `string` | required | Address to revoke the role from (0x-prefixed)        |
+| `role`        | `string` | required | Role to revoke: `admin` or `editor`                  |
+
+### Output Fields
+
+Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
+
+### Error Conditions
+
+- Invalid `from` or `account` address.
+- Invalid `role` value (must be `admin` or `editor`).
+- ABI encoding failure.
+- Nonce lookup failure (RPC error).
+- Gas estimation failure (RPC error or EVM revert, e.g., caller is not an admin, or the account never held the role).
+
+### Example
+
+**Request:**
+
+```json
+{
+  "from": "0xaaa...111",
+  "registry_id": 1,
+  "account": "0xbbb...222",
+  "role": "editor"
+}
+```
+
+**Response:**
+
+```json
+{
+  "raw_tx": "0xf8b80185...",
+  "to": "0x0000000000000000000000000000000000000A00",
+  "data": "0x13572468...",
+  "nonce": 9,
+  "gas": 150000,
+  "gas_price": "1000000000",
+  "value": "0",
+  "chain_id": 787111,
+  "wallet_tx_request": {
+    "from": "0xaaa...111",
+    "to": "0x0000000000000000000000000000000000000A00",
+    "data": "0x13572468...",
+    "value": "0x0",
+    "chainId": "0xc02a7",
+    "gas": "0x249f0",
+    "gasPrice": "0x3b9aca00"
+  }
+}
+```
+
+---
+
+## 18. evm\_send\_raw\_transaction
 
 > Requires `ENABLE_WRITE_TOOLS=true`
 >
 > **Write gate:** The server checks RBAC role (`writer`, `admin`, or `automation`) and the `ENABLE_WRITE_TOOLS` flag. On success, the signed transaction is broadcast directly. Obtaining human confirmation before submitting a signed transaction is the caller/agent's responsibility.
 >
-> **Relay scope (broadcast allowlist):** This tool is a *scoped anchoring relay*, not a general-purpose transaction broadcaster. Before broadcasting, the server decodes the signed transaction and rejects it unless its destination is the anchor precompile (`ANCHOR_ADDRESS`, default `0x0000000000000000000000000000000000000A00`). Every other destination — a different contract, an externally-owned account, a native value transfer, or contract creation (`to` is empty) — is rejected with no broadcast. The check runs on **both** the anonymous keyless-write path and the authenticated/self-host path; the signer cannot use this relay to move funds or touch arbitrary contracts. Self-host operators who need to broadcast non-anchor transactions (e.g. deploying their own registry contract or admin operations) can set `MCP_RELAY_ALLOW_ANY=true`, which restores an unscoped best-effort relay on the authenticated path only. That flag has no effect under keyless writes and is a boot error if combined with them — anonymous writes are always pinned to the precompile. Reads of any data remain unrestricted.
+> **Relay scope (broadcast allowlist):** This tool is a _scoped anchoring relay_, not a general-purpose transaction broadcaster. Before broadcasting, the server decodes the signed transaction and rejects it unless its destination is the anchor precompile (`ANCHOR_ADDRESS`, default `0x0000000000000000000000000000000000000A00`). Every other destination — a different contract, an externally-owned account, a native value transfer, or contract creation (`to` is empty) — is rejected with no broadcast. The check runs on **both** the anonymous keyless-write path and the authenticated/self-host path; the signer cannot use this relay to move funds or touch arbitrary contracts. Self-host operators who need to broadcast non-anchor transactions (e.g. deploying their own registry contract or admin operations) can set `MCP_RELAY_ALLOW_ANY=true`, which restores an unscoped best-effort relay on the authenticated path only. That flag has no effect under keyless writes and is a boot error if combined with them — anonymous writes are always pinned to the precompile. Reads of any data remain unrestricted.
 
 Broadcast a signed transaction to the network. Input is the signed transaction as a hex string (0x-prefixed). Returns the transaction hash.
 

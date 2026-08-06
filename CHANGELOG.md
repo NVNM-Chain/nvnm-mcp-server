@@ -9,6 +9,54 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`anchor_get_registries` supports lookup by name**, in addition to
+  `registry_id`/`offset`/`limit` paging: pass `name` and an optional
+  `match` (`exact` (default), `prefix`, `suffix`, or `contains`, all
+  case-insensitive). Since the anchoring precompile has no by-name index,
+  this scans the registry table client-side and returns **every** match
+  rather than the first -- registry names are caller-supplied and not
+  unique, so callers should check `creator`/`created_at` to disambiguate.
+  `anchor_get_registry(id)` stays ID-only and single-valued; the by-name
+  path lives only on `anchor_get_registries`. (W3)
+
+### Fixed
+
+- **`anchor_prepare_update_record_status` and `anchor_prepare_revoke_role`
+  are now reachable on keyless (anonymous-read) deployments**, classified
+  auth-exempt alongside their sibling prepare tools. (W1)
+- **Auth-exemption coverage is now enforced by construction**: a test walks
+  the live registered tool list and asserts every tool is either
+  auth-exempt or the one conditional write tool, failing and naming any
+  tool that's missing a classification, instead of pinning independent
+  size/count literals that could drift out of sync with each other. (W2)
+- **`anchor_get_registries`' `next_actions` hint now accurately describes
+  `anchor_get_registry` as ID-only**, and separately points callers who
+  want a name-based lookup at `anchor_get_registries(name=...)`. (W4)
+
+## [1.0.0-rc17] - 2026-08-04
+
+### Changed
+
+- **BREAKING: anchor registry references migrated from name to numeric ID**
+  across every record and prepare surface, following the anchoring
+  precompile's registry-ID redesign. `anchor_get_registry` now takes `id`
+  only (`name` removed); the `registry` field on `anchor_get_records` /
+  `anchor_prepare_add_record` is removed in favor of `registry_id`. The
+  precompile does not support querying by name at all; `Registry.Name` is
+  still returned on every registry/record response for display purposes.
+  (PR #70)
+
+### Added
+
+- **`anchor_prepare_update_record_status`**: construct an unsigned
+  `updateRecordStatus` transaction to change an existing anchored record's
+  status (e.g. `Active`, `Superseded`, `Revoked`). (PR #70)
+- **`anchor_prepare_revoke_role`**: construct an unsigned `revokeRole`
+  transaction to remove admin or editor permissions from a registry.
+  (PR #70)
+
 ## [1.0.0-rc16] - 2026-07-28
 
 ### Fixed
