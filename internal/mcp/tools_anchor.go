@@ -214,13 +214,14 @@ func makeGetRegistriesHandler(
 //
 // maxNameScanPages is a safety backstop against an unbounded or misbehaving
 // chain, not an expected limit: at nameScanPageSize per page that is up to
-// 200,000 registries scanned, far beyond anything this testnet precompile
-// has held (highest assigned registry ID observed live: 2612). Hitting it
-// is surfaced to the caller via NameMatchTruncated rather than silently
-// returning a partial match set indistinguishable from a complete one.
+// 10,000 registries scanned, comfortably above anything this testnet
+// precompile has held (highest assigned registry ID observed live: 2612).
+// Hitting it is surfaced to the caller via NameMatchTruncated rather than
+// silently returning a partial match set indistinguishable from a complete
+// one.
 const (
 	nameScanPageSize = 200
-	maxNameScanPages = 1000
+	maxNameScanPages = 50
 )
 
 // registryNameMatcher returns a case-insensitive matcher for the given mode,
