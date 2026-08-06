@@ -5,7 +5,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/NVNM-Chain/nvnm-mcp-server?include_prereleases&sort=semver)](https://github.com/NVNM-Chain/nvnm-mcp-server/releases)
 [![Cosign Signed](https://img.shields.io/badge/cosign-signed-2496ed)](.github/workflows/release.yml)
 
-A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and the NVNM Chain (Inveniam's L2 on MANTRA). It exposes 21 curated tools — EVM reads, anchor reads, prepare-sign-submit writes, and guided onboarding — with normalized responses, per-tool authorization, and zero key custody. Intended for application developers, LLM-agent authors, and pipeline operators who need a stable, audited surface against an EVM chain rather than raw JSON-RPC.
+A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and the NVNM Chain (Inveniam's L2 on MANTRA). It exposes 23 curated tools — EVM reads, anchor reads, prepare-sign-submit writes, and guided onboarding — with normalized responses, per-tool authorization, and zero key custody. Intended for application developers, LLM-agent authors, and pipeline operators who need a stable, audited surface against an EVM chain rather than raw JSON-RPC.
 
 A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the NVNM Chain (Inveniam's L2 on MANTRA) through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
 

@@ -869,6 +869,14 @@ Fetch a paginated list of anchoring registries, or look one up by name. Two mutu
 
 > Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all returned matches (check `creator` / `created_at` to disambiguate), not just take the first.
 
+> **Operator note (interim scan cost):** each by-name call pages the *entire* registry
+> table through the upstream RPC -- one sequential call per 200 registries plus one
+> peek -- measured at roughly 5–9 seconds per lookup at ~2.6k registries, growing
+> linearly with the table. Every scan emits a structured log line
+> (`anchor_get_registries by-name scan`: duration, matches, truncated) so operators can
+> watch frequency and cost. The client-side scan is interim pending an on-chain name
+> index (tracked in issue #79).
+
 ### Input Parameters
 
 | Name          | Type     | Required | Description                   |
@@ -1069,7 +1077,7 @@ Construct an unsigned `addRegistry` transaction. Returns a complete unsigned tra
 | Name          | Type     | Required | Description                    |
 |---------------|----------|----------|--------------------------------|
 | `from`        | `string` | required | Sender EVM address (0x-prefixed)|
-| `name`        | `string` | required | Registry name (must be unique) |
+| `name`        | `string` | required | Registry name. **Not unique** — the precompile accepts duplicate names (since chain v1.2); registries are keyed by numeric ID. |
 | `description` | `string` | required | Registry description           |
 | `metadata`    | `string` | optional | Optional JSON metadata         |
 
@@ -1242,25 +1250,34 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 
 ```json
 {
-  "raw_tx": "0xf8a80185...",
+  "raw_tx": "0x02f8f4830c02a7...",
   "to": "0x0000000000000000000000000000000000000A00",
-  "data": "0x11223344...",
+  "data": "0x97b40c25...",
   "nonce": 8,
-  "gas": 180000,
-  "gas_price": "1000000000",
+  "gas": 54694,
+  "gas_price": "90000000000",
+  "max_fee_per_gas": "90000000000",
+  "max_priority_fee_per_gas": "5000000000",
+  "type": 2,
   "value": "0",
   "chain_id": 787111,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
-    "data": "0x11223344...",
+    "data": "0x97b40c25...",
     "value": "0x0",
     "chainId": "0xc02a7",
-    "gas": "0x2bf20",
-    "gasPrice": "0x3b9aca00"
+    "gas": "0xd5a6",
+    "maxFeePerGas": "0x14f46b0400",
+    "maxPriorityFeePerGas": "0x12a05f200"
   }
 }
 ```
+
+(Field shape taken from live testnet output: EIP-1559 type-2 by default, so `type`,
+`max_fee_per_gas`, and `max_priority_fee_per_gas` are populated and
+`wallet_tx_request` carries `maxFeePerGas`/`maxPriorityFeePerGas`, not `gasPrice`;
+`0x97b40c25` is the real `updateRecordStatus` selector.)
 
 After confirming, verify with [anchor\_get\_records](#12-anchor_get_records).
 
@@ -1378,25 +1395,33 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 
 ```json
 {
-  "raw_tx": "0xf8b80185...",
+  "raw_tx": "0x02f90114830c02a7...",
   "to": "0x0000000000000000000000000000000000000A00",
-  "data": "0x13572468...",
+  "data": "0xacd58bc7...",
   "nonce": 9,
-  "gas": 150000,
-  "gas_price": "1000000000",
+  "gas": 43935,
+  "gas_price": "90000000000",
+  "max_fee_per_gas": "90000000000",
+  "max_priority_fee_per_gas": "5000000000",
+  "type": 2,
   "value": "0",
   "chain_id": 787111,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
-    "data": "0x13572468...",
+    "data": "0xacd58bc7...",
     "value": "0x0",
     "chainId": "0xc02a7",
-    "gas": "0x249f0",
-    "gasPrice": "0x3b9aca00"
+    "gas": "0xab9f",
+    "maxFeePerGas": "0x14f46b0400",
+    "maxPriorityFeePerGas": "0x12a05f200"
   }
 }
 ```
+
+(Field shape taken from live testnet output — see the note under
+[anchor\_prepare\_update\_record\_status](#15-anchor_prepare_update_record_status);
+`0xacd58bc7` is the real `revokeRole` selector.)
 
 ---
 
