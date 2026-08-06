@@ -27,6 +27,8 @@ func TestIsInputError(t *testing.T) {
 		{"ErrPrecompileValidation", ErrPrecompileValidation, true},
 		{"ErrLogRangeTooWide", ErrLogRangeTooWide, true},
 		{"ErrEmptyMetadataObject", ErrEmptyMetadataObject, true},
+		{"ErrInvalidMatchMode", ErrInvalidMatchMode, true},
+		{"ErrInvalidFilterCombination", ErrInvalidFilterCombination, true},
 		{"wrapped input error", fmt.Errorf("context: %w", ErrInvalidAddress), true},
 		{"ErrBlockNotFound is not input error", ErrBlockNotFound, false},
 		{"ErrUpstreamRPC is not input error", ErrUpstreamRPC, false},

@@ -72,10 +72,14 @@ func TestAnchorGetRegistriesNext_EmptyBranch(t *testing.T) {
 
 func TestAnchorGetRegistriesNext_NonEmptyBranch(t *testing.T) {
 	got := anchorGetRegistriesNext(false)
-	if len(got) != 2 {
-		t.Fatalf("len(got) = %d, want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3", len(got))
 	}
-	wantTools := map[string]bool{"anchor_get_registry": false, "anchor_prepare_add_record": false}
+	wantTools := map[string]bool{
+		"anchor_get_registry":       false,
+		"anchor_get_registries":     false,
+		"anchor_prepare_add_record": false,
+	}
 	for _, na := range got {
 		if _, ok := wantTools[na.Tool]; !ok {
 			t.Errorf("unexpected Tool = %q", na.Tool)

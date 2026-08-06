@@ -61,8 +61,14 @@ type registryOutput struct {
 
 type registriesOutput struct {
 	anchor.GetRegistriesResponse
-	ContentTrust string       `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
-	NextActions  []NextAction `json:"next_actions,omitempty"`
+	ContentTrust string `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
+	// NameMatchTruncated is true only for a name-filtered query that hit the
+	// client-side scan's page cap before reaching the end of the registry
+	// table (see maxNameScanPages in tools_anchor.go). It signals that
+	// Registries may be an incomplete match set, rather than silently
+	// returning a partial result indistinguishable from a complete one.
+	NameMatchTruncated bool         `json:"name_match_truncated,omitempty"`
+	NextActions        []NextAction `json:"next_actions,omitempty"`
 }
 
 type recordsOutput struct {
