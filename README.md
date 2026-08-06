@@ -304,7 +304,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 
 ## MCP Tools
 
-21 tools in total. First-time agents should call `nvnm_overview` first; it returns the canonical 6-step journey across the rest of the surface.
+23 tools in total. First-time agents should call `nvnm_overview` first; it returns the canonical 6-step journey across the rest of the surface.
 
 ### Phase 8.8: Onboarding (5 tools)
 
@@ -334,8 +334,8 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | Tool | Description |
 |---|---|
 | `anchor_info` | Precompile config status: address, ABI loaded, method count |
-| `anchor_get_registry` | Fetch a registry by numeric ID or unique name |
-| `anchor_get_registries` | Paginated list of registries, with optional filters |
+| `anchor_get_registry` | Fetch a registry by numeric ID (ID-only, single-valued) |
+| `anchor_get_registries` | Paginated list of registries, or look up by name (client-side scan, all matches returned) |
 | `anchor_get_records` | Flexible record query: by version, by checksum, by registry, with pagination |
 
 ### Phase 3: Anchor Writes
@@ -346,7 +346,9 @@ Write tools follow a **prepare-sign-submit** pattern. The MCP server constructs 
 |---|---|
 | `anchor_prepare_add_registry` | Build unsigned tx to create a new registry |
 | `anchor_prepare_add_record` | Build unsigned tx to anchor a document (checksum + URI) |
+| `anchor_prepare_update_record_status` | Build unsigned tx to change a record's status (e.g. Active, Superseded, Revoked) |
 | `anchor_prepare_grant_role` | Build unsigned tx to grant admin/editor role |
+| `anchor_prepare_revoke_role` | Build unsigned tx to revoke admin/editor role |
 | `evm_send_raw_transaction` | Broadcast a signed transaction, return tx hash |
 
 ## Write Architecture (Phase 3)
