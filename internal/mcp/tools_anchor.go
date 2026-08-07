@@ -207,12 +207,13 @@ func handleRegistriesNameLookup(
 	if err != nil {
 		return registriesOutput{}, err
 	}
-	// Operational visibility for the interim client-side scan: each by-name
-	// call is a multi-page upstream walk whose cost grows with the registry
-	// table (see nameScanPageSize/maxNameScanPages below), so operators
-	// need its frequency and duration in logs until a chain-side name index
-	// retires it (#79). The scanned name itself is caller-supplied input
-	// and deliberately not logged.
+	// Operational visibility for the client-side scan: each by-name call is
+	// a multi-page upstream walk whose cost grows with the registry table
+	// (see nameScanPageSize/maxNameScanPages below), so operators need its
+	// frequency and duration in logs. The scan is a stopgap -- if the chain
+	// gains a by-name index as expected, or if indexing is solved off-chain,
+	// it can be retired (#79). The scanned name itself is caller-supplied
+	// input and deliberately not logged.
 	logger.InfoContext(ctx, "anchor_get_registries by-name scan",
 		slog.Duration("duration", time.Since(start)),
 		slog.Int("matches", len(matches)),

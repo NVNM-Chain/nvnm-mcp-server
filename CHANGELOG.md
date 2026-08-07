@@ -43,8 +43,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ever dropped below the client's requested page size). Same fix applied to
   the seed script's and integration helper's walks.
 - **Each by-name scan emits a structured log line** (duration, match count,
-  truncated flag) so operators can watch the interim client-side scan's
-  frequency and cost until an on-chain name index retires it (#79).
+  truncated flag) so operators can watch the client-side scan's frequency
+  and cost. The scan is a stopgap: if the chain gains a by-name index as
+  expected, or if indexing is solved off-chain, it can be retired (#79).
 
 ## [1.0.0-rc17] - 2026-08-04
 

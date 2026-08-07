@@ -869,13 +869,14 @@ Fetch a paginated list of anchoring registries, or look one up by name. Two mutu
 
 > Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all returned matches (check `creator` / `created_at` to disambiguate), not just take the first.
 
-> **Operator note (interim scan cost):** each by-name call pages the *entire* registry
+> **Operator note (scan cost):** each by-name call pages the *entire* registry
 > table through the upstream RPC -- one sequential call per 200 registries plus one
 > peek -- measured at roughly 5–9 seconds per lookup at ~2.6k registries, growing
 > linearly with the table. Every scan emits a structured log line
 > (`anchor_get_registries by-name scan`: duration, matches, truncated) so operators can
-> watch frequency and cost. The client-side scan is interim pending an on-chain name
-> index (tracked in issue #79).
+> watch frequency and cost. The client-side scan is a stopgap: if the chain gains a
+> by-name index as expected, or if indexing is solved off-chain, it can be retired.
+> Issue #79 tracks the options.
 
 ### Input Parameters
 
