@@ -52,7 +52,7 @@ Call any anchor write tool from your MCP client. Example for adding a record:
   "tool": "anchor_prepare_add_record",
   "params": {
     "from": "0xYourWalletAddress",
-    "registry": "my-documents",
+    "registry_id": 1,
     "uri": "https://example.com/contract.pdf",
     "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "checksum_algo": "sha256",
@@ -140,7 +140,7 @@ Read back the anchored record to confirm it is on-chain:
 {
   "tool": "anchor_get_records",
   "params": {
-    "registry": "my-documents"
+    "registry_id": 1
   }
 }
 ```

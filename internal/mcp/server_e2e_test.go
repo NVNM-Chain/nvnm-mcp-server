@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +57,8 @@ func signTxWithKey(t *testing.T, key *defiwallet.PrivateKey) string {
 }
 
 type e2eServerConfig struct {
-	evmClient *mockEVM
+	evmClient    *mockEVM
+	anchorClient *mockAnchor
 }
 
 func startTestServerWithConfig(
@@ -73,14 +75,17 @@ func startTestServerWithConfig(
 			sendTxHash: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		}
 	}
-	anchorClient := &mockAnchor{
-		info: anchor.PrecompileInfo{
-			Address:     testAddr,
-			ChainID:     58887,
-			ABILoaded:   true,
-			MethodCount: 5,
-		},
+	if cfg.anchorClient == nil {
+		cfg.anchorClient = &mockAnchor{
+			info: anchor.PrecompileInfo{
+				Address:     testAddr,
+				ChainID:     58887,
+				ABILoaded:   true,
+				MethodCount: 5,
+			},
+		}
 	}
+	anchorClient := cfg.anchorClient
 
 	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true), nil, nil, nil, nil, nil, testLogger())
 
@@ -104,6 +109,72 @@ func startTestServerWithConfig(
 	t.Cleanup(func() { _ = session.Close() })
 
 	return session
+}
+
+// ---------------------------------------------------------------------------
+// anchor_get_registries by-name E2E tests (W3 post-release review)
+//
+// Handler-level tests (tools_test.go) cover the by-name scan logic directly
+// against a mocked anchor.Client -- they never cross the real HTTP/JSON-RPC
+// boundary or the MCP SDK's schema (un)marshaling for the new name/match
+// input fields. These two do: a real client sends a real tools/call over a
+// real HTTP session, through the actual generated schema, exercising the
+// exact path a live agent would use.
+// ---------------------------------------------------------------------------
+
+func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
+	session := startTestServerWithConfig(t, e2eServerConfig{
+		anchorClient: &mockAnchor{
+			registries: &anchor.GetRegistriesResponse{
+				Registries: []anchor.Registry{
+					{ID: 1, Name: "fund-documents", Creator: "0xaaa"},
+					{ID: 57, Name: "fund-documents", Creator: "0xccc"},
+				},
+			},
+		},
+	})
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "anchor_get_registries",
+		Arguments: map[string]any{"name": "fund-documents"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned error: %v", result.Content)
+	}
+
+	raw, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	var out registriesOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode structured content: %v", err)
+	}
+	if len(out.Registries) != 2 {
+		t.Fatalf("Registries = %+v, want 2 matches (both fund-documents)", out.Registries)
+	}
+}
+
+// TestE2E_CallTool_AnchorGetRegistries_NameCombinedWithOffsetRejected proves
+// the mutual-exclusivity guard survives real schema (un)marshaling -- both
+// fields are optional in the generated schema, so nothing at the schema
+// level stops a caller from sending both; the handler must reject it.
+func TestE2E_CallTool_AnchorGetRegistries_NameCombinedWithOffsetRejected(t *testing.T) {
+	session := startTestServerWithConfig(t, e2eServerConfig{})
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "anchor_get_registries",
+		Arguments: map[string]any{"name": "anything", "offset": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError=true when name is combined with offset")
+	}
 }
 
 // ---------------------------------------------------------------------------

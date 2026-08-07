@@ -8,13 +8,13 @@
 
 ## 1. What this server is (the 60-second version)
 
-A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and NVNM Chain (Inveniam's L2 on MANTRA). It exposes **21 curated, typed tools** across four surfaces — EVM reads, anchor reads, prepare-sign-submit **writes**, and a guided onboarding wizard — with normalized responses and **zero private-key custody**. It is deliberately **not** a JSON-RPC passthrough.
+A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and NVNM Chain (Inveniam's L2 on MANTRA). It exposes **23 curated, typed tools** across four surfaces — EVM reads, anchor reads, prepare-sign-submit **writes**, and a guided onboarding wizard — with normalized responses and **zero private-key custody**. It is deliberately **not** a JSON-RPC passthrough.
 
 Read next, in order:
 
 1. [`../README.md`](../README.md) — the technical entry point; request-flow middleware diagram and env-var table.
 2. [`DESIGN.md`](DESIGN.md) — architecture decisions, package dependency graph, tool design, write-transaction flows, security considerations. **The canonical architecture reference.**
-3. [`TOOL_REFERENCE.md`](TOOL_REFERENCE.md) — the per-tool contract for all 21 tools.
+3. [`TOOL_REFERENCE.md`](TOOL_REFERENCE.md) — the per-tool contract for all 23 tools.
 4. [`KEY_CUSTODY_THREAT_MODEL.md`](KEY_CUSTODY_THREAT_MODEL.md) — why the server never holds a key.
 
 Everything below assumes you've skimmed those.
@@ -41,7 +41,7 @@ Full package responsibilities and the dependency graph live in [`DESIGN.md`](DES
 
 | Package | Responsibility |
 |---|---|
-| `mcp/` | The 21 tool handlers, server, and HTTP middleware chain |
+| `mcp/` | The 23 tool handlers, server, and HTTP middleware chain |
 | `evm/` | EVM client, RLP decode, signer recovery (via `defiweb/go-eth`) |
 | `anchor/` | The chain's anchoring precompile interface — the flagship surface |
 | `auth/` | API-key + FusionAuth auth, admin auth, key store |

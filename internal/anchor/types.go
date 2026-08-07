@@ -43,11 +43,33 @@ type Record struct {
 type PageRequest struct {
 	Offset uint64 `json:"offset,omitempty"`
 	Limit  uint64 `json:"limit,omitempty"`
+	// Reverse iterates the underlying collection in descending key order.
+	// Currently honored by GetRegistries only, where it is used internally
+	// (not exposed as an MCP tool parameter) to cheaply read the highest
+	// currently-assigned registry ID via Limit=1 -- a substitute for
+	// pagination.total, which this chain always reports as 0.
+	Reverse bool `json:"reverse,omitempty"`
+	// Key resumes iteration from a prior PageResponse.NextKey. The Cosmos
+	// SDK pagination this precompile wraps seeks directly to Key (an O(1)
+	// store lookup, cosmossdk.io/collections IterateRaw) rather than
+	// walking from the start, unlike Offset (which the SDK implements as a
+	// literal iter.Next() loop for Offset steps -- see
+	// query.CollectionFilteredPaginate/advanceIter in
+	// cosmos-sdk/types/query/collections_pagination.go). Key and a nonzero
+	// Offset are mutually exclusive; the SDK rejects supplying both.
+	Key []byte `json:"key,omitempty"`
 }
 
-// PageResponse holds the total count returned from paginated precompile queries.
+// PageResponse holds the total count and cursor returned from paginated
+// precompile queries.
 type PageResponse struct {
 	Total uint64 `json:"total"`
+	// NextKey resumes iteration where this page left off (see
+	// PageRequest.Key). Empty means there is no more data -- either this
+	// page came back short, or it was exactly full and happened to be the
+	// last one; both cases leave NextKey empty, so its emptiness (not the
+	// returned row count) is the authoritative "done" signal.
+	NextKey []byte `json:"next_key,omitempty"`
 }
 
 // --- Query request/response types ---

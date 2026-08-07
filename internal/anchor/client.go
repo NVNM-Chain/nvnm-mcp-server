@@ -239,6 +239,10 @@ func (c *client) GetRegistries(
 		if req.Pagination.Limit > 0 {
 			pagination.Limit = req.Pagination.Limit
 		}
+		pagination.Reverse = req.Pagination.Reverse
+		if len(req.Pagination.Key) > 0 {
+			pagination.Key = req.Pagination.Key
+		}
 	}
 
 	output, err := c.callPrecompile(ctx, "registries", registryID, pagination)
@@ -264,7 +268,7 @@ func (c *client) GetRegistries(
 
 	return &GetRegistriesResponse{
 		Registries: toRegistries(rows),
-		Pagination: &PageResponse{Total: page.Total},
+		Pagination: &PageResponse{Total: page.Total, NextKey: page.NextKey},
 	}, nil
 }
 

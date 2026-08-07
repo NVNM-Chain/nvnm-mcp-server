@@ -52,6 +52,29 @@ var (
 		"metadata must not be the empty JSON object \"{}\" (the anchoring " +
 			"precompile rejects it); pass a non-empty value such as a short " +
 			"label or a JSON object with at least one field")
+	// ErrInvalidMatchMode marks an anchor_get_registries name-match mode
+	// outside the supported set. The message is the client-facing text,
+	// surfaced verbatim (input class).
+	ErrInvalidMatchMode = errors.New(
+		"invalid match mode: must be exact, prefix, suffix, or contains")
+	// ErrInvalidFilterCombination marks an anchor_get_registries call that
+	// combined the client-side name filter with registry_id, offset, or
+	// limit. The name filter scans the entire registry table and returns
+	// every match; those other filters describe a different (single-page,
+	// ID-scoped) query shape that cannot be honored at the same time. The
+	// message is the client-facing text, surfaced verbatim (input class).
+	ErrInvalidFilterCombination = errors.New(
+		"name cannot be combined with registry_id, offset, or limit: " +
+			"the name filter scans and returns all matches, which is a " +
+			"different query shape from a registry_id/offset/limit page")
+	// ErrMatchWithoutName marks an anchor_get_registries call that supplied
+	// a match mode with no name to match against. Silently ignoring the
+	// parameter would leave the caller believing a filter was applied when
+	// none was. The message is the client-facing text, surfaced verbatim
+	// (input class).
+	ErrMatchWithoutName = errors.New(
+		"match requires name: the match mode only applies to a name lookup; " +
+			"supply name, or omit match for a paged listing")
 )
 
 // Not-found errors.
@@ -124,6 +147,9 @@ var inputErrors = []error{
 	ErrPrecompileValidation,
 	ErrLogRangeTooWide,
 	ErrEmptyMetadataObject,
+	ErrInvalidMatchMode,
+	ErrInvalidFilterCombination,
+	ErrMatchWithoutName,
 }
 
 // IsInputError returns true if the error is an input validation error.

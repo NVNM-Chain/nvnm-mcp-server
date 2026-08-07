@@ -118,7 +118,7 @@ Run with: `make test-integration` or `go test -tags integration ./...`
 | `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
 | `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
 | `internal/evm` | `call_integration_test.go` | 2 | `CallContract` against precompile (empty data error path), non-existent address |
-| `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID/name), `GetRecords` |
+| `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
 | `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
 | `internal/mcp` | `wallet_status_integration_test.go` | 1 | `eth_account` round-trip: `wallet_status` before → `PrepareAddRegistry` → sign → broadcast → receipt → `wallet_status` reflects the new nonce |
@@ -130,6 +130,8 @@ Write and round-trip integration tests require testnet credentials --
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
 
+Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-test-data` resolves `mcp-test-data` to its `registry_id` by scanning `GetRegistries` for an exact name match client-side (there is no on-chain by-name lookup); it reuses the existing registry if that scan finds one, otherwise it creates a new one. Every downstream call in the script, and in the anchor read tests, then operates on that numeric ID.
+
 **`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile returns `pagination.total = 0` for `registries` and `records` queries even though the client sets `countTotal: true`. The registry/record rows themselves decode correctly; only the count is unpopulated. The integration tests therefore assert on the returned slice length, not on `pagination.total`. MCP tool responses surface whatever the chain returns for `total`, so a downstream consumer should treat it as best-effort, not authoritative, on this network.
 
 ### 4. MCP End-to-End HTTP Tests
@@ -140,12 +142,12 @@ These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock 
 
 | Test | What's verified |
 |------|-----------------|
-| `TestE2E_ListTools_Returns21` | Server registers exactly 21 tools (5 onboarding + 8 EVM reads + 4 anchor reads + 4 writes) |
+| `TestE2E_ListTools_Returns23` | Server registers exactly 23 tools (5 onboarding + 8 EVM reads + 4 anchor reads + 5 anchor writes + 1 relay write) |
 | `TestE2E_ListTools_ContainsExpectedNames` | Every expected tool name is present |
 | `TestE2E_CallTool_ChainID` | `evm_get_chain_id` returns non-error structured content |
 | `TestE2E_CallTool_AnchorInfo` | `anchor_info` returns non-error structured content |
 | `TestE2E_CallTool_InvalidAddress` | `evm_get_balance` with bad address returns `IsError=true` |
-| `TestE2E_CallTool_MissingRegistryIDAndName` | `anchor_get_registry` with no args returns `IsError=true` |
+| `TestE2E_CallTool_MissingRegistryID` | `anchor_get_registry` with no args returns `IsError=true` |
 
 **Write path E2E** (`server_e2e_test.go`):
 

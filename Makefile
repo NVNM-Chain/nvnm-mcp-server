@@ -137,8 +137,7 @@ test-unit:
 	$(GO) test $(GOFLAGS) -short ./...
 
 test-integration:
-	$(GO) test $(GOFLAGS) -tags integration ./... 2>&1 || \
-		(echo "No integration tests found (yet) — OK"; true)
+	$(GO) test $(GOFLAGS) -tags integration ./...
 
 test-coverage:
 	$(GO) test -race -coverprofile=coverage.out ./...
@@ -229,11 +228,15 @@ docker-run:
 docker-smoke: docker-build
 	@echo "Starting container..."
 	@CONTAINER_ID=$$(docker run -d --rm \
-		-e NVNM_EVM_RPC_URL=https://evm.inveniam.mantrachain.io \
-		-e NVNM_CHAIN_ID=58887 \
+		-e NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
+		-e NVNM_CHAIN_ID=787111 \
+		-e NVNM_CHAIN_ENVIRONMENT=testnet \
 		-e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
 		-e ENABLE_WRITE_TOOLS=true \
 		-e MCP_TRANSPORT=http \
+		-e MCP_API_KEY=docker-smoke-test-key \
+		-e MCP_API_KEY_ROLES=reader,writer,admin,automation \
+		-e MCP_KEYLESS_READS=true \
 		-p 18080:8080 -p 19090:9090 \
 		$(DOCKER_IMAGE)) && \
 	echo "  container: $$CONTAINER_ID" && \

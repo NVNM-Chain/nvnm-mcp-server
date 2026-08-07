@@ -40,10 +40,16 @@ func registerAnchorWriteTools(
 		"requires the writer, admin, or automation role because the output is " +
 		"a signing-ready payload."
 
-	// accessControlAdminOnly matches requireRole(ctx, "admin") on grant_role.
-	const accessControlAdminOnly = " Access control: this tool is annotated " +
+	// accessControlAdminOnlyGrant matches requireRole(ctx, "admin") on grant_role.
+	const accessControlAdminOnlyGrant = " Access control: this tool is annotated " +
 		"read-only (it does not modify server or chain state by itself) but " +
 		"requires the admin role -- granting roles is an administrative " +
+		"operation -- and the output is a signing-ready payload."
+
+	// accessControlAdminOnlyRevoke matches requireRole(ctx, "admin") on revoke_role.
+	const accessControlAdminOnlyRevoke = " Access control: this tool is annotated " +
+		"read-only (it does not modify server or chain state by itself) but " +
+		"requires the admin role -- revoking roles is an administrative " +
 		"operation -- and the output is a signing-ready payload."
 
 	addTool(srv, &mcp.Tool{
@@ -77,7 +83,7 @@ func registerAnchorWriteTools(
 		Title: "Prepare Grant Role Transaction",
 		Description: "Construct an unsigned grantRole transaction to assign " +
 			"admin or editor permissions on a registry or specific record. " +
-			walletSigningPaths + accessControlAdminOnly,
+			walletSigningPaths + accessControlAdminOnlyGrant,
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareGrantRoleHandler(anchorClient, logger))
 
@@ -86,7 +92,7 @@ func registerAnchorWriteTools(
 		Title: "Prepare Revoke Role Transaction",
 		Description: "Construct an unsigned revokeRole transaction to remove " +
 			"admin or editor permissions from a registry or specific record. " +
-			walletSigningPaths + accessControlAdminOnly,
+			walletSigningPaths + accessControlAdminOnlyRevoke,
 		Annotations: newOpenWorldReadOnly(),
 	}, makePrepareRevokeRoleHandler(anchorClient, logger))
 }

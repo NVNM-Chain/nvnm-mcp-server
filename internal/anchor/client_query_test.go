@@ -342,6 +342,68 @@ func TestGetRegistries_PaginationAndFiltersForwarded(t *testing.T) {
 	}
 }
 
+func TestGetRegistries_KeyAndNextKeyRoundTrip(t *testing.T) {
+	var gotInput []byte
+	mock := &mockEVMClient{
+		callContractFn: func(_ context.Context, msg defitypes.Call, _ *big.Int) ([]byte, error) {
+			gotInput = msg.Input
+			return encodeRegistriesOutput(t, []abiRegistryRow{}, abiPaginationOutput{NextKey: []byte("cursor-out")}), nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
+
+	resp, err := c.GetRegistries(context.Background(), GetRegistriesRequest{
+		Pagination: &PageRequest{Key: []byte("cursor-in"), Limit: 200},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistries: %v", err)
+	}
+	if resp.Pagination == nil || string(resp.Pagination.NextKey) != "cursor-out" {
+		t.Errorf("Pagination = %+v, want NextKey=cursor-out", resp.Pagination)
+	}
+
+	var reqID uint64
+	var reqPage abiPaginationInput
+	m := parsedTestABI(t).Methods["registries"]
+	if decErr := m.DecodeArgs(gotInput, &reqID, &reqPage); decErr != nil {
+		t.Fatalf("decode call input: %v", decErr)
+	}
+	if string(reqPage.Key) != "cursor-in" {
+		t.Errorf("Key = %q, want %q", reqPage.Key, "cursor-in")
+	}
+}
+
+func TestGetRegistries_ReverseForwarded(t *testing.T) {
+	var gotInput []byte
+	mock := &mockEVMClient{
+		callContractFn: func(_ context.Context, msg defitypes.Call, _ *big.Int) ([]byte, error) {
+			gotInput = msg.Input
+			return encodeRegistriesOutput(t, []abiRegistryRow{}, abiPaginationOutput{Total: 0}), nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
+
+	_, err := c.GetRegistries(context.Background(), GetRegistriesRequest{
+		Pagination: &PageRequest{Limit: 1, Reverse: true},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistries: %v", err)
+	}
+
+	var reqID uint64
+	var reqPage abiPaginationInput
+	m := parsedTestABI(t).Methods["registries"]
+	if decErr := m.DecodeArgs(gotInput, &reqID, &reqPage); decErr != nil {
+		t.Fatalf("decode call input: %v", decErr)
+	}
+	if !reqPage.Reverse {
+		t.Error("Reverse = false, want true")
+	}
+	if reqPage.Limit != 1 {
+		t.Errorf("Limit = %d, want 1", reqPage.Limit)
+	}
+}
+
 func TestGetRegistries_NotFoundMapsToSentinel(t *testing.T) {
 	mock := &mockEVMClient{
 		callContractFn: func(_ context.Context, _ defitypes.Call, _ *big.Int) ([]byte, error) {

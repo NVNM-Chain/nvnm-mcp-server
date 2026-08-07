@@ -73,25 +73,56 @@ func integrationResilientEVMClient(t *testing.T) evm.Client {
 	}, mets, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
+// findRegistryIDByNameMaxPages bounds the scan below against a live testnet
+// that keeps growing -- 100 pages * 200/page = 20,000 registries, far more
+// than this suite has ever seen. Not expected to ever trigger; if it does,
+// the registry table has grown to a size this helper needs revisiting for.
+const findRegistryIDByNameMaxPages = 100
+
 // findRegistryIDByName scans registries looking for an exact name match. The
 // anchoring precompile keys registries by ID only (names are not unique or
 // queryable on-chain), so tests that need a well-known seeded registry
-// ("mcp-test-data") have to paginate and filter client-side.
+// ("mcp-test-data") have to paginate and filter client-side. Cursors via
+// NextKey (not Offset) for the same reason anchor_get_registries' by-name
+// scan does -- see the PageRequest.Key doc comment in types.go -- and pages
+// until either a match is found or a short/NextKey-empty page ends the walk;
+// it does not stop after one fixed-size page the way this helper used to
+// (which silently missed any registry seeded past the first 200 as the live
+// table grew, including mcp-test-data itself once it passed ID 200).
 func findRegistryIDByName(t *testing.T, c anchor.Client, name string) uint64 {
 	t.Helper()
 	ctx := context.Background()
-	resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
-		Pagination: &anchor.PageRequest{Limit: 200},
-	})
-	if err != nil {
-		t.Fatalf("GetRegistries: %v", err)
-	}
-	for i := range resp.Registries {
-		if resp.Registries[i].Name == name {
-			return resp.Registries[i].ID
+
+	var cursorKey []byte
+	scanned := 0
+	for page := 0; page < findRegistryIDByNameMaxPages; page++ {
+		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+			Pagination: &anchor.PageRequest{Key: cursorKey, Limit: 200},
+		})
+		if err != nil {
+			t.Fatalf("GetRegistries: %v", err)
 		}
+		scanned += len(resp.Registries)
+		for i := range resp.Registries {
+			if resp.Registries[i].Name == name {
+				return resp.Registries[i].ID
+			}
+		}
+		var nextKey []byte
+		if resp.Pagination != nil {
+			nextKey = resp.Pagination.NextKey
+		}
+		// NextKey emptiness is the authoritative "done" signal (a short-page
+		// check would misfire if the chain's page cap ever dropped below the
+		// requested limit -- see the scan in internal/mcp/tools_anchor.go).
+		if len(nextKey) == 0 {
+			t.Fatalf("registry %q not found among %d registries", name, scanned)
+			return 0
+		}
+		cursorKey = nextKey
 	}
-	t.Fatalf("registry %q not found among %d registries", name, len(resp.Registries))
+	t.Fatalf("registry %q not found after scanning %d registries (%d pages, hit findRegistryIDByNameMaxPages)",
+		name, scanned, findRegistryIDByNameMaxPages)
 	return 0
 }
 
