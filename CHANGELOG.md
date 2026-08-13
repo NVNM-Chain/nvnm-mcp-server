@@ -60,6 +60,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the supported way to fetch one registry by ID.
 
 ### Fixed
+- **Authorization denials now name the principal.** `requires role admin:
+  permission denied` was ambiguous on the anchor role tools, which grant and
+  revoke *on-chain* roles: a registry's own admin could be told it "requires
+  role admin" with no way to tell whether the chain or their API key had
+  refused. The message now reads "your API key does not hold the role this
+  tool requires".
 - **`anchor_prepare_update_record_status` no longer fails for callers that
   follow its schema.** `index` was marked optional and documented as
   "default: latest", but there is no such default: omitting it sent 0, which
