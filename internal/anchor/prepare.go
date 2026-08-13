@@ -349,8 +349,8 @@ func (c *client) buildUnsignedTx(
 		// not pre-validate). Surface a curated, safe reason when recognized;
 		// otherwise let SafeForClient collapse it to avoid leaking raw chain
 		// detail (rc8 E2E F5).
-		if reason, ok := classifyPrecompileRevert(err); ok {
-			return nil, fmt.Errorf("%s: %w", reason, apperrors.ErrPrecompileValidation)
+		if reason, ok, kind := classifyPrecompileRevert(err); ok {
+			return nil, fmt.Errorf("%s: %w", reason, kind)
 		}
 		return nil, fmt.Errorf("estimate gas: %w", err)
 	}
