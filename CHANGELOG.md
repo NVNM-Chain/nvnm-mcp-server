@@ -60,6 +60,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the supported way to fetch one registry by ID.
 
 ### Fixed
+- **`anchor_prepare_update_record_status` no longer fails for callers that
+  follow its schema.** `index` was marked optional and documented as
+  "default: latest", but there is no such default: omitting it sent 0, which
+  the precompile rejects outright (`index cannot be zero`), and the
+  rejection reached the caller collapsed to `upstream operation failed`. The
+  field is now required -- so the SDK rejects the omission before any chain
+  round-trip -- documented as 1-based, and guarded by a handler check for
+  clients that bypass schema validation.
 - **On-chain role denials no longer arrive as `upstream operation failed`.**
   `anchor_prepare_add_record` and `anchor_prepare_update_record_status`
   collapsed the precompile's `unauthorized` revert to the generic upstream

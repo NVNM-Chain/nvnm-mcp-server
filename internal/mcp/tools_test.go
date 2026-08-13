@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
@@ -1474,6 +1475,7 @@ func TestHandler_PrepareUpdateRecordStatus_Happy(t *testing.T) {
 		From:       testAddr,
 		RegistryID: 1,
 		RecordID:   7,
+		Index:      1, // required and 1-based; omitting it sent 0, which the chain rejects
 		Status:     "Superseded",
 	})
 	if err != nil {
@@ -1481,6 +1483,32 @@ func TestHandler_PrepareUpdateRecordStatus_Happy(t *testing.T) {
 	}
 	if out.Gas != 63000 {
 		t.Errorf("Gas = %d, want 63000", out.Gas)
+	}
+}
+
+// TestHandler_PrepareUpdateRecordStatus_RejectsZeroIndex pins the fail-fast
+// guard. Version indexes are 1-based on chain, so index 0 is always invalid;
+// before this check a caller that omitted the then-optional field spent a
+// gas-estimation round-trip to be told so, and the rejection reached them
+// collapsed to "upstream operation failed".
+func TestHandler_PrepareUpdateRecordStatus_RejectsZeroIndex(t *testing.T) {
+	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
+	handler := makePrepareUpdateRecordStatusHandler(m, testLogger())
+
+	_, _, err := handler(ctx, nil, prepareUpdateRecordStatusInput{
+		From:       testAddr,
+		RegistryID: 1,
+		RecordID:   7,
+		Status:     "Superseded",
+	})
+	if err == nil {
+		t.Fatal("index 0 accepted, want rejection before any chain call")
+	}
+	if !apperrors.IsInputError(err) {
+		t.Errorf("error = %v, want an input error so it survives SafeForClient", err)
+	}
+	if !strings.Contains(err.Error(), "1 or greater") {
+		t.Errorf("error = %v, want it to state the 1-based rule", err)
 	}
 }
 
