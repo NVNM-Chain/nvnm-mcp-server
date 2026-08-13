@@ -5,12 +5,14 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 )
 
@@ -127,8 +129,16 @@ type prepareUpdateRecordStatusInput struct {
 	From       string `json:"from" jsonschema:"Editor EVM address (0x...)"`
 	RegistryID uint64 `json:"registry_id" jsonschema:"Registry numeric ID"`
 	RecordID   uint64 `json:"record_id" jsonschema:"Record numeric ID"`
-	Index      uint64 `json:"index,omitempty" jsonschema:"Version index of the record (default: latest)"`
-	Status     string `json:"status" jsonschema:"New record status, e.g. Active, Superseded, Revoked"`
+	// Index is required and 1-based. It carried `omitempty` and a "default:
+	// latest" description, both of which were wrong: there is no server-side
+	// default, and the precompile rejects index 0 outright. A caller that
+	// followed the old schema and omitted it always failed, with the rejection
+	// arriving as an opaque upstream error. Dropping `omitempty` makes the
+	// generated schema mark it required, so the SDK rejects the omission
+	// before a chain round-trip.
+	//nolint:lll // descriptive prose for agents
+	Index  uint64 `json:"index" jsonschema:"Version index of the record to update, 1-based (the first version is 1, not 0). Required -- there is no 'latest' default. anchor_get_records reports the index of each version."`
+	Status string `json:"status" jsonschema:"New record status, e.g. Active, Superseded, Revoked"`
 	//nolint:lll // descriptive prose for agents
 	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }
@@ -231,6 +241,16 @@ func makePrepareUpdateRecordStatusHandler(
 	) (*mcp.CallToolResult, unsignedTxOutput, error) {
 		if err := requireRole(ctx, "writer", "admin", "automation"); err != nil {
 			return nil, unsignedTxOutput{}, err
+		}
+		// Defense in depth behind the required-field schema: a client that
+		// bypasses schema validation would otherwise spend a gas-estimation
+		// round-trip to be told "index cannot be zero" by the chain.
+		if input.Index == 0 {
+			return nil, unsignedTxOutput{}, fmt.Errorf(
+				"index must be 1 or greater -- record version indexes start at 1, "+
+					"and anchor_get_records reports the index of each version: %w",
+				apperrors.ErrMissingRequired,
+			)
 		}
 		tx, err := c.PrepareUpdateRecordStatus(ctx, anchor.PrepareUpdateRecordStatusRequest{
 			From:         input.From,
