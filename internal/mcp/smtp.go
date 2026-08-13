@@ -125,6 +125,7 @@ func (s *SMTPEmailSender) Send(_ context.Context, to, subject, body string) erro
 	// (ErrEmailHeaderInjection); body comes from a server-side template
 	// in approvalEmailBody / rejectionEmailBody that doesn't reflect
 	// caller input.
+	//nolint:gosec,nolintlint // G707: CI/local lint skew; CR/LF rejected above
 	if err := smtp.SendMail(
 		addr, auth, s.cfg.From, []string{to}, []byte(msg.String()),
 	); err != nil {

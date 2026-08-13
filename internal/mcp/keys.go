@@ -333,7 +333,7 @@ func writeKeysAtomic(path string, data []byte) error {
 		if tmpPath != "" {
 			// tmpPath is server-constructed from the configured keys-file path
 			// (operator config), never user input — not a path-traversal sink.
-			_ = os.Remove(tmpPath)
+			_ = os.Remove(tmpPath) //nolint:gosec,nolintlint // G703: CI/local lint skew
 		}
 	}()
 
@@ -354,6 +354,7 @@ func writeKeysAtomic(path string, data []byte) error {
 	}
 	// tmpPath and path are both server-constructed from operator config, never
 	// user input — not a path-traversal sink.
+	//nolint:gosec,nolintlint // G703: CI/local lint skew; operator-controlled path
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("rename temp keys file: %w", err)
 	}
