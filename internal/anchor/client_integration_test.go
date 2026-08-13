@@ -108,9 +108,9 @@ func findRegistryIDByName(t *testing.T, c anchor.Client, name string) uint64 {
 				return resp.Registries[i].ID
 			}
 		}
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			t.Fatalf("decode pagination cursor: %v", err)
 		}
 		// NextKey emptiness is the authoritative "done" signal (a short-page
 		// check would misfire if the chain's page cap ever dropped below the
@@ -159,7 +159,7 @@ func TestIntegration_GetRegistries(t *testing.T) {
 	}
 	// The nvnm-testnet-1 anchor precompile returns pagination.total=0 even
 	// with countTotal=true, so assert on the returned slice -- that is what
-	// the server actually guarantees. See docs/TESTING.md on the count_total
+	// the server actually guarantees. See docs/TESTING_UNIT.md on the count_total
 	// behavioral difference.
 	if len(resp.Registries) == 0 {
 		t.Fatal("expected at least one registry in results")

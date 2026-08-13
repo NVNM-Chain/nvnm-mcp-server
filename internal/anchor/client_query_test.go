@@ -358,8 +358,15 @@ func TestGetRegistries_KeyAndNextKeyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRegistries: %v", err)
 	}
-	if resp.Pagination == nil || string(resp.Pagination.NextKey) != "cursor-out" {
-		t.Errorf("Pagination = %+v, want NextKey=cursor-out", resp.Pagination)
+	// NextKey is the base64 rendering of the raw cursor the precompile
+	// returned; CursorBytes must round-trip it back to those exact bytes,
+	// since that is what feeds the next page's PageRequest.Key.
+	gotCursor, err := resp.Pagination.CursorBytes()
+	if err != nil {
+		t.Fatalf("CursorBytes: %v", err)
+	}
+	if resp.Pagination == nil || string(gotCursor) != "cursor-out" {
+		t.Errorf("Pagination = %+v, want NextKey decoding to cursor-out", resp.Pagination)
 	}
 
 	var reqID uint64

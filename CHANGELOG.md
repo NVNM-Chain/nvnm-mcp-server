@@ -32,9 +32,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`anchor_get_registries` no longer fails whenever the result carries a
+  pagination cursor.** `PageResponse.NextKey` was a `[]byte`, which
+  `encoding/json` marshals to a base64 *string* while the MCP SDK infers a
+  `[]byte` field's output schema as an array of integers. Any response with
+  a non-empty cursor therefore failed the SDK's output-schema validation
+  and reached the caller as an opaque `upstream operation failed` — which
+  in practice meant the unfiltered registry listing (step 3 of the
+  `nvnm_overview` agent journey) never worked against a real registry
+  table, while `registry_id`-filtered calls returning a single page did.
+  `NextKey` is now a `string` holding that same base64, so the emitted JSON
+  is byte-for-byte unchanged and the declared schema is finally true;
+  `PageResponse.CursorBytes` decodes it back for the paginated scans.
+  `anchor_get_records` carried the identical latent defect and is fixed by
+  the same change. Regression coverage in
+  `internal/mcp/output_schema_test.go` asserts, for every tool output
+  envelope, that the schema the SDK derives accepts the JSON actually
+  emitted — the general invariant, not just this field.
 - **`docs/TESTING.md` integration inventory** corrected: `client_integration_test.go`
   lists 10 tests (was 8, `TransactionByHash` was added without a doc update), the
-  new lifecycle file is listed, and the credentials note now states that the test
+  new round-trip file is listed, and the credentials note now states that the test
   wallet must be funded.
 
 ## [1.0.0-rc18] - 2026-08-13

@@ -139,9 +139,9 @@ func findRegistryByName(ctx context.Context, ac anchor.Client, name string) (*an
 				return &resp.Registries[i], nil
 			}
 		}
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			return nil, err
 		}
 		// NextKey emptiness is the authoritative "done" signal (a short-page
 		// check would misfire if the chain's page cap ever dropped below the
