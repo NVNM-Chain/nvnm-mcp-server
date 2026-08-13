@@ -174,10 +174,21 @@ rather than inventing them:
 | B7 | `anchor_get_records` | unfiltered, `limit=5` |
 
 Checks: no field shift (`registry_id` / `record_id` / `checksum` mutually
-coherent), page N's last id + 1 equals page N+1's first id, the
-`pagination.total` always-zero quirk still holds, `content_trust` warning
-present, and `pagination.next_key` is a **string** (the regression guarded
-by `internal/mcp/output_schema_test.go`).
+coherent), page N's last id + 1 equals page N+1's first id,
+`content_trust` warning present, and `pagination.next_key` is a **string**
+(the regression guarded by `internal/mcp/output_schema_test.go`).
+
+`pagination.total` is mode-dependent and must be read that way -- it is
+not a single quirk to confirm. A chain-paged listing reports `0` even
+while returning rows, because this chain never populates the count, so
+the walk has to terminate on an empty `next_key` and a caller cannot use
+`total` to size the table. A name-filtered listing reports the **real**
+match count, because the scan is client-side and has counted every match
+before returning a window of it (`name=us-ca, match=prefix` →
+`total: 37`, no cursor). Treating either number as the other's semantics
+is the mistake to watch for: a sweep that asserts "total is always 0"
+will now fail on the name path, and code that trusts `total` on the
+listing path will conclude a populated table is empty.
 
 **Phase C — EVM reads (8 tools).** `evm_get_block` latest and by hash from
 that result; `evm_get_balance`; `evm_get_code` on the precompile;
@@ -243,6 +254,52 @@ unconditionally when `NVNM_CHAIN_ENVIRONMENT=mainnet`. Signing is
 caller-side: pass the tool's `wallet_tx_request` to a local signer that
 reads its key from a gitignored file or the OS keychain. Never write a
 private key — not even a truncated one — into this repo.
+
+### State the sweep changes, and restore it
+
+A full sweep is not read-only. It mutates the working tree, the key store,
+the server, and -- in Phase G -- the chain. Track every change as you make
+it and restore it at the end; the report must state anything that cannot be
+undone.
+
+**Restore afterwards:**
+
+- `.env` -- the chain block and `ENABLE_WRITE_TOOLS`. Phase G needs the flag
+  on; leaving it on is how a later `make run-http` ends up serving broadcast
+  tools against whatever chain `.env` next points at.
+- **API keys.** Phase E/G's role tools require an `admin` **API key**, which
+  is separate from the signing wallet's on-chain role. If you create one
+  (`make key-create NAME=sweep-admin ROLES=admin`), disable it when done
+  (`make key-disable`). The key store is read at boot, so both operations
+  need a server restart to take effect.
+- **Throwaway signers and credentials.** A local signer written to sign
+  Phase G transactions is scratch: delete it before committing, and never
+  write a private key -- not even a truncated one -- into a tracked file.
+  `.chain_credentials.txt` is gitignored; keep it mode `0600`.
+
+**Cannot be undone -- report it:** Phase G writes are permanent. Record the
+registry and record IDs created, the transaction hashes, the nonce range,
+and the gas spent, so a later reader can tell sweep artifacts apart from
+real data.
+
+**Operating the server:**
+
+- **Kill by PID, never by port.** Ports move: sourcing `.env` changes the
+  metrics port, and an ephemeral instance can end up on the port you assumed
+  was yours. `pgrep -f "bin/nvnm-mcp-server --transport http"` first.
+- **Restart after:** a rebuild, a key-store change, or an `.env` edit.
+- **Reconnect (`/mcp`) after:** any change to a tool's name, input schema, or
+  description. The client caches `tools/list` at connection time, so calls
+  keep working with stale schemas and the description-quality dimension of
+  the sweep silently goes unexercised. Note it in the report when you could
+  not reconnect.
+
+**Driving the server over HTTP:** responses are SSE-framed and a large
+payload arrives as multiple `data:` frames, so `sed -n 's/^data: //p'` alone
+yields concatenated JSON that fails to parse. Join the frame payloads and
+decode a single value (`json.JSONDecoder().raw_decode`). A parse failure
+here looks exactly like a tool failure in the results table -- do not record
+one as the other.
 
 ### Diagnosing opaque failures
 
@@ -336,12 +393,13 @@ re-probed. Update the status column every run.
 |---|---|---|---|
 | C1 | `update_record_status` / `revoke_role` unreachable (auth-exempt gap) | E3, E5 | Resolved — both callable; failures are chain-level permission denials |
 | C6 | `next_actions` says "by id **or name**" when `anchor_get_registry` is ID-only | B1 | Resolved — split into two hints, name pointing at `anchor_get_registries` |
-| C7 | Role denial surfaces as bare `upstream operation failed` | E2, E3, F6 | **Open** — `grant_role`/`revoke_role` are curated; `add_record`/`update_record_status` are not |
-| C8 | `evm_get_code` precompile hint says "inspect its balance instead" | C4 | **Open** — unhelpful for a precompile, which has no bytecode by design |
-| C9 | `evm_get_balance` labels the amount `ether` | C3 | **Open** — chain gas token is `wmantraUSD`/`wmmUSD`; `wallet_status` gets this right via `balance_human` |
+| C7 | Role denial surfaces as bare `upstream operation failed` | E2, E3, F6 | Resolved — `unauthorized` maps to `ErrPermissionDenied`; message distinguishes chain-side from API-key authorization |
+| C8 | `evm_get_code` precompile hint says "inspect its balance instead" | C4 | Resolved — precompiles point at `anchor_info`; ordinary accounts keep the balance hint |
+| C9 | `evm_get_balance` labels the amount `ether` | C3 | Resolved — `balance_human` + `token_wrapped` added; `ether` kept as a documented legacy alias |
 | C10 | `revoke_role` description says "granting" | E5 | Resolved — now "remove admin or editor permissions" |
-| C12 | `balance_human` float64 precision artifact | post-write | Unprobed — needs a funded wallet (Phase G, testnet) |
-| C13 | `anchor_prepare_update_record_status` declares `index` optional; omitting it sends `0`, which the precompile rejects | E3 | **Open** — schema and chain disagree; opaque failure for a schema-conformant call |
+| C12 | `balance_human` float64 precision artifact | post-write | Not reproduced — testnet Phase G showed full 18-dp precision (`29.899510860000000000`) |
+| C13 | `anchor_prepare_update_record_status` declares `index` optional; omitting it sends `0`, which the precompile rejects | E3 | Resolved — `index` required and 1-based; rejected by schema before any chain call |
+| C14 | RBAC denial did not say whether the chain or the API key refused | E4, E5 | Resolved — message names the API key |
 
 Then act on it: every failure gets a root cause from the span, a
 regression test in the layer that should have caught it, and a
