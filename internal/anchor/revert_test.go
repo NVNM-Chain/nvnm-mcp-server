@@ -6,6 +6,7 @@ package anchor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func TestClassifyPrecompileRevert(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reason, ok := classifyPrecompileRevert(tt.err)
+			reason, _, ok := classifyPrecompileRevert(tt.err)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v (reason=%q)", ok, tt.wantOK, reason)
 			}
@@ -109,5 +110,51 @@ func TestBuildUnsignedTx_SurfacesPrecompileValidationReason(t *testing.T) {
 		if strings.Contains(err.Error(), leak) {
 			t.Errorf("error leaks raw revert detail %q: %v", leak, err)
 		}
+	}
+}
+
+// TestClassifyPrecompileRevert_Sentinels pins the sentinel each curated reason
+// is wrapped with. The sentinel decides whether SafeForClient passes the
+// reason through or collapses it to "upstream operation failed", so a reason
+// mapped to a non-passthrough sentinel is silently discarded -- which is how
+// an on-chain role denial used to reach callers with no explanation at all.
+func TestClassifyPrecompileRevert_Sentinels(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		kind error
+	}{
+		{
+			"on-chain role denial classifies as permission denied",
+			errors.New("RPC error: -32000 rpc error: code = Unknown desc = unauthorized"),
+			apperrors.ErrPermissionDenied,
+		},
+		{
+			"zero version index classifies as input validation",
+			errors.New("RPC error: -32000 rpc error: code = Unknown desc = index cannot be zero: invalid request"),
+			apperrors.ErrPrecompileValidation,
+		},
+		{
+			"oversized checksum classifies as input validation",
+			errors.New("checksum exceeds max length: got=100 max=64: invalid request"),
+			apperrors.ErrPrecompileValidation,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, kind, ok := classifyPrecompileRevert(tt.err)
+			if !ok {
+				t.Fatalf("not classified: %v", tt.err)
+			}
+			if !errors.Is(kind, tt.kind) {
+				t.Errorf("kind = %v, want %v", kind, tt.kind)
+			}
+			// The whole point of the sentinel: the curated reason must
+			// survive the client-facing sanitizer.
+			wrapped := fmt.Errorf("%s: %w", reason, kind)
+			if got := apperrors.SafeForClient(wrapped); got.Error() == "upstream operation failed" {
+				t.Errorf("reason collapsed by SafeForClient: %v", got)
+			}
+		})
 	}
 }
