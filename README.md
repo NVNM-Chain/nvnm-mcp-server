@@ -463,6 +463,10 @@ make docker-buildx  # Multi-arch Docker build (amd64 + arm64) via buildx -- loca
 make docker-push    # Multi-arch build and push to registry -- local manual operation, requires registry login
 make docker-run     # Run in Docker
 make docker-smoke   # Build, run, verify healthz + MCP, tear down
+make compose-up     # Docker Compose: server + Caddy TLS on https://localhost:8443
+make compose-restart # Restart the server container (reloads the key store)
+make compose-logs   # Follow Docker Compose stack logs
+make compose-down    # Stop and remove the Docker Compose stack
 make test-load      # Run k6 load tests (requires k6)
 make test-integration # Integration tests against live testnet
 make seed-test-data # Create test registry with phoney records on-chain

@@ -1,0 +1,18 @@
+# Local TLS termination for the NVNM MCP server (docker compose).
+#
+# Caddy issues a self-signed cert from its own local CA (`local_certs`)
+# and proxies to the server container over the compose network. Caddy
+# sets X-Forwarded-Proto=https and X-Forwarded-For automatically, which
+# the server enforces/consumes because compose sets
+# NVNM_TRUST_PROXY_HEADERS=true (see docker-compose.yml).
+#
+# To make your MCP client / browser trust the cert, export Caddy's root CA:
+#   docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-local-root.crt
+# then add it to your trust store, or use curl -k / --insecure for testing.
+{
+	local_certs
+}
+
+localhost:8443 {
+	reverse_proxy nvnm-mcp-server:8180
+}

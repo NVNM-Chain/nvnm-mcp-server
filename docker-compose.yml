@@ -1,0 +1,93 @@
+# Local deployment of the NVNM MCP server via Docker Compose.
+#
+# Usage:
+#   cp .env.example .env   # fill in real values (never commit .env)
+#   docker compose up --build
+#
+# HTTPS: the server does not terminate TLS in-process (by design -- TLS is
+# the ingress's job; see internal/mcp/forwardedproto.go). The `caddy`
+# service below terminates TLS on https://localhost:8443 with a local
+# self-signed CA and proxies to the server, setting X-Forwarded-Proto/-For.
+# NVNM_TRUST_PROXY_HEADERS=true makes the server enforce the https signal
+# and derive client IPs from XFF. Prometheus metrics stay on plain
+# http://localhost:9190. The MCP port is NOT published directly on the
+# host: with proxy trust enabled, a direct caller could forge XFF/XFP.
+#
+# Optional Postgres key-store backend (KEY_STORE_BACKEND=postgres):
+#   docker compose --profile postgres up --build
+# and set in .env:
+#   KEY_STORE_BACKEND=postgres
+#   KEY_STORE_DSN=postgres://nvnm:nvnm-local-dev@postgres:5432/nvnm_keys?sslmode=disable
+#   KEY_HMAC_PEPPER=<long random secret, >=32 chars>
+
+services:
+  nvnm-mcp-server:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Container-local overrides. Everything else comes from .env.
+      MCP_TRANSPORT: http
+      MCP_HTTP_ADDR: ":8180"
+      METRICS_ADDR: ":9190"
+      ANCHOR_ABI_PATH: /app/abi/anchoring.json
+      # TLS terminates at the caddy service; trust its XFF/XFP headers.
+      NVNM_TRUST_PROXY_HEADERS: "true"
+      NVNM_TRUSTED_PROXY_HOPS: "1"
+    ports:
+      - "9190:9190"   # Prometheus metrics (plain HTTP)
+    # Multi-key store file: uncomment when using MCP_API_KEYS_FILE (create the
+    # file first -- a missing host path would be created as a directory).
+    # For quick local runs, prefer MCP_API_KEY + MCP_API_KEY_ROLES in .env.
+    volumes:
+      - ./.mcp-keys.json:/app/.mcp-keys.json:ro
+    working_dir: /app
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # TLS-terminating reverse proxy: https://localhost:8443 -> server :8180.
+  # Uses Caddy's built-in local CA (self-signed). To trust the cert, see
+  # the header comment in deploy/caddy/Caddyfile.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - nvnm-mcp-server
+    ports:
+      - "8443:8443"   # MCP HTTPS endpoint
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Optional: Postgres 16 for KEY_STORE_BACKEND=postgres (and/or
+  # MCP_KEYLESS_PG_DSN). Enabled via `--profile postgres`.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nvnm
+      POSTGRES_PASSWORD: nvnm-local-dev
+      POSTGRES_DB: nvnm_keys
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nvnm -d nvnm_keys"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
