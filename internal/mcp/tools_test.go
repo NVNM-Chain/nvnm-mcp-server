@@ -1074,7 +1074,7 @@ func TestScanRegistriesByName_PagesUntilShortPage(t *testing.T) {
 		// Full page: NextKey non-empty means the SDK saw at least one more
 		// entry past this page, so the walk must keep paging via Key, not
 		// stop just because the page happened to be full.
-		{Registries: full, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		{Registries: full, Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("cursor-1"))}},
 		{Registries: []anchor.Registry{{ID: 9999, Name: "target-registry"}}}, // short page: stop here
 	}
 	m := &mockAnchor{registriesPages: pages}
@@ -1105,8 +1105,8 @@ func TestScanRegistriesByName_StopsOnExactlyFullLastPage(t *testing.T) {
 		full[i] = anchor.Registry{ID: uint64(i), Name: "target-registry"}
 	}
 	pages := []*anchor.GetRegistriesResponse{
-		{Registries: []anchor.Registry{{ID: uint64(nameScanPageSize)}}},    // peek: reconciles with totalScanned
-		{Registries: full, Pagination: &anchor.PageResponse{NextKey: nil}}, // exactly full, but NextKey empty: done
+		{Registries: []anchor.Registry{{ID: uint64(nameScanPageSize)}}},   // peek: reconciles with totalScanned
+		{Registries: full, Pagination: &anchor.PageResponse{NextKey: ""}}, // exactly full, but NextKey empty: done
 	}
 	m := &mockAnchor{registriesPages: pages}
 
@@ -1140,7 +1140,7 @@ func TestScanRegistriesByName_ShortPageWithNextKeyContinues(t *testing.T) {
 		// Peek: 101 reconciles with the 101 rows the walk scans below.
 		{Registries: []anchor.Registry{{ID: 101}}},
 		// Short page (100 < nameScanPageSize) with NextKey set: keep going.
-		{Registries: shortPage, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		{Registries: shortPage, Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("cursor-1"))}},
 		// Final page: no NextKey, walk ends.
 		{Registries: []anchor.Registry{{ID: 101, Name: "target-registry"}}},
 	}
@@ -1180,7 +1180,7 @@ func TestScanRegistriesByName_TruncatesAtPageCap(t *testing.T) {
 			}
 			return &anchor.GetRegistriesResponse{
 				Registries: full,
-				Pagination: &anchor.PageResponse{NextKey: []byte("always-more")},
+				Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("always-more"))},
 			}, nil
 		},
 	}
@@ -1214,7 +1214,7 @@ func TestHandler_GetRegistries_ByName_TruncatedScanStillPages(t *testing.T) {
 			}
 			return &anchor.GetRegistriesResponse{
 				Registries: full,
-				Pagination: &anchor.PageResponse{NextKey: []byte("always-more")},
+				Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("always-more"))},
 			}, nil
 		},
 	}
