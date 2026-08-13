@@ -6,7 +6,9 @@ project, the non-negotiable practices, and the testing requirements every
 change must meet. It complements — and defers to —
 [CONTRIBUTING.md](CONTRIBUTING.md),
 [docs/standards/CODING_STANDARDS.md](docs/standards/CODING_STANDARDS.md),
-and [docs/TESTING.md](docs/TESTING.md); read those before large changes.
+and [docs/TESTING_UNIT.md](docs/TESTING_UNIT.md) (automated suite) plus
+[docs/TESTING.md](docs/TESTING.md) (manual local e2e); read those before large
+changes.
 
 ## What this server is
 
@@ -105,6 +107,247 @@ pre-commit run --all-files
 Before declaring any task complete: `make check-all && make coverage-check`
 must both pass, and `go build -mod=vendor ./...` must succeed.
 
+## Full tool sweep (live MCP tool exercise)
+
+`make test` and `make coverage-check` do not answer "does every tool
+actually work when a Claude-class client calls it against a live chain?"
+Three failure classes escape the automated suite entirely:
+
+- **Output-schema violations.** Tool output is validated against the
+  schema the MCP SDK infers from the Go envelope type. A struct field
+  whose Go type marshals differently than the inferred schema expects
+  (classically `[]byte` → base64 *string* vs. an inferred `array`) fails
+  validation only when a response actually populates that field — which
+  hermetic mocks usually don't.
+- **Error-message quality.** Whether a failure reaches the caller as an
+  actionable message or as a bare `upstream operation failed` is only
+  visible against a real chain that actually rejects things.
+- **Description quality.** Whether the tool descriptions lead an agent to
+  the right tool with the right arguments is only observable by having an
+  agent do it.
+
+Run this sweep after changing any tool's schema, envelope, description, or
+error handling, and before any release.
+
+### Target environment
+
+The sweep runs against the **local server on the chain `.env` currently
+points at** — normally `make run-http` on `:8080`. Do not substitute a
+hosted or demo endpoint: the point is to exercise the build in the working
+tree.
+
+Two things that bite:
+
+- **Check which chain you are actually on.** `.env` carries both testnet
+  and mainnet blocks. `evm_get_chain_id` (787111 testnet / 1611 mainnet)
+  is the cheapest confirmation, and every tool reporting
+  `chain_environment` or a token symbol (`wmantraUSD` / `wmmUSD`)
+  corroborates it. Record it in the run header — the same tool passes on
+  one chain and fails on another.
+- **Claude Code caches `tools/list` at connection time.** After any change
+  to a tool's name, schema, or description: rebuild, restart the server,
+  then `/mcp` to reconnect. Behavior-only changes need just the restart.
+
+### Phase coverage
+
+Phases A–F are read-only and run autonomously. Phase G broadcasts real
+transactions and is **testnet-only** (see below).
+
+**Phase A — identity reads (5 tools).** `nvnm_overview`,
+`evm_get_chain_id`, `anchor_info`, `wallet_status`, and
+`nvnm_setup_wizard` twice (no address → `needs_wallet`; with address →
+whichever of `unfunded` / `funded_unused` / `funded_active` applies).
+Confirms chain identity, precompile address, `abi_loaded:true`, and
+`method_count`.
+
+**Phase B — anchor reads (4 tools).** Chain real IDs through the calls
+rather than inventing them:
+
+| # | Tool | Case |
+|---|---|---|
+| B1 | `anchor_get_registries` | `limit=5` — first page, captures a cursor |
+| B2 | `anchor_get_registries` | `offset=5, limit=5` — pagination continuity |
+| B3 | `anchor_get_registries` | `name=<from B1>` — by-name scan (walks the whole table via cursors) |
+| B4 | `anchor_get_registry` | single lookup by an `id` from B1 |
+| B5 | `anchor_get_records` | by `registry_id` |
+| B6 | `anchor_get_records` | by `checksum` alone — cross-registry mode |
+| B7 | `anchor_get_records` | unfiltered, `limit=5` |
+
+Checks: no field shift (`registry_id` / `record_id` / `checksum` mutually
+coherent), page N's last id + 1 equals page N+1's first id, the
+`pagination.total` always-zero quirk still holds, `content_trust` warning
+present, and `pagination.next_key` is a **string** (the regression guarded
+by `internal/mcp/output_schema_test.go`).
+
+**Phase C — EVM reads (8 tools).** `evm_get_block` latest and by hash from
+that result; `evm_get_balance`; `evm_get_code` on the precompile;
+`evm_get_transaction` + `evm_get_transaction_receipt`; `evm_get_logs` over
+a narrow range; `evm_call_contract` with raw calldata against the
+precompile. On an idle chain the tx/receipt/log happy paths are
+unreachable — that is `partial`, not `pass` (see § *Report the results*).
+
+**Phase D — setup verification (2 tools, 4 cases).** Both tools on both
+sides: `nvnm_setup_verify_hash` pass and mismatch, and
+`nvnm_setup_verify_signature` pass and wrong-signer. The mismatch cases
+matter most — they must return `ok:false` **with** `expected`/`got` or
+`recovered_address` and a remediation hint, not an error.
+
+No tooling is needed for the hash: the challenge is
+`sha256(lowercase(address) + ":nvnm-setup-challenge-v1")` and the
+submitted hash is `sha256` of that challenge string including its `0x`
+prefix, both reproducible with `shasum -a 256`. The signature needs a real
+EIP-191 signature; the vendored `github.com/defiweb/go-eth/wallet` signs
+one from a throwaway key in a few lines of `go run -mod=vendor`. Delete
+any such scratch program before committing.
+
+**Phase E — prepare tools, happy path (5 tools).** All five
+`anchor_prepare_*` tools. No signing, no broadcast — assert `raw_tx` and
+`wallet_tx_request` are both present and structurally valid, and that the
+method selector is unchanged (`anchor_prepare_add_registry` →
+`0x318b38b1`, `anchor_prepare_add_record` → `0x64d25295`).
+
+These tools are **not registered unless `ENABLE_WRITE_TOOLS=true`**, which
+`.env` deliberately leaves off. Rather than flipping it, run Phase E
+against an ephemeral second instance on a spare port and tear it down
+afterwards — the main server and `.env` stay untouched:
+
+```sh
+set -a && . ./.env && set +a && \
+  MCP_HTTP_ADDR=:8280 METRICS_ADDR=:9290 ENABLE_WRITE_TOOLS=true \
+  ./bin/nvnm-mcp-server --transport http > /tmp/e.log 2>&1 &
+# ... run Phase E/F against :8280 ...
+lsof -ti:8280 | xargs kill
+```
+
+Never call `evm_send_raw_transaction` from that instance. It is registered
+alongside the prepare tools and it broadcasts.
+
+**Phase F — error cases.** Regression checks on curated messages:
+
+| # | Call | Expected |
+|---|---|---|
+| F1 | `anchor_prepare_add_record` with `metadata: "{}"` | curated empty-JSON-object rejection |
+| F2 | `anchor_prepare_add_record` with a 100-char checksum | curated "exceeds the maximum length" |
+| F3 | `evm_call_contract` with `from: "not-an-address"` | input-validation error naming the field |
+| F4 | `evm_get_transaction` with a nonexistent hash | `transaction not found` (not `is_pending:true`) |
+| F5 | `evm_get_logs` with `from_block=1, to_block=latest` | range-too-wide error with a retry hint |
+| F6 | `anchor_prepare_add_record` on a registry the `from` address does not own | role denial — probe whether it is curated or bare |
+
+**Phase G — write cycle. Testnet only; never run on mainnet.** Requires a
+funded wallet and a local signer, and broadcasts ~5 real transactions:
+prepare → sign → `evm_send_raw_transaction` →
+`evm_get_transaction_receipt` → read back, closing the loop on all five
+write-path tools. Skip it
+automatically when the signing prerequisites are absent, and skip it
+unconditionally when `NVNM_CHAIN_ENVIRONMENT=mainnet`. Signing is
+caller-side: pass the tool's `wallet_tx_request` to a local signer that
+reads its key from a gitignored file or the OS keychain. Never write a
+private key — not even a truncated one — into this repo.
+
+### Diagnosing opaque failures
+
+`apperrors.SafeForClient` collapses upstream errors to
+`upstream operation failed`, and `NewMCPMiddleware` records the real
+error **on the OTel span only** — it never reaches the logs, which show
+just `"status":"error"`. To see the cause, start a second instance on a
+spare port (leaving the one you were using untouched) with the stdout
+trace exporter on:
+
+```sh
+set -a && . ./.env && set +a && \
+  MCP_HTTP_ADDR=:8280 METRICS_ADDR=:9290 \
+  ENABLE_STDOUT_TELEMETRY=true LOG_LEVEL=debug \
+  ./bin/nvnm-mcp-server --transport http > /tmp/srv.log 2>&1 &
+
+MCP_API_KEY=<raw key> MCP_HTTP_ADDR=:8280 \
+  make mcp-probe TOOL=<failing_tool> ARGS='{...}'
+
+grep -A4 exception.message /tmp/srv.log   # spans batch; allow ~5s
+```
+
+Always do this before concluding *why* something failed. Two different
+root causes flatten to the identical client-facing string, and one can
+mask the other — a call that fails validation will keep failing for that
+reason even after the permission problem behind it is fixed.
+
+`make mcp-probe` reproduces a failure without a client in the loop, which
+separates "the server rejects this" from "the client sent something
+unexpected". To inspect a generated output schema directly, `POST` a
+`tools/list` and read `result.tools[].outputSchema`.
+
+### Report the results in this exact format
+
+Every sweep — whether run by a person, by Claude, or by a subagent —
+reports as the run header plus the table below. Do not summarize in prose
+instead; a reader has to be able to see which tools were touched, with
+what, and what came back.
+
+Rules that make the table trustworthy:
+
+- **List every tool, always**, including the ones that passed, in phase
+  order. A tool silently missing from the table is indistinguishable from
+  a tool that was never registered.
+- **Never report a tool as `pass` on an error-path call alone.** If the
+  chain had no data to exercise the happy path, that is `partial`, and
+  the gap goes in the "Not covered" list.
+- **Evidence, not adjectives.** Quote the field or value that proves the
+  result — `chain_id: 1611`, `selector: 0x318b38b1`, the actual error
+  string.
+- **Root-cause every failure from the span**, not from the sanitized
+  message.
+
+**Run header** (all five lines, every time):
+
+```
+Chain:    1611 (mainnet) via https://evm.nvnmchain.io
+Build:    <git rev> + working tree, binary built <time>
+Server:   make run-http on :8080, ENABLE_WRITE_TOOLS=false
+Surface:  17 of 23 tools registered (+ ephemeral :8280 for Phase E/F)
+Date:     <UTC>
+```
+
+**Results table** (example rows — keep the columns and the legend):
+
+| # | Tool | Case | Result | Evidence / notes |
+|---|---|---|---|---|
+| A2 | `evm_get_chain_id` | `{}` | pass | `chain_id: 1611`, block 2,386,211 |
+| B1 | `anchor_get_registries` | `limit=5` | pass | ids 1–5, `next_key: "AAAAAAAAAAY="` (string) |
+| C5 | `evm_get_transaction` | nonexistent hash | partial | `transaction not found` — chain idle, no happy path |
+| E3 | `anchor_prepare_update_record_status` | happy path | **FAIL** | bare `upstream operation failed`; span: `index cannot be zero` |
+
+Legend — `pass`: happy path exercised and correct. `partial`: tool
+responded correctly but only the error/empty path was reachable.
+**`FAIL`**: wrong result, or an error that is not the correct answer.
+
+Close with a tally and an explicit gap list:
+
+```
+34/34 calls — 24 pass, 4 partial, 2 FAIL
+Not covered: evm_get_transaction_receipt happy path (idle chain);
+             Phase G (mainnet — testnet only, no credentials)
+```
+
+### Findings ledger
+
+Carry a ledger across sweeps so fixed items stay fixed and open items get
+re-probed. Update the status column every run.
+
+| Finding | Description | Probe | Status |
+|---|---|---|---|
+| C1 | `update_record_status` / `revoke_role` unreachable (auth-exempt gap) | E3, E5 | Resolved — both callable; failures are chain-level permission denials |
+| C6 | `next_actions` says "by id **or name**" when `anchor_get_registry` is ID-only | B1 | Resolved — split into two hints, name pointing at `anchor_get_registries` |
+| C7 | Role denial surfaces as bare `upstream operation failed` | E2, E3, F6 | **Open** — `grant_role`/`revoke_role` are curated; `add_record`/`update_record_status` are not |
+| C8 | `evm_get_code` precompile hint says "inspect its balance instead" | C4 | **Open** — unhelpful for a precompile, which has no bytecode by design |
+| C9 | `evm_get_balance` labels the amount `ether` | C3 | **Open** — chain gas token is `wmantraUSD`/`wmmUSD`; `wallet_status` gets this right via `balance_human` |
+| C10 | `revoke_role` description says "granting" | E5 | Resolved — now "remove admin or editor permissions" |
+| C12 | `balance_human` float64 precision artifact | post-write | Unprobed — needs a funded wallet (Phase G, testnet) |
+| C13 | `anchor_prepare_update_record_status` declares `index` optional; omitting it sends `0`, which the precompile rejects | E3 | **Open** — schema and chain disagree; opaque failure for a schema-conformant call |
+
+Then act on it: every failure gets a root cause from the span, a
+regression test in the layer that should have caught it, and a
+`CHANGELOG.md` entry. A tool that fails only on non-empty pagination, or
+only when a caller omits an "optional" field, is still a broken tool.
+
 ## CI pipeline (what a PR must survive)
 
 `.github/workflows/ci.yml`, on every PR: `go vet` → license headers →
@@ -123,8 +366,9 @@ against the baseline, and `dco.yml` enforces per-commit sign-off.
   value through, or delete failing tests to get green.
 - **Keep tests deterministic.** `-race -count=1` must pass; no sleeps as
   synchronization, no dependence on wall-clock, network, or test order.
-- **Update the docs that own the surface you changed:** `docs/TESTING.md`
-  for new test layers/helpers, `docs/TOOL_REFERENCE.md` for tool changes,
+- **Update the docs that own the surface you changed:**
+  `docs/TESTING_UNIT.md` for new test layers/helpers, `docs/TESTING.md` for
+  changes to the local e2e / MCP-client setup, `docs/TOOL_REFERENCE.md` for tool changes,
   `README.md` for operator-facing config, `CHANGELOG.md` under
   Unreleased.
 - **Dependency updates (e.g. Dependabot):** treat the full CI suite as

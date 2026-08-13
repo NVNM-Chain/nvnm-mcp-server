@@ -57,7 +57,8 @@ This README is the technical entry point. For deeper context, follow the links b
 | [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
 | [`docs/METAMASK_GUIDE.md`](docs/METAMASK_GUIDE.md) | Signing and submitting anchor writes with MetaMask (step-by-step) |
 | [`docs/standards/CODING_STANDARDS.md`](docs/standards/CODING_STANDARDS.md) | Go coding standards and conventions for contributors |
-| [`docs/TESTING.md`](docs/TESTING.md) | Layered testing strategy — unit, golden, integration, HTTP E2E, load, and Docker smoke |
+| [`docs/TESTING.md`](docs/TESTING.md) | Manual end-to-end testing — local environment setup, MCP client / Claude connector wiring, write-path walkthrough |
+| [`docs/TESTING_UNIT.md`](docs/TESTING_UNIT.md) | Automated testing strategy — unit, golden, integration, HTTP E2E, load, and Docker smoke |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational guide — startup, env-var migration, admin REST API |
 | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) | Per-alert investigation playbook; what to do when each Prometheus rule fires |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
@@ -152,28 +153,81 @@ make run-http
 
 ### Connect to an MCP client
 
+_Further details can be found at [docs/TESTING.md](docs/TESTING.md) which reviews various loops of MCP Testing that can be done beyond just simple go unit tests_.
+
 **Stdio (local):**
+
+```bash
+claude mcp add nvnm-stdio \
+    -e NVNM_EVM_RPC_URL=https://evm.nvnmchain.io \
+    -e NVNM_CHAIN_ID=1611 \
+    -e NVNM_CHAIN_ENVIRONMENT=mainnet \
+    -e ANCHOR_ABI_PATH=$PWD/abi/anchoring.json \
+    -- $PWD/bin/nvnm-mcp-server --transport stdio
+```
+
+**Output (`$HOME/.claude.json`)**
+
 ```json
 {
   "mcpServers": {
-    "nvnm-chain": {
-      "command": "/path/to/nvnm-mcp-server",
-      "args": ["--transport", "stdio"]
+    "nvnm-stdio": {
+      "type": "stdio",
+      "command": ".../nvnm-mcp-server/bin/nvnm-mcp-server",
+      "args": [
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "NVNM_EVM_RPC_URL": "https://evm.nvnmchain.io",
+        "NVNM_CHAIN_ID": "1611",
+        "NVNM_CHAIN_ENVIRONMENT": "mainnet",
+        "ANCHOR_ABI_PATH": ".../nvnm-mcp-server/abi/anchoring.json"
+      }
     }
   }
 }
 ```
 
 **HTTP (remote):**
+
+1. Create a key (prints the raw key once — copy it):
+
 ```bash
-# Server runs on :8080 by default
-export MCP_HTTP_ADDR=:8080
-./nvnm-mcp-server --transport http
+# The raw key is shown exactly once, at make key-create time, and never stored.
+
+make key-create NAME=claude-local ROLES=reader,writer
 ```
 
-### Authentication (HTTP transport)
+2. Start the HTTP server so it loads the new key (the store is read at boot):
 
-When using HTTP transport, authentication is strongly recommended. The server supports two auth providers, selected by `AUTH_PROVIDER` (default: `apikey`).
+```bash
+# Server runs on :8080 by default
+make run-http
+```
+
+3. Register the MCP server with the bearer header:
+
+```bash
+claude mcp add --transport http nvnm-local-http http://localhost:8080/ \
+    --header "Authorization: Bearer <RAW_KEY_FROM_STEP_1>"
+```
+
+**Output (`$HOME/.claude.json`)**
+
+```json
+"nvnm-local-http": {
+  "type": "http",
+  "url": "http://localhost:8080/",
+  "headers": {
+    "Authorization": "Bearer <RAW_KEY_FROM_STEP_1>"
+  }
+}
+```
+
+### Authentication Details (HTTP transport)
+
+When using HTTP transport, authentication is **REQUIRED**. The server supports two auth providers, selected by `AUTH_PROVIDER` (default: `apikey`).
 
 #### API Key Provider (default)
 
@@ -181,7 +235,7 @@ When using HTTP transport, authentication is strongly recommended. The server su
 export AUTH_PROVIDER=apikey  # default, can be omitted
 
 # Create an API key for a client
-make key-create NAME=my-agent
+make key-create NAME=my-agent ROLES=reader,writer
 
 # List all keys
 make key-list
@@ -513,7 +567,11 @@ make test-integration # Live-testnet integration tests (needs network + .env cre
 make docker-smoke     # Build image, boot container, verify healthz/readyz + MCP init
 ```
 
-For comprehensive testing documentation, including test architecture, framework details, and latest results, see [docs/TESTING.md](docs/TESTING.md).
+For the automated suite — test architecture, layers, and the CI gates — see
+[docs/TESTING_UNIT.md](docs/TESTING_UNIT.md). To stand the server up locally and
+drive it from a real MCP client (Claude Code, Claude Desktop, a claude.ai custom
+connector, or the Messages API MCP connector), see
+[docs/TESTING.md](docs/TESTING.md).
 
 ## Deployment
 
@@ -600,7 +658,8 @@ docs/
   SECURITY_CONSUMER_GUIDANCE.md   Operator-facing security guidance
   LICENSE_EXCEPTIONS.md           Project-scoped license exception register
   METAMASK_GUIDE.md               End-user MetaMask integration walkthrough
-  TESTING.md                      Test framework, strategy, and results
+  TESTING.md                      Manual e2e: local env setup + MCP client wiring
+  TESTING_UNIT.md                 Automated test framework, layers, and CI gates
   TOOL_REFERENCE.md               MCP tool schema reference
   RUNBOOK.md                      Operational runbook
 .github/
