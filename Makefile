@@ -14,6 +14,7 @@ LDFLAGS := -s -w
         test test-unit test-integration test-coverage coverage-check test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
+        compose-up compose-down compose-restart compose-logs \
         pre-commit install-hooks setup-dev install-dev ci release-check \
         deps-update deps-verify info help \
         key-create key-disable key-enable key-list
@@ -326,6 +327,37 @@ docker-buildx:
 docker-push:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE) --push .
 
+## Docker Compose -- local stack (server + Caddy TLS termination, optional
+## Postgres). The MCP port is reachable only through Caddy on
+## https://localhost:8443; see docs/TESTING.md § 3b for why.
+
+compose-up:
+	@if [ ! -f .env ]; then \
+		echo "ERROR: .env not found. Copy .env.example to .env and fill in values (see CONTRIBUTING.md § 2)."; \
+		exit 1; \
+	fi
+	@if [ ! -f .mcp-keys.json ]; then \
+		echo "ERROR: .mcp-keys.json not found. Create a key first:"; \
+		echo "         make key-create NAME=local-dev ROLES=reader,writer"; \
+		echo "       (compose bind-mounts that path; Docker would create it as a DIRECTORY if missing)."; \
+		exit 1; \
+	fi
+	docker compose up --build -d
+	@echo ""
+	@echo "MCP endpoint : https://localhost:8443/   (Caddy local CA -- use curl -k)"
+	@echo "Health       : http://localhost:9190/healthz"
+	@echo "Logs         : make compose-logs"
+
+compose-down:
+	docker compose down
+
+# The key store is read at boot; run this after key-create / key-disable.
+compose-restart:
+	docker compose restart nvnm-mcp-server
+
+compose-logs:
+	docker compose logs -f
+
 ## API Key Management
 
 MCP_API_KEYS_FILE ?= .mcp-keys.json
@@ -432,6 +464,12 @@ help:
 	@echo "  docker-run       Run in Docker"
 	@echo "  docker-buildx    Multi-arch Docker build (amd64 + arm64)"
 	@echo "  docker-push      Multi-arch build and push to registry"
+	@echo ""
+	@echo "Docker Compose (local stack: server + Caddy TLS on https://localhost:8443):"
+	@echo "  compose-up       Build and start the stack (needs .env + .mcp-keys.json)"
+	@echo "  compose-restart  Restart the server container (reloads the key store)"
+	@echo "  compose-logs     Follow stack logs"
+	@echo "  compose-down     Stop and remove the stack"
 	@echo ""
 	@echo "Other:"
 	@echo "  clean            Remove build artifacts"

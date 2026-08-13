@@ -33,6 +33,27 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`make compose-up` / `compose-down` / `compose-restart` / `compose-logs`
+  wrap `docker-compose.yml`** (server + Caddy TLS termination on
+  `https://localhost:8443`, optional Postgres profile) for local development.
+  `compose-up` fails fast with an actionable message if `.env` or
+  `.mcp-keys.json` is missing, since Docker would otherwise create the
+  latter's bind-mount path as an empty directory. `docs/TESTING.md` § 3b/5d
+  cover standing the stack up and trusting Caddy's local CA so Claude Code /
+  Desktop can connect to it over HTTPS; verified end-to-end against a live
+  testnet call.
+- **`docs/TESTING.md` is now a manual end-to-end guide for standing the
+  server up locally and driving it from a real MCP client.** It covers the
+  three loops (loopback `curl` / `make mcp-probe`; a local Claude Code or
+  Claude Desktop client over stdio or HTTP; a remote claude.ai custom
+  connector or Messages API MCP connector over a tunnel), the boot-time auth
+  requirements that bite first (`ErrHTTPAuthRequired`,
+  `ErrMissingAPIKeyRoles`), the MCP-authorization preflight that determines
+  whether a Claude-class client reports "Needs authentication"
+  (well-known → `404`, unauthenticated → `401` + `WWW-Authenticate: Bearer`),
+  the Origin-allowlist behavior a hosted client hits, the write-path
+  walkthrough, and a symptom→cause troubleshooting table. Every command and
+  status code in it was verified against a locally built binary.
 - **`anchor_get_registries` supports filtering by name**: pass `name` and an
   optional `match` (`exact` (default), `prefix`, `suffix`, or `contains`, all
   case-insensitive). Since the anchoring precompile has no by-name index,
