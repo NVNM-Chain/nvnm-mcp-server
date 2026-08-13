@@ -135,7 +135,7 @@ make test
 # Verify the same coverage gate CI enforces (-race + >=80% total coverage)
 make coverage-check
 
-# Configure (minimum required)
+# Configure (minimum required). `make run` reads the exported environment.
 export NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io
 export NVNM_CHAIN_ID=787111
 export ANCHOR_ABI_PATH=abi/anchoring.json
@@ -143,7 +143,10 @@ export ANCHOR_ABI_PATH=abi/anchoring.json
 # Run (stdio transport -- for local MCP client integration)
 make run
 
-# Run (HTTP transport -- for remote/production deployment)
+# Run (HTTP transport -- for remote/production deployment).
+# `run-http` sources `.env` rather than the exported environment, so
+# configure it there; values in `.env` win over anything exported above.
+cp .env.example .env      # then fill in values
 make run-http
 ```
 

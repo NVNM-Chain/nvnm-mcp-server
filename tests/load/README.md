@@ -12,13 +12,13 @@ Load tests for the NVNM Chain MCP server using [k6](https://k6.io/) against the 
 
 ## Starting the server for load testing
 
-From the repository root, with environment variables set:
+From the repository root, with `.env` populated (copy `.env.example` and fill it in):
 
 ```bash
 make run-http
 ```
 
-This builds the binary and runs it with `--transport http`. By default the MCP HTTP handler listens on `MCP_HTTP_ADDR` (default `:8080`) at the **server root** (for example `http://localhost:8080/`). Health and Prometheus metrics are on `METRICS_ADDR` (default `:9090`), separate from MCP.
+This builds the binary, sources `.env`, and runs it with `--transport http`. The MCP HTTP handler listens on `:8080` at the **server root** (for example `http://localhost:8080/`); `run-http` pins that port, overriding any `MCP_HTTP_ADDR` in `.env`, and it can be changed with `make run-http RUN_HTTP_ADDR=:9999`. Health and Prometheus metrics are on `METRICS_ADDR`, which **does** come from `.env` (`:9190` in `.env.example`, `:9090` if unset), separate from MCP.
 
 If you terminate TLS or mount the handler under a path (for example `/mcp`), set `MCP_URL` to that full URL when running k6.
 

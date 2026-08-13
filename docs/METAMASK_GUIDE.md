@@ -11,10 +11,19 @@ Before you can anchor documents on the NVNM chain:
 1. **MetaMask installed** in your browser (Chrome, Firefox, Brave, or Edge extension)
 2. **NVNM Chain added** to MetaMask (see [Add the NVNM Chain](#step-1-add-the-nvnm-chain))
 3. **wmantraUSD balance** -- the gas token on NVNM testnet
-4. **MCP server running** with write tools enabled:
+4. **MCP server running** with write tools enabled. Set this in `.env` --
+   `run-http` sources that file, so an inline `ENABLE_WRITE_TOOLS=` prefix
+   would be overwritten and have no effect:
+
    ```bash
-   ENABLE_WRITE_TOOLS=true make run-http
+   # in .env
+   ENABLE_WRITE_TOOLS=true
    ```
+
+   ```bash
+   make run-http
+   ```
+
 5. **An MCP client or agent** that can call tools and handle the response
 
 ---

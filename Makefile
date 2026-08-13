@@ -30,8 +30,32 @@ build:
 run: build
 	"$(BUILD_DIR)/$(BINARY_NAME)" --transport stdio
 
+# `run-http` sources `.env` like `run-local`, so chain config and every
+# feature flag reach the process instead of being silently absent (a flag
+# set only in `.env` used to have no effect here, leaving e.g. the write
+# tools unregistered with no indication why). `.env` is the single source
+# of truth for everything the server reads -- notably ENABLE_WRITE_TOOLS,
+# which is deliberately NOT forced on here: a target that quietly enabled
+# broadcast tools would override an operator's explicit `false` and, with
+# `.env` pointed at mainnet, put evm_send_raw_transaction one `make` away.
+#
+# The listen address is the sole exception, pinned so this target keeps its
+# conventional :8080 identity regardless of MCP_HTTP_ADDR in `.env`:
+#   make run-http RUN_HTTP_ADDR=:9999
+#
+# Precedence note: `set -a && . ./.env` overwrites already-exported shell
+# variables, so `FOO=bar make run-http` does NOT win over a `FOO` set in
+# `.env` -- change it in `.env`.
+RUN_HTTP_ADDR ?= :8080
+
 run-http: build
-	"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
+	@if [ ! -f .env ]; then \
+		echo "ERROR: .env not found. Copy .env.example to .env and fill in values (see CONTRIBUTING.md § 2)."; \
+		exit 1; \
+	fi
+	@set -a && . ./.env && set +a && \
+		MCP_HTTP_ADDR="$(RUN_HTTP_ADDR)" \
+		"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
 
 ## Local dev
 
@@ -160,9 +184,23 @@ test-load:
 
 ## Quality
 
+# Format this module's packages only. Both tools are pointed at the package
+# directories `go list ./...` reports rather than at `.`, because `gofmt -w .`
+# and `goimports -w .` recurse into vendor/ and rewrite vendored dependencies
+# in place. That damage is quiet: the files reformat cleanly, then surface as
+# a pile of unrelated modifications in `git status` and get clobbered by the
+# next `go mod vendor`. `go list ./...` excludes vendored packages in module
+# mode, so this stays correct as packages come and go -- no path pattern to
+# keep in sync. Directory arguments make gofmt process the .go files in each
+# directory without recursing, so testdata/ fixtures are left alone too.
 format:
-	gofmt -w .
-	goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server .
+	@command -v goimports >/dev/null 2>&1 || \
+		{ echo "goimports is required: make install-dev"; exit 1; }
+	@dirs=$$($(GO) list -f '{{.Dir}}' ./...) || exit 1; \
+	echo "gofmt -w <$$(echo "$$dirs" | wc -l | tr -d ' ') package dirs, vendor excluded>"; \
+	gofmt -w $$dirs; \
+	echo "goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server <same>"; \
+	goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server $$dirs
 
 vet:
 	$(GO) vet ./...
@@ -313,7 +351,7 @@ help:
 	@echo "  all              check-all + test + build"
 	@echo "  build            Build the server binary"
 	@echo "  run              Run with stdio transport"
-	@echo "  run-http         Run with HTTP transport"
+	@echo "  run-http         Run with HTTP transport (sources .env; pins :8080)"
 	@echo "  run-local        Source .env and run with HTTP transport (see Local Dev)"
 	@echo ""
 	@echo "API Key Management:"
