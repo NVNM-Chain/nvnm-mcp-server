@@ -59,11 +59,11 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 			return err
 		}},
 		{"get_balance", func() error {
-			_, _, err := makeGetBalanceHandler(m)(denied, nil, getBalanceInput{Address: testAddr})
+			_, _, err := makeGetBalanceHandler(m, testServerConfig(false))(denied, nil, getBalanceInput{Address: testAddr})
 			return err
 		}},
 		{"get_code", func() error {
-			_, _, err := makeGetCodeHandler(m)(denied, nil, getCodeInput{Address: testAddr})
+			_, _, err := makeGetCodeHandler(m, testServerConfig(false))(denied, nil, getCodeInput{Address: testAddr})
 			return err
 		}},
 		{"get_logs", func() error {
@@ -159,11 +159,11 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_balance", func() error {
-			_, _, err := makeGetBalanceHandler(m)(ctx, nil, getBalanceInput{Address: testAddr})
+			_, _, err := makeGetBalanceHandler(m, testServerConfig(false))(ctx, nil, getBalanceInput{Address: testAddr})
 			return err
 		}},
 		{"get_code with block", func() error {
-			_, _, err := makeGetCodeHandler(m)(ctx, nil, getCodeInput{Address: testAddr, BlockNum: &blockNum})
+			_, _, err := makeGetCodeHandler(m, testServerConfig(false))(ctx, nil, getCodeInput{Address: testAddr, BlockNum: &blockNum})
 			return err
 		}},
 		{"get_logs", func() error {
