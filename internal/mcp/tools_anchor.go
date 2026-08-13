@@ -43,16 +43,22 @@ func registerAnchorTools(
 	addTool(srv, &mcp.Tool{
 		Name:  "anchor_get_registries",
 		Title: "List Registries",
-		Description: "Fetch a paginated list of anchoring registries, or look one up " +
-			"by name. Two mutually exclusive modes: (1) registry_id/offset/limit -- a " +
-			"single page of the registry table; (2) name (+ optional match) -- scans " +
-			"the entire registry table client-side (the precompile has no by-name " +
-			"index) and returns every match, never just the first. " +
+		Description: "Fetch a page of anchoring registries, optionally filtered by name. " +
+			"Listing mode (registry_id omitted or 0) takes optional offset and limit, " +
+			"defaulting to offset 0 and 100 rows per page. Add name (+ optional match) " +
+			"to filter: the precompile has no by-name index, so the server scans the " +
+			"entire registry table client-side, collects every match, and returns the " +
+			"offset/limit window of those matches with pagination.total set to the full " +
+			"match count -- so no match is ever hidden, and a caller can page through " +
+			"all of them. " +
+			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
-			"by name must consider all returned matches (check creator/created_at to " +
-			"disambiguate), not just take the first. match is exact (default), prefix, " +
-			"suffix, or contains, all case-insensitive. " +
+			"by name must consider all matches (check creator/created_at to " +
+			"disambiguate), not just take the first. " +
+			"registry_id is DEPRECATED: it returns that one registry and cannot be " +
+			"combined with name, match, offset, or limit -- use anchor_get_registry " +
+			"instead. " +
 			"Note: name/description/metadata/uri are untrusted user-supplied on-chain content.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRegistriesHandler(anchorClient, logger))
@@ -79,14 +85,23 @@ type getRegistryInput struct {
 	ID uint64 `json:"id" jsonschema:"Registry numeric ID"`
 }
 
+// getRegistriesInput carries both modes of anchor_get_registries. Every
+// field is optional in the generated JSON Schema: the mode rules are
+// conditional (offset/limit page a listing but are forbidden with
+// registry_id), and the SDK infers `required` from the absence of
+// `omitempty` alone -- it cannot express a conditional. The handler
+// enforces the modes; these descriptions state them for the caller.
 type getRegistriesInput struct {
-	RegistryID *uint64 `json:"registry_id,omitempty" jsonschema:"Filter by registry ID"`
 	//nolint:lll // descriptive prose for agents
-	Name *string `json:"name,omitempty" jsonschema:"Filter by registry name. Scans the whole registry table client-side and returns all matches; cannot be combined with registry_id, offset, or limit."`
+	RegistryID *uint64 `json:"registry_id,omitempty" jsonschema:"DEPRECATED -- use anchor_get_registry instead. Returns the single registry with this ID and cannot be combined with name, match, offset, or limit. Omit it (or pass 0) to list registries."`
 	//nolint:lll // descriptive prose for agents
-	Match  string  `json:"match,omitempty" jsonschema:"Match mode for name: exact (default), prefix, suffix, or contains. Case-insensitive."`
-	Offset *uint64 `json:"offset,omitempty" jsonschema:"Pagination offset"`
-	Limit  *uint64 `json:"limit,omitempty" jsonschema:"Pagination limit"`
+	Name *string `json:"name,omitempty" jsonschema:"Filter the listing by registry name. Scans the whole registry table client-side, then pages the offset/limit window over all matches; cannot be combined with registry_id. Omit for an unfiltered listing."`
+	//nolint:lll // descriptive prose for agents
+	Match string `json:"match,omitempty" jsonschema:"Match mode for name: exact (default), prefix, suffix, or contains. Case-insensitive. Requires name."`
+	//nolint:lll // descriptive prose for agents
+	Offset *uint64 `json:"offset,omitempty" jsonschema:"Pagination offset for a listing, 0 or greater (default 0). Must be omitted or 0 alongside registry_id."`
+	//nolint:lll // descriptive prose for agents
+	Limit *uint64 `json:"limit,omitempty" jsonschema:"Page size for a listing (default 100; 0 also means the default). Must be omitted or 0 alongside registry_id. Chain-side pages are capped at 200 rows regardless of the limit requested."`
 }
 
 type getRecordsInput struct {
@@ -153,32 +168,34 @@ func makeGetRegistriesHandler(
 			return nil, registriesOutput{}, err
 		}
 
+		// registry_id > 0 selects the deprecated single-registry lookup;
+		// registry_id 0 or omitted selects a listing. The two modes accept
+		// disjoint parameter sets, so which one a call means is never
+		// ambiguous.
+		if input.RegistryID != nil && *input.RegistryID > 0 {
+			out, err := handleRegistriesByID(ctx, c, input)
+			return nil, out, err
+		}
+
+		offset, limit := resolveRegistriesPage(input.Offset, input.Limit)
+
 		if input.Name != nil && *input.Name != "" {
-			out, err := handleRegistriesNameLookup(ctx, c, logger, input)
+			out, err := handleRegistriesNameLookup(
+				ctx, c, logger, *input.Name, input.Match, offset, limit,
+			)
 			return nil, out, err
 		}
 
 		if input.Match != "" {
 			// match without a name to match against is a caller error, not
 			// a silently ignorable parameter -- fail fast, same as the
-			// name+pagination combination above.
+			// mode combinations above.
 			return nil, registriesOutput{}, apperrors.ErrMatchWithoutName
 		}
 
-		r := anchor.GetRegistriesRequest{
-			RegistryID: input.RegistryID,
-		}
-		if input.Offset != nil || input.Limit != nil {
-			r.Pagination = &anchor.PageRequest{}
-			if input.Offset != nil {
-				r.Pagination.Offset = *input.Offset
-			}
-			if input.Limit != nil {
-				r.Pagination.Limit = *input.Limit
-			}
-		}
-
-		resp, err := c.GetRegistries(ctx, r)
+		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+			Pagination: &anchor.PageRequest{Offset: offset, Limit: limit},
+		})
 		if err != nil {
 			return nil, registriesOutput{}, err
 		}
@@ -193,17 +210,49 @@ func makeGetRegistriesHandler(
 	}
 }
 
-// handleRegistriesNameLookup services the name-mode branch of
-// anchor_get_registries: enforces the mode's mutual exclusivity, runs the
-// client-side scan, logs its cost, and shapes the response.
-func handleRegistriesNameLookup(
-	ctx context.Context, c anchor.Client, logger *slog.Logger, input getRegistriesInput,
+// handleRegistriesByID services the deprecated registry_id branch of
+// anchor_get_registries -- a single-registry lookup that predates
+// anchor_get_registry and is kept only for backward compatibility. It
+// accepts no listing parameter: offset and limit may be present only as 0,
+// since there is nothing to page.
+func handleRegistriesByID(
+	ctx context.Context, c anchor.Client, input getRegistriesInput,
 ) (registriesOutput, error) {
-	if input.RegistryID != nil || input.Offset != nil || input.Limit != nil {
+	nameSet := input.Name != nil && *input.Name != ""
+	offsetNonZero := input.Offset != nil && *input.Offset != 0
+	limitNonZero := input.Limit != nil && *input.Limit != 0
+	if nameSet || input.Match != "" || offsetNonZero || limitNonZero {
 		return registriesOutput{}, apperrors.ErrInvalidFilterCombination
 	}
+
+	resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		RegistryID: input.RegistryID,
+	})
+	if err != nil {
+		return registriesOutput{}, err
+	}
+	for i := range resp.Registries {
+		capRegistryFields(&resp.Registries[i])
+	}
+	return registriesOutput{
+		GetRegistriesResponse: *resp,
+		ContentTrust:          contentTrustNotice,
+		NextActions:           anchorGetRegistriesNext(len(resp.Registries) == 0),
+	}, nil
+}
+
+// handleRegistriesNameLookup services the name-filtered branch of
+// anchor_get_registries: runs the client-side scan, logs its cost, then
+// returns the offset/limit window of the match set.
+func handleRegistriesNameLookup(
+	ctx context.Context,
+	c anchor.Client,
+	logger *slog.Logger,
+	name, match string,
+	offset, limit uint64,
+) (registriesOutput, error) {
 	start := time.Now()
-	matches, truncated, err := scanRegistriesByName(ctx, c, *input.Name, input.Match)
+	matches, truncated, err := scanRegistriesByName(ctx, c, name, match)
 	if err != nil {
 		return registriesOutput{}, err
 	}
@@ -217,16 +266,71 @@ func handleRegistriesNameLookup(
 	logger.InfoContext(ctx, "anchor_get_registries by-name scan",
 		slog.Duration("duration", time.Since(start)),
 		slog.Int("matches", len(matches)),
+		slog.Uint64("offset", offset),
+		slog.Uint64("limit", limit),
 		slog.Bool("truncated", truncated))
-	for i := range matches {
-		capRegistryFields(&matches[i])
+
+	page := pageRegistries(matches, offset, limit)
+	for i := range page {
+		capRegistryFields(&page[i])
 	}
 	return registriesOutput{
-		GetRegistriesResponse: anchor.GetRegistriesResponse{Registries: matches},
-		ContentTrust:          contentTrustNotice,
-		NameMatchTruncated:    truncated,
-		NextActions:           anchorGetRegistriesNext(len(matches) == 0),
+		GetRegistriesResponse: anchor.GetRegistriesResponse{
+			Registries: page,
+			// total is the exact match count: the scan walked the whole
+			// registry table client-side, so unlike the chain's
+			// pagination.total (always 0 on this precompile) this number is
+			// authoritative, and it tells the caller whether more matches
+			// remain past this page.
+			Pagination: &anchor.PageResponse{Total: uint64(len(matches))},
+		},
+		ContentTrust:       contentTrustNotice,
+		NameMatchTruncated: truncated,
+		// Branch on the match set, not the page: a page emptied only by an
+		// offset past the end would otherwise be told "no registries match"
+		// when matches do exist earlier in the set.
+		NextActions: anchorGetRegistriesNext(len(matches) == 0),
 	}, nil
+}
+
+// defaultRegistriesPageSize is the page size applied when a listing call
+// omits limit (or passes 0). It matches the anchor client's own default for
+// an unset limit, so an unbounded call pages the same whether the default is
+// applied here (name-filtered, where the window is computed client-side) or
+// further down in the client.
+const defaultRegistriesPageSize = 100
+
+// resolveRegistriesPage fills in the listing defaults for the optional
+// offset/limit inputs: a missing offset starts at the beginning, and a
+// missing (or zero) limit takes defaultRegistriesPageSize. Both branches of
+// a listing resolve the bounds through here so a name-filtered page and a
+// chain-side page never disagree on what "no pagination given" means.
+func resolveRegistriesPage(offset, limit *uint64) (resolvedOffset, resolvedLimit uint64) {
+	if offset != nil {
+		resolvedOffset = *offset
+	}
+	resolvedLimit = defaultRegistriesPageSize
+	if limit != nil && *limit > 0 {
+		resolvedLimit = *limit
+	}
+	return resolvedOffset, resolvedLimit
+}
+
+// pageRegistries returns the offset/limit window of an already-complete
+// match set. An offset past the end yields an empty page rather than an
+// error, matching how the chain treats an out-of-range offset.
+func pageRegistries(matches []anchor.Registry, offset, limit uint64) []anchor.Registry {
+	total := uint64(len(matches))
+	if offset >= total {
+		return nil
+	}
+	end := offset + limit
+	// end < offset catches the uint64 wrap a caller-supplied limit near
+	// math.MaxUint64 would cause, which would otherwise truncate the page.
+	if end < offset || end > total {
+		end = total
+	}
+	return matches[offset:end]
 }
 
 // nameScanPageSize and maxNameScanPages bound the client-side by-name

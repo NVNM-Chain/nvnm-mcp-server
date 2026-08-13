@@ -118,7 +118,9 @@ func anchorGetRegistriesNext(emptyResult bool) []NextAction {
 		{Tool: "anchor_get_registry", Hint: "Drill into a specific registry by id."},
 		{
 			Tool: "anchor_get_registries",
-			Hint: "Look up a registry by name instead of id (name=..., match=exact|prefix|suffix|contains).",
+			Hint: "Look up a registry by name instead of id " +
+				"(name=..., match=exact|prefix|suffix|contains), or page further " +
+				"with offset/limit.",
 		},
 		{
 			Tool: "anchor_prepare_add_record",

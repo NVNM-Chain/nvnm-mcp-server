@@ -116,10 +116,12 @@ func startTestServerWithConfig(
 //
 // Handler-level tests (tools_test.go) cover the by-name scan logic directly
 // against a mocked anchor.Client -- they never cross the real HTTP/JSON-RPC
-// boundary or the MCP SDK's schema (un)marshaling for the new name/match
-// input fields. These two do: a real client sends a real tools/call over a
+// boundary or the MCP SDK's schema (un)marshaling for the name/match/offset/
+// limit input fields. These do: a real client sends a real tools/call over a
 // real HTTP session, through the actual generated schema, exercising the
-// exact path a live agent would use.
+// exact path a live agent would use. The mode rules matter here in
+// particular because every field is optional in the generated schema, so
+// nothing below the handler enforces them.
 // ---------------------------------------------------------------------------
 
 func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
@@ -135,8 +137,12 @@ func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
 	})
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "anchor_get_registries",
-		Arguments: map[string]any{"name": "fund-documents"},
+		Name: "anchor_get_registries",
+		Arguments: map[string]any{
+			"name":   "fund-documents",
+			"offset": 0,
+			"limit":  10,
+		},
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -156,24 +162,41 @@ func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
 	if len(out.Registries) != 2 {
 		t.Fatalf("Registries = %+v, want 2 matches (both fund-documents)", out.Registries)
 	}
+	if out.Pagination == nil || out.Pagination.Total != 2 {
+		t.Errorf("Pagination = %+v, want Total = 2 (the match count)", out.Pagination)
+	}
 }
 
-// TestE2E_CallTool_AnchorGetRegistries_NameCombinedWithOffsetRejected proves
-// the mutual-exclusivity guard survives real schema (un)marshaling -- both
-// fields are optional in the generated schema, so nothing at the schema
-// level stops a caller from sending both; the handler must reject it.
-func TestE2E_CallTool_AnchorGetRegistries_NameCombinedWithOffsetRejected(t *testing.T) {
+// TestE2E_CallTool_AnchorGetRegistries_ModeViolationsRejected proves the
+// per-mode input rules survive real schema (un)marshaling: the schema marks
+// every field optional, so only the handler can reject a call that mixes the
+// deprecated registry_id lookup with listing parameters.
+func TestE2E_CallTool_AnchorGetRegistries_ModeViolationsRejected(t *testing.T) {
 	session := startTestServerWithConfig(t, e2eServerConfig{})
 
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "anchor_get_registries",
-		Arguments: map[string]any{"name": "anything", "offset": 10},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"registry_id with name", map[string]any{"registry_id": 1, "name": "anything"}},
+		{"registry_id with match", map[string]any{"registry_id": 1, "match": "prefix"}},
+		{"registry_id with offset", map[string]any{"registry_id": 1, "offset": 10}},
+		{"registry_id with limit", map[string]any{"registry_id": 1, "limit": 10}},
+		{"match without name", map[string]any{"match": "prefix"}},
 	}
-	if !result.IsError {
-		t.Error("expected IsError=true when name is combined with offset")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := session.CallTool(ctx, &mcp.CallToolParams{
+				Name:      "anchor_get_registries",
+				Arguments: tc.args,
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if !result.IsError {
+				t.Errorf("expected IsError=true for %s", tc.name)
+			}
+		})
 	}
 }
 

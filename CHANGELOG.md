@@ -11,15 +11,32 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`anchor_get_registries` supports lookup by name**, in addition to
-  `registry_id`/`offset`/`limit` paging: pass `name` and an optional
-  `match` (`exact` (default), `prefix`, `suffix`, or `contains`, all
+- **`anchor_get_registries` supports filtering by name**: pass `name` and an
+  optional `match` (`exact` (default), `prefix`, `suffix`, or `contains`, all
   case-insensitive). Since the anchoring precompile has no by-name index,
-  this scans the registry table client-side and returns **every** match
-  rather than the first -- registry names are caller-supplied and not
-  unique, so callers should check `creator`/`created_at` to disambiguate.
-  `anchor_get_registry(id)` stays ID-only and single-valued; the by-name
-  path lives only on `anchor_get_registries`. (W3)
+  this scans the registry table client-side, finds **every** match rather
+  than the first, and returns the `offset`/`limit` window of those matches
+  (defaulting, as any listing does, to offset 0 and 100 rows) with
+  `pagination.total` set to the full match count -- so no match is hidden and
+  a caller can page through all of them. Registry names are caller-supplied
+  and not unique, so callers should check `creator`/`created_at` to
+  disambiguate. `anchor_get_registry(id)` stays ID-only and single-valued;
+  the by-name path lives only on `anchor_get_registries`. (W3)
+
+### Changed
+
+- **`name` can be combined with `offset`/`limit`** on
+  `anchor_get_registries` (they page the match set); combining it with
+  `registry_id` remains rejected, and `ErrInvalidFilterCombination` now
+  describes that narrower rule. `offset`/`limit` stay optional, with the page
+  size defaulting to 100.
+
+### Deprecated
+
+- **`anchor_get_registries`' `registry_id` parameter.** It still returns that
+  single registry and still rejects every listing parameter
+  (`name`, `match`, non-zero `offset`/`limit`), but `anchor_get_registry` is
+  the supported way to fetch one registry by ID.
 
 ### Fixed
 
@@ -43,9 +60,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ever dropped below the client's requested page size). Same fix applied to
   the seed script's and integration helper's walks.
 - **Each by-name scan emits a structured log line** (duration, match count,
-  truncated flag) so operators can watch the client-side scan's frequency
-  and cost. The scan is a stopgap: if the chain gains a by-name index as
-  expected, or if indexing is solved off-chain, it can be retired (#79).
+  requested offset/limit, truncated flag) so operators can watch the
+  client-side scan's frequency and cost. Note that paging a match set does
+  not reduce that cost: each page re-runs the full scan. The scan is a
+  stopgap: if the chain gains a by-name index as expected, or if indexing is
+  solved off-chain, it can be retired (#79).
 
 ## [1.0.0-rc17] - 2026-08-04
 

@@ -862,46 +862,52 @@ Fetch a single anchoring registry by its numeric ID. A registry is a logical con
 
 ## 11. anchor\_get\_registries
 
-Fetch a paginated list of anchoring registries, or look one up by name. Two mutually exclusive modes:
+Fetch a page of anchoring registries, optionally filtered by name. The mode is selected by `registry_id`:
 
-1. **`registry_id` / `offset` / `limit`** -- a single page of the registry table (chain-side pagination).
-2. **`name` (+ optional `match`)** -- scans the entire registry table client-side (the precompile has no by-name index) and returns **every** match, never just the first.
+1. **Listing (`registry_id` omitted or `0`)** -- `offset` and `limit` are optional, defaulting to offset `0` and 100 rows per page.
+   - Without `name`: a single chain-side page of the registry table.
+   - With `name` (+ optional `match`): the server scans the entire registry table client-side (the precompile has no by-name index), collects **every** match, and returns the `offset`/`limit` window of those matches. `pagination.total` is the full match count, so no match is ever hidden and a caller can page through all of them.
+2. **`registry_id` > 0 -- DEPRECATED** -- returns that single registry. It cannot be combined with `name`, `match`, `offset`, or `limit`. Use [anchor\_get\_registry](#10-anchor_get_registry) instead.
 
-> Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all returned matches (check `creator` / `created_at` to disambiguate), not just take the first.
+> Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all matches (check `creator` / `created_at` to disambiguate), not just take the first.
 
-> **Operator note (scan cost):** each by-name call pages the *entire* registry
+> **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Compare `pagination.total` against the rows returned -- authoritative for a `name` filter, always `0` from this chain otherwise -- or keep paging until a page comes back short.
+
+> **Operator note (scan cost):** each name-filtered call pages the *entire* registry
 > table through the upstream RPC -- one sequential call per 200 registries plus one
 > peek -- measured at roughly 5–9 seconds per lookup at ~2.6k registries, growing
-> linearly with the table. Every scan emits a structured log line
-> (`anchor_get_registries by-name scan`: duration, matches, truncated) so operators can
-> watch frequency and cost. The client-side scan is a stopgap: if the chain gains a
-> by-name index as expected, or if indexing is solved off-chain, it can be retired.
-> Issue #79 tracks the options.
+> linearly with the table. `offset`/`limit` window the result, they do **not** reduce
+> this cost: every page of a match set re-runs the full scan. Every scan emits a
+> structured log line (`anchor_get_registries by-name scan`: duration, matches, offset,
+> limit, truncated) so operators can watch frequency and cost. The client-side scan is
+> a stopgap: if the chain gains a by-name index as expected, or if indexing is solved
+> off-chain, it can be retired. Issue #79 tracks the options.
 
 ### Input Parameters
 
 | Name          | Type     | Required | Description                   |
 |---------------|----------|----------|-------------------------------|
-| `registry_id` | `uint64` | optional | Filter by registry ID. Mutually exclusive with `name`. |
-| `offset`      | `uint64` | optional | Pagination offset. Mutually exclusive with `name`. |
-| `limit`       | `uint64` | optional | Pagination limit. Mutually exclusive with `name`. |
-| `name`        | `string` | optional | Look up registries by name (client-side scan, returns all matches). Mutually exclusive with `registry_id`, `offset`, and `limit`. |
-| `match`       | `string` | optional | Match mode for `name`: `exact` (default), `prefix`, `suffix`, or `contains`. All case-insensitive. |
+| `offset`      | `uint64` | optional | Pagination offset for a listing, `0` or greater (default `0`). Must be omitted or `0` alongside `registry_id`. |
+| `limit`       | `uint64` | optional | Page size for a listing (default `100`; `0` also means the default). Must be omitted or `0` alongside `registry_id`. Note: the precompile caps a chain-side page at 200 rows regardless of the `limit` requested. |
+| `name`        | `string` | optional | Filter the listing by registry name (client-side scan over the whole table, then paged by `offset`/`limit`). Omit for an unfiltered listing. Mutually exclusive with `registry_id`. |
+| `match`       | `string` | optional | Match mode for `name`: `exact` (default), `prefix`, `suffix`, or `contains`. All case-insensitive. Requires `name`. |
+| `registry_id` | `uint64` | optional, **DEPRECATED** | Returns the single registry with this ID. Mutually exclusive with `name`, `match`, `offset`, and `limit`. Use [anchor\_get\_registry](#10-anchor_get_registry) instead. |
 
 ### Output Fields
 
 | Field                   | Type         | Description                              |
 |-------------------------|--------------|------------------------------------------|
-| `registries`            | `Registry[]` | Array of registry objects                |
-| `pagination`            | `object`     | Pagination metadata (omitted in `name` mode, and omitted in `registry_id`/`offset`/`limit` mode if no pagination requested) |
-| `pagination.total`      | `uint64`     | Chain-reported total. **Note:** the nvnm-testnet-1 anchoring precompile returns `0` here even when registries are present (it does not honor `countTotal`); do not treat `total` as authoritative. |
-| `name_match_truncated`  | `bool`       | `name` mode only, omitted otherwise. `true` if the client-side scan hit its internal safety cap before confirming it reached the end of the registry table -- treat `registries` as a possibly-incomplete match set when this is `true`. |
+| `registries`            | `Registry[]` | Array of registry objects (the requested page) |
+| `pagination`            | `object`     | Pagination metadata               |
+| `pagination.total`      | `uint64`     | With `name`: the **exact** number of matching registries, counted client-side across the whole table -- use it to tell whether more matches remain past this page. Without `name`: the chain-reported total. **Note:** the nvnm-testnet-1 anchoring precompile returns `0` here even when registries are present (it does not honor `countTotal`); do not treat the chain-reported `total` as authoritative. |
+| `name_match_truncated`  | `bool`       | `name` filter only, omitted otherwise. `true` if the client-side scan hit its internal safety cap before confirming it reached the end of the registry table -- treat the match set (and therefore `pagination.total`) as possibly incomplete when this is `true`. |
 
 Each element in `registries` has the same fields as [anchor\_get\_registry](#10-anchor_get_registry) output.
 
 ### Error Conditions
 
-- `name` combined with `registry_id`, `offset`, or `limit` (the two modes cannot be mixed).
+- `registry_id` > 0 combined with `name`, `match`, a non-zero `offset`, or a non-zero `limit` (the two modes cannot be mixed).
+- `match` supplied without `name` (the match mode has nothing to apply to).
 - Invalid `match` value (must be `exact`, `prefix`, `suffix`, or `contains`).
 - ABI encoding/decoding failure.
 - RPC connection failure.
@@ -952,11 +958,13 @@ Each element in `registries` has the same fields as [anchor\_get\_registry](#10-
 ```json
 {
   "name": "fund-documents",
-  "match": "exact"
+  "match": "exact",
+  "offset": 0,
+  "limit": 10
 }
 ```
 
-**Response:** (two registries share this exact name -- both are returned, not just the first)
+**Response:** (two registries share this exact name -- both are returned, not just the first; `pagination.total` confirms there are no further matches)
 
 ```json
 {
@@ -977,7 +985,53 @@ Each element in `registries` has the same fields as [anchor\_get\_registry](#10-
       "created_at": "2024-05-02T09:00:00Z",
       "metadata": ""
     }
-  ]
+  ],
+  "pagination": {
+    "total": 2
+  }
+}
+```
+
+### Example: paging through a large match set
+
+`pagination.total` (12) exceeds `offset + limit` (0 + 2), so ten more matches remain; the caller advances with `offset: 2`, then `offset: 4`, and so on.
+
+**Request:**
+
+```json
+{
+  "name": "fund",
+  "match": "prefix",
+  "offset": 0,
+  "limit": 2
+}
+```
+
+**Response:**
+
+```json
+{
+  "registries": [
+    {
+      "id": 1,
+      "name": "fund-documents",
+      "description": "Anchored fund documentation",
+      "creator": "0xaaa...111",
+      "created_at": "2024-01-15T10:30:00Z",
+      "metadata": ""
+    },
+    {
+      "id": 12,
+      "name": "fund-nav-statements",
+      "description": "Monthly NAV statements",
+      "creator": "0xaaa...111",
+      "created_at": "2024-03-01T08:00:00Z",
+      "metadata": ""
+    }
+  ],
+  "pagination": {
+    "total": 12
+  }
 }
 ```
 

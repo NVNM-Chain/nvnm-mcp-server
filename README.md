@@ -335,7 +335,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 |---|---|
 | `anchor_info` | Precompile config status: address, ABI loaded, method count |
 | `anchor_get_registry` | Fetch a registry by numeric ID (ID-only, single-valued) |
-| `anchor_get_registries` | Paginated list of registries, or look up by name (client-side scan, all matches returned) |
+| `anchor_get_registries` | Paginated list of registries, optionally filtered by name (client-side scan finds every match, then pages over them) |
 | `anchor_get_records` | Flexible record query: by version, by checksum, by registry, with pagination |
 
 ### Phase 3: Anchor Writes

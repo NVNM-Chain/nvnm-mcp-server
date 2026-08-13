@@ -58,15 +58,16 @@ var (
 	ErrInvalidMatchMode = errors.New(
 		"invalid match mode: must be exact, prefix, suffix, or contains")
 	// ErrInvalidFilterCombination marks an anchor_get_registries call that
-	// combined the client-side name filter with registry_id, offset, or
-	// limit. The name filter scans the entire registry table and returns
-	// every match; those other filters describe a different (single-page,
-	// ID-scoped) query shape that cannot be honored at the same time. The
-	// message is the client-facing text, surfaced verbatim (input class).
+	// combined the deprecated registry_id lookup with any listing
+	// parameter. registry_id fetches one registry by ID; name, match,
+	// offset, and limit describe a listing, which is a different query
+	// shape that cannot be honored at the same time. The message is the
+	// client-facing text, surfaced verbatim (input class).
 	ErrInvalidFilterCombination = errors.New(
-		"name cannot be combined with registry_id, offset, or limit: " +
-			"the name filter scans and returns all matches, which is a " +
-			"different query shape from a registry_id/offset/limit page")
+		"registry_id cannot be combined with name, match, offset, or limit: " +
+			"registry_id fetches a single registry by ID, which is a " +
+			"different query shape from a registry listing; drop the other " +
+			"parameters, or omit registry_id to list registries")
 	// ErrMatchWithoutName marks an anchor_get_registries call that supplied
 	// a match mode with no name to match against. Silently ignoring the
 	// parameter would leave the caller believing a filter was applied when
