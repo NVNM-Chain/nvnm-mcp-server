@@ -40,6 +40,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`anchor_get_registries` inline doc corrections**: the `limit` field's
+  schema description no longer claims chain-side pages are capped at 200 rows
+  for the caller's limit -- the caller's limit is applied client-side in all
+  listing paths and is never sent to the chain. The tool description now
+  explicitly states that every listing mode (filtered *and* unfiltered) does a
+  full client-side scan before windowing, not only the name-filtered path.
+  The `defaultRegistriesPageSize` constant comment no longer implies the
+  default may be applied further down in the client -- both listing branches
+  resolve pagination through `resolveRegistriesPage`.
 - **`anchor_prepare_update_record_status` and `anchor_prepare_revoke_role`
   are now reachable on keyless (anonymous-read) deployments**, classified
   auth-exempt alongside their sibling prepare tools. (W1)

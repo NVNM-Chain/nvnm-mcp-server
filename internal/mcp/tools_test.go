@@ -641,9 +641,12 @@ func TestHandler_GetRegistry_MissingID(t *testing.T) {
 }
 
 func TestHandler_GetRegistries_NoFilter(t *testing.T) {
+	// The unfiltered listing walks the table cursor-based (scanAllRegistries):
+	// one call for latestRegistryID + at least one scan-loop call.  The mock
+	// returns the same 2-registry page for every call; the scan terminates on
+	// an empty NextKey after the first loop iteration.
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
 		Registries: []anchor.Registry{{ID: 1}, {ID: 2}},
-		Pagination: &anchor.PageResponse{Total: 2},
 	}}
 	handler := makeGetRegistriesHandler(m, testLogger())
 
@@ -654,77 +657,153 @@ func TestHandler_GetRegistries_NoFilter(t *testing.T) {
 	if len(out.Registries) != 2 {
 		t.Errorf("len(Registries) = %d, want 2", len(out.Registries))
 	}
-	if m.lastRegistriesReq.RegistryID != nil {
-		t.Errorf("RegistryID = %v, want nil (unfiltered listing)", *m.lastRegistriesReq.RegistryID)
+	// Pagination.Total now reflects the full scan count, not the precompile's
+	// reported total (which is always 0 on this chain).
+	if out.Pagination == nil || out.Pagination.Total != 2 {
+		t.Errorf("Pagination.Total = %v, want 2", out.Pagination)
+	}
+	// The scan always passes RegistryID=&0 (not nil) to the precompile so that
+	// the zero value is unambiguously the "no ID filter" sentinel.
+	if m.lastRegistriesReq.RegistryID == nil || *m.lastRegistriesReq.RegistryID != 0 {
+		t.Errorf("last RegistryID = %v, want ptr-to-0 (unfiltered listing)", m.lastRegistriesReq.RegistryID)
+	}
+	// The scan uses cursor-based pagination with Limit=nameScanPageSize (200),
+	// never the caller's raw offset/limit.
+	page := m.lastRegistriesReq.Pagination
+	if page == nil {
+		t.Fatal("Pagination = nil")
+	}
+	if page.Limit != nameScanPageSize {
+		t.Errorf("Limit = %d, want nameScanPageSize (%d)", page.Limit, nameScanPageSize)
 	}
 }
 
 // TestHandler_GetRegistries_WithPagination proves an unfiltered listing
-// pages chain-side: the caller's offset/limit reach the precompile call
-// itself rather than being applied to an already-fetched page.
+// applies offset/limit client-side (not forwarded to the precompile).
+// The precompile is always called with cursor-based pagination at
+// nameScanPageSize; the caller's window is sliced from the collected set.
 func TestHandler_GetRegistries_WithPagination(t *testing.T) {
+	regs := make([]anchor.Registry, 10)
+	for i := range regs {
+		regs[i] = anchor.Registry{ID: uint64(i + 1)}
+	}
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
-		Registries: []anchor.Registry{{ID: 5}},
-		Pagination: &anchor.PageResponse{Total: 100},
+		Registries: regs,
 	}}
 	handler := makeGetRegistriesHandler(m, testLogger())
 
 	offset := uint64(4)
-	limit := uint64(1)
+	limit := uint64(3)
 	_, out, err := handler(ctx, nil, getRegistriesInput{Offset: &offset, Limit: &limit})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Pagination.Total != 100 {
-		t.Errorf("Total = %d, want 100", out.Pagination.Total)
+	// Client-side slice: [offset, offset+limit) of the 10-registry scan.
+	if len(out.Registries) != 3 {
+		t.Errorf("len(Registries) = %d, want 3", len(out.Registries))
 	}
-	page := m.lastRegistriesReq.Pagination
-	if page == nil {
-		t.Fatal("Pagination = nil, want the caller's offset/limit forwarded upstream")
+	if out.Registries[0].ID != 5 || out.Registries[2].ID != 7 {
+		t.Errorf("Registries IDs = %v, want [5 6 7]", func() []uint64 {
+			ids := make([]uint64, len(out.Registries))
+			for i, r := range out.Registries {
+				ids[i] = r.ID
+			}
+			return ids
+		}())
 	}
-	if page.Offset != 4 || page.Limit != 1 {
-		t.Errorf("Pagination = {Offset: %d, Limit: %d}, want {4, 1}", page.Offset, page.Limit)
+	// Total reflects the full scanned count, not the page size.
+	if out.Pagination == nil || out.Pagination.Total != 10 {
+		t.Errorf("Pagination.Total = %v, want 10", out.Pagination)
+	}
+	// The precompile must NOT have received the caller's offset/limit;
+	// it always gets cursor-based nameScanPageSize.
+	scanPage := m.lastRegistriesReq.Pagination
+	if scanPage == nil {
+		t.Fatal("Pagination = nil on last GetRegistries call")
+	}
+	if scanPage.Offset != 0 {
+		t.Errorf("precompile Offset = %d, want 0 (caller offset must not be forwarded)", scanPage.Offset)
+	}
+	if scanPage.Limit != nameScanPageSize {
+		t.Errorf("precompile Limit = %d, want nameScanPageSize (%d)", scanPage.Limit, nameScanPageSize)
 	}
 }
 
-// TestHandler_GetRegistries_ListingDefaultsPagination proves both bounds are
-// optional and default to offset 0 / defaultRegistriesPageSize, including
-// when a caller passes an explicit 0 limit.
+// TestHandler_GetRegistries_ListingDefaultsPagination proves that for all
+// input combinations the precompile scan always receives cursor-based
+// pagination at nameScanPageSize, and the returned window is sliced
+// client-side from the full scan result.
 func TestHandler_GetRegistries_ListingDefaultsPagination(t *testing.T) {
 	zero := uint64(0)
+	two := uint64(2)
 	five := uint64(5)
-	fifty := uint64(50)
 	regIDZero := uint64(0)
+
+	// Three registries in the mock — enough to exercise different slice windows.
+	mockRegs := []anchor.Registry{{ID: 1}, {ID: 2}, {ID: 3}}
+
 	tests := []struct {
-		name       string
-		input      getRegistriesInput
-		wantOffset uint64
-		wantLimit  uint64
+		name         string
+		input        getRegistriesInput
+		wantRegCount int    // expected len(out.Registries)
+		wantTotal    uint64 // expected out.Pagination.Total
 	}{
-		{"nothing supplied", getRegistriesInput{}, 0, defaultRegistriesPageSize},
-		{"offset without limit", getRegistriesInput{Offset: &five}, 5, defaultRegistriesPageSize},
-		{"limit without offset", getRegistriesInput{Limit: &fifty}, 0, 50},
-		{"explicit zero limit", getRegistriesInput{Offset: &five, Limit: &zero}, 5, defaultRegistriesPageSize},
-		{"registry_id zero is a listing", getRegistriesInput{RegistryID: &regIDZero}, 0, defaultRegistriesPageSize},
+		{
+			"nothing supplied",
+			getRegistriesInput{},
+			3, 3, // offset=0, limit=defaultRegistriesPageSize → all 3 returned
+		},
+		{
+			"offset within range",
+			getRegistriesInput{Offset: &two},
+			1, 3, // offset=2, limit=defaultRegistriesPageSize → 1 registry (index 2)
+		},
+		{
+			"limit below total",
+			getRegistriesInput{Limit: &two},
+			2, 3, // offset=0, limit=2 → first 2
+		},
+		{
+			"explicit zero limit defaults to page size",
+			getRegistriesInput{Offset: &two, Limit: &zero},
+			1, 3, // offset=2, limit=defaultRegistriesPageSize → 1 registry
+		},
+		{
+			"offset past end returns empty",
+			getRegistriesInput{Offset: &five},
+			0, 3, // offset=5 ≥ len(3) → empty slice
+		},
+		{
+			"registry_id zero treated as unfiltered listing",
+			getRegistriesInput{RegistryID: &regIDZero},
+			3, 3,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
-				Registries: []anchor.Registry{{ID: 1}},
+				Registries: mockRegs,
 			}}
 			handler := makeGetRegistriesHandler(m, testLogger())
 
-			_, _, err := handler(ctx, nil, tc.input)
+			_, out, err := handler(ctx, nil, tc.input)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			page := m.lastRegistriesReq.Pagination
-			if page == nil {
-				t.Fatal("Pagination = nil, want the resolved bounds forwarded upstream")
+			if len(out.Registries) != tc.wantRegCount {
+				t.Errorf("len(Registries) = %d, want %d", len(out.Registries), tc.wantRegCount)
 			}
-			if page.Offset != tc.wantOffset || page.Limit != tc.wantLimit {
-				t.Errorf("Pagination = {Offset: %d, Limit: %d}, want {%d, %d}",
-					page.Offset, page.Limit, tc.wantOffset, tc.wantLimit)
+			if out.Pagination == nil || out.Pagination.Total != tc.wantTotal {
+				t.Errorf("Pagination.Total = %v, want %d", out.Pagination, tc.wantTotal)
+			}
+			// The scan loop call must always use cursor-based nameScanPageSize,
+			// regardless of what offset/limit the caller supplied.
+			scanPage := m.lastRegistriesReq.Pagination
+			if scanPage == nil {
+				t.Fatal("Pagination = nil on last GetRegistries call")
+			}
+			if scanPage.Limit != nameScanPageSize {
+				t.Errorf("precompile Limit = %d, want nameScanPageSize (%d)", scanPage.Limit, nameScanPageSize)
 			}
 		})
 	}
@@ -1230,12 +1309,140 @@ func TestHandler_GetRegistries_ByName_TruncatedScanStillPages(t *testing.T) {
 	if !out.NameMatchTruncated {
 		t.Error("NameMatchTruncated = false, want true (the scan hit its page cap)")
 	}
+	if !out.TotalIsLowerBound {
+		t.Error("TotalIsLowerBound = false, want true (scan truncated, total is a floor)")
+	}
 	if len(out.Registries) != 3 {
 		t.Errorf("len(Registries) = %d, want 3 (the requested window)", len(out.Registries))
 	}
 	wantTotal := uint64(nameScanPageSize * maxNameScanPages)
 	if out.Pagination == nil || out.Pagination.Total != wantTotal {
 		t.Errorf("Pagination = %+v, want Total = %d", out.Pagination, wantTotal)
+	}
+}
+
+// TestHandler_GetRegistries_UnfilteredTruncated proves that when the full-table
+// scan hits its page cap (maxNameScanPages), the unfiltered listing sets
+// TotalIsLowerBound=true and leaves pagination.total as the scanned floor.
+func TestHandler_GetRegistries_UnfilteredTruncated(t *testing.T) {
+	m := &mockAnchor{
+		registriesFn: func(_ int) (*anchor.GetRegistriesResponse, error) {
+			page := make([]anchor.Registry, nameScanPageSize)
+			for i := range page {
+				page[i] = anchor.Registry{ID: uint64(i + 1)}
+			}
+			return &anchor.GetRegistriesResponse{
+				Registries: page,
+				Pagination: &anchor.PageResponse{NextKey: []byte("always-more")},
+			}, nil
+		},
+	}
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	_, out, err := handler(ctx, nil, getRegistriesInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.TotalIsLowerBound {
+		t.Error("TotalIsLowerBound = false, want true (unfiltered scan hit page cap)")
+	}
+	wantTotal := uint64(nameScanPageSize * maxNameScanPages)
+	if out.Pagination == nil || out.Pagination.Total != wantTotal {
+		t.Errorf("Pagination.Total = %v, want %d (scanned floor)", out.Pagination, wantTotal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// scanAllRegistries unit tests
+// ---------------------------------------------------------------------------
+
+// TestScanAllRegistries_EmptyTableSkipsWalk proves the peek short-circuits an
+// empty registry table without issuing a second GetRegistries call -- mirrors
+// TestScanRegistriesByName_EmptyTableSkipsWalk for the unfiltered walk.
+func TestScanAllRegistries_EmptyTableSkipsWalk(t *testing.T) {
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
+
+	all, truncated, err := scanAllRegistries(ctx, m, testLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if truncated {
+		t.Error("expected truncated=false for a definitively empty table")
+	}
+	if len(all) != 0 {
+		t.Errorf("len(all) = %d, want 0", len(all))
+	}
+	if m.registriesCallCount != 1 {
+		t.Errorf("registriesCallCount = %d, want 1 (peek only, walk skipped)", m.registriesCallCount)
+	}
+}
+
+// TestScanAllRegistries_PagesUntilShortPage proves the unfiltered walk crosses
+// multiple chain pages and terminates naturally on an empty NextKey, returning
+// all rows without spurious truncation -- mirrors
+// TestScanRegistriesByName_PagesUntilShortPage.
+func TestScanAllRegistries_PagesUntilShortPage(t *testing.T) {
+	full := make([]anchor.Registry, nameScanPageSize)
+	for i := range full {
+		full[i] = anchor.Registry{ID: uint64(i + 1), Name: "filler"}
+	}
+	pages := []*anchor.GetRegistriesResponse{
+		// Peek: highest ID=201 reconciles exactly with the 201 rows the walk
+		// will scan (200 filler + 1 last), so the peek doesn't flag truncation.
+		{Registries: []anchor.Registry{{ID: 201}}},
+		// Full page with NextKey set -- walk must advance the cursor.
+		{Registries: full, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		// Short terminal page with no NextKey -- walk ends here.
+		{Registries: []anchor.Registry{{ID: 201, Name: "last-registry"}}},
+	}
+	m := &mockAnchor{registriesPages: pages}
+
+	all, truncated, err := scanAllRegistries(ctx, m, testLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if truncated {
+		t.Error("expected truncated=false; walk ended naturally and reconciled with the peek")
+	}
+	if len(all) != nameScanPageSize+1 {
+		t.Errorf("len(all) = %d, want %d", len(all), nameScanPageSize+1)
+	}
+	if m.registriesCallCount != 3 {
+		t.Errorf("registriesCallCount = %d, want 3 (peek, one full page, one short page)", m.registriesCallCount)
+	}
+}
+
+// TestScanAllRegistries_IDGapTruncation proves that when the walk exhausts all
+// pages (empty NextKey signals end of table) but the row count is lower than
+// the highest known registry ID, the result is reported as truncated.
+// Concurrent writes or non-contiguous IDs can cause the scan to miss entries;
+// callers must not treat a truncated result as complete.
+func TestScanAllRegistries_IDGapTruncation(t *testing.T) {
+	pages := []*anchor.GetRegistriesResponse{
+		// Peek: highest known ID=5.
+		{Registries: []anchor.Registry{{ID: 5}}},
+		// Single walk page -- only 3 rows, no NextKey (end of table as seen by
+		// the precompile). totalScanned(3) < highestID(5) triggers ID-gap path.
+		{Registries: []anchor.Registry{
+			{ID: 1, Name: "reg-one"},
+			{ID: 2, Name: "reg-two"},
+			{ID: 4, Name: "reg-four"},
+		}},
+	}
+	m := &mockAnchor{registriesPages: pages}
+
+	all, truncated, err := scanAllRegistries(ctx, m, testLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !truncated {
+		t.Error("expected truncated=true; scanned 3 rows but highest known ID was 5")
+	}
+	if len(all) != 3 {
+		t.Errorf("len(all) = %d, want 3", len(all))
+	}
+	if m.registriesCallCount != 2 {
+		t.Errorf("registriesCallCount = %d, want 2 (peek + one walk page)", m.registriesCallCount)
 	}
 }
 
