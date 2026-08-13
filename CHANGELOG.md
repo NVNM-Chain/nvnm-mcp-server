@@ -82,6 +82,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the supported way to fetch one registry by ID.
 
 ### Fixed
+- **On-chain role denials no longer arrive as `upstream operation failed`.**
+  `anchor_prepare_add_record` and `anchor_prepare_update_record_status`
+  collapsed the precompile's `unauthorized` revert to the generic upstream
+  message, while `grant_role`/`revoke_role` returned a curated one for the
+  same class of failure -- so whether a caller learned *why* a write was
+  refused depended on which tool refused it. The revert classifier now
+  carries a sentinel per curated reason, and `unauthorized` maps to
+  `ErrPermissionDenied` so the reason survives `SafeForClient`. The message
+  states that the check is chain-side, distinguishing it from this server's
+  own API-key authorization.
 
 - **`anchor_get_registries` inline doc corrections**: the `limit` field's
   schema description no longer claims chain-side pages are capped at 200 rows
