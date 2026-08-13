@@ -92,10 +92,24 @@ metrics:
 ## doesn't survive between `make` recipe lines. jq is used for pretty-printing
 ## when available; falls back to raw stdout.
 ##
+## The tools/call response always comes back as a Streamable HTTP
+## text/event-stream body (the handler isn't configured with JSONResponse,
+## so even a single-message reply is SSE-framed), so the recipe strips any
+## "event:"/"data:" SSE framing before handing the payload to jq.
+##
 ## Usage:
 ##   make mcp-probe TOOL=evm_get_chain_id ARGS='{}'
 ##   make mcp-probe TOOL=nvnm_overview ARGS='{}'
 ##   make mcp-probe TOOL=evm_get_balance ARGS='{"address":"0x..."}'
+##   MCP_API_KEY=<raw key> make mcp-probe TOOL=evm_get_chain_id ARGS='{}'
+
+# Bearer token attached to every mcp-probe request when set (falls back to
+# an already-exported MCP_API_KEY -- the same variable the single-throwaway-
+# key setup in docs/TESTING.md § 2 uses). Empty by default: the HTTP
+# transport is fail-closed at boot, but MCP_KEYLESS_READS=true still allows
+# unauthenticated requests through, so mcp-probe must be able to omit the
+# header entirely rather than send a hollow "Bearer ".
+MCP_API_KEY ?=
 
 mcp-probe:
 ifndef TOOL
@@ -103,9 +117,11 @@ ifndef TOOL
 endif
 	@ARGS_VAL='$(if $(ARGS),$(ARGS),{})'; \
 	BASE_URL="http://localhost$(MCP_HTTP_ADDR)/"; \
+	set --; \
+	if [ -n "$(MCP_API_KEY)" ]; then set -- -H "Authorization: Bearer $(MCP_API_KEY)"; fi; \
 	echo "POST $$BASE_URL  (initialize)" >&2; \
 	INIT_HEADERS=$$(mktemp); \
-	INIT_BODY=$$(curl -sS -D "$$INIT_HEADERS" -X POST "$$BASE_URL" \
+	INIT_BODY=$$(curl -sS -D "$$INIT_HEADERS" -X POST "$$BASE_URL" "$$@" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"make-mcp-probe","version":"1.0.0"}}}'); \
@@ -114,20 +130,26 @@ endif
 	if [ -z "$$SESSION_ID" ]; then \
 		echo "ERROR: server did not return Mcp-Session-Id header. Is the server running on $(MCP_HTTP_ADDR)?" >&2; \
 		echo "initialize response: $$INIT_BODY" >&2; \
+		case "$$INIT_BODY" in \
+			*"missing Authorization"*|*"invalid"*[Tt]oken*|*[Uu]nauthorized*) \
+				echo "HINT: pass a key -- MCP_API_KEY=<raw key from make key-create> make mcp-probe ..." >&2 ;; \
+		esac; \
 		exit 1; \
 	fi; \
 	echo "  session: $$SESSION_ID" >&2; \
-	curl -sS -X POST "$$BASE_URL" \
+	curl -sS -X POST "$$BASE_URL" "$$@" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION_ID" \
 		-d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' > /dev/null; \
 	echo "tools/call $(TOOL) $$ARGS_VAL" >&2; \
-	RESP=$$(curl -sS -X POST "$$BASE_URL" \
+	RESP=$$(curl -sS -X POST "$$BASE_URL" "$$@" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION_ID" \
 		-d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":2,\"params\":{\"name\":\"$(TOOL)\",\"arguments\":$$ARGS_VAL}}"); \
+	SSE_BODY=$$(printf '%s\n' "$$RESP" | sed -n 's/^data:[[:space:]]*//p'); \
+	if [ -n "$$SSE_BODY" ]; then RESP="$$SSE_BODY"; fi; \
 	if command -v jq >/dev/null 2>&1; then \
 		echo "$$RESP" | jq .; \
 	else \
@@ -148,6 +170,12 @@ mcp-probe-help:
 	@echo ""
 	@echo "Listening address comes from MCP_HTTP_ADDR (default :8180)."
 	@echo "Override via env: MCP_HTTP_ADDR=:9999 make mcp-probe TOOL=evm_get_chain_id"
+	@echo ""
+	@echo "Auth: the HTTP transport is fail-closed by default, so most servers need a"
+	@echo "bearer token. Set MCP_API_KEY (env or inline) to the raw key from"
+	@echo "'make key-create' or the single-throwaway-key setup in docs/TESTING.md § 2:"
+	@echo "  MCP_API_KEY=<raw key> make mcp-probe TOOL=evm_get_chain_id ARGS='{}'"
+	@echo "Omit it only against a server running with MCP_KEYLESS_READS=true."
 
 seed-test-data:
 	$(GO) run ./cmd/seed-test-data
