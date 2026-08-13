@@ -1,304 +1,512 @@
-# Testing
+# End-to-End Testing — Local Environment Setup
 
-This document describes the testing strategy and framework for the NVNM Chain MCP Server. Current test results live in CI, not here.
+This document covers **manual end-to-end testing**: standing a real server up
+on your machine and driving it the way a real MCP client will. It is the
+companion to [`TESTING_UNIT.md`](TESTING_UNIT.md), which owns the automated
+suite (unit, golden, integration, in-process MCP E2E, k6, Docker smoke) and
+the CI coverage gate.
 
-## Overview
+Use this document when you need to answer "does a Claude-class client actually
+connect and call tools against my build?" — a question the automated suite
+deliberately does not answer, because client behavior is black-box (see
+`SECURITY_AUDIT.md` § *Update 2026-06-11*).
 
-The project uses a layered testing approach: unit tests with mocks for fast feedback, golden tests for response shape stability, integration tests against the live NVNM testnet, HTTP end-to-end tests through the MCP protocol layer, k6 load tests for performance, and Docker smoke tests for deployment verification.
+## Three loops
 
-The suite runs via `make test`; CI enforces green on every PR. Exact test counts aren't tracked here — they drift every release. Run `go test ./...` (or check the CI job output) for current numbers.
+E2E here means three progressively wider loops. Each is independently useful;
+run the narrowest one that covers what you changed.
 
-CI additionally enforces a **minimum total statement coverage of 80%** on every PR (`scripts/check_coverage.sh`, run after the test step). Reproduce the exact gate locally with `make coverage-check`; the threshold lives in the Makefile (`COVERAGE_THRESHOLD`) and the CI workflow together.
+| Loop | What it exercises | Needs |
+|---|---|---|
+| 1. Loopback | Real binary, real HTTP transport, real middleware chain, real chain RPC — driven by `curl` / `make mcp-probe` | Nothing beyond the repo |
+| 2. Local client | Loop 1 + a real MCP client (Claude Code, Claude Desktop) over stdio or HTTP to `localhost` | A Claude client |
+| 3. Remote connector | Loop 2 + public HTTPS ingress, Origin allowlist, bearer auth as a hosted deployment sees it | A tunnel (`cloudflared` / `ngrok`) |
 
-## Running Tests
+Loops 1 and 2 are the everyday path. Loop 3 is for changes to auth, the
+Origin/CORS guards, the well-known handling, or anything that only manifests
+when the client is not on your machine.
 
-### Quick Reference
+---
 
-```bash
-make test              # All unit tests (no integration)
-make test-unit         # Unit tests with -short flag
-make test-integration  # Integration tests against live testnet (requires network)
-make test-coverage     # Unit tests with race detector + HTML coverage report
-make coverage-check    # test-coverage + enforce the 80% total-coverage gate (same check CI runs)
-make test-verbose      # Verbose output, no caching
-make test-load         # k6 load tests (requires running server + k6 installed)
-make docker-smoke      # Build Docker image, start container, verify health + MCP
-make seed-test-data    # Create a test registry with phoney records on-chain
+## 1. Prerequisites
+
+| Loop | Requirement |
+|---|---|
+| All | Go 1.26+, network access to the configured EVM RPC (`https://evm.testnet.nvnmchain.io` by default) |
+| All | `curl`; `jq` optional (`make mcp-probe` pretty-prints with it when present) |
+| 2 | Claude Code CLI (`claude`) and/or Claude Desktop |
+| 3 | A tunnel that terminates TLS — `cloudflared` or `ngrok` |
+| Optional | Docker + Compose v2 (§ 3b stack, container smoke), `k6` (load), Postgres 16 (audit/key-store surfaces) |
+
+---
+
+## 2. Configure the environment
+
+```sh
+cp .env.example .env
 ```
 
-### Prerequisites
-
-| Command | Prerequisite | Install |
-|---------|-------------|---------|
-| `make test` | Go 1.26+ | -- |
-| `make test-integration` | Network access to `https://evm.testnet.nvnmchain.io` | -- |
-| `make test-load` | k6, running server on `:8080` | `brew install k6` |
-| `make docker-smoke` | Docker Desktop | -- |
-| `make seed-test-data` | `.chain_credentials.txt` in project root | See below |
-| Postgres-backed `internal/mcp` tests | `NVNM_TEST_PG_DSN` env var | See below |
-
-**Credentials file format** (`.chain_credentials.txt`, git-ignored):
-
-```
-Address: 0x...
-PrivateKey: 0x...
-```
-
-Used by integration write tests and `seed-test-data`. Tests skip gracefully if the file is missing.
-
-**Postgres-backed tests.** A subset of `internal/mcp` tests exercise the audit log, signer-quota, signer-blacklist, write-audit, and migration surface against a real Postgres database, gated on `NVNM_TEST_PG_DSN` (e.g. `postgres://.../nvnm?sslmode=disable`). They call `t.Skip` cleanly when the variable is unset, so `make test` passes without it — set `NVNM_TEST_PG_DSN` to actually exercise that surface.
-
-## Test Layers
-
-Note: a subset of `internal/mcp` unit tests are Postgres-backed and gated on `NVNM_TEST_PG_DSN` (see Prerequisites above); they skip cleanly when it's unset.
-
-### 1. Unit Tests (no network, no build tags)
-
-Fast, deterministic tests using mocks and stubs. Run with `make test`.
-
-- **`internal/mcp`** — MCP tool dispatch (EVM + anchor read/write handlers, onboarding tools), HTTP/E2E protocol server, API key auth, RBAC/default-deny, admin key-management API + hot reload, `ManagedKeyStore` CRUD, write-audit + admin audit logging, signer quota/blacklist, Postgres-backed store and migrations, fail-loud legacy-config migration guards.
-- **`internal/auth`** — API-key hashing/validation (including legacy-hash back-compat), FusionAuth JWT/JWKS validation (issuer/audience/expiry/role extraction, app-scoped roles), claims propagation via context.
-- **`internal/config`** — environment variable loading, defaults, validation errors, resilience config, fail-loud migration guard for removed legacy settings.
-- **`internal/errors`** — sentinel error distinctness and classification helpers (`IsInputError`, `IsTransientError`, `IsNotFound`).
-- **`internal/evm`** — tracing client delegation, resilient wrapper (retry/backoff, circuit breaker, rate limiting, non-retry on send).
-- **`internal/anchor`** — client construction/ABI loading, mock-based query methods, prepare-transaction validation and gas buffering.
-- **`internal/telemetry`** — `/healthz` and `/readyz` endpoints, MCP middleware, request ID and tool-name extraction, metric instruments.
-- **`internal/logging`** — logger creation, JSON output, level filtering, dual-handler fanout, address/URL/data redaction.
-
-See each package's `*_test.go` files for the current set of test functions and cases; this list intentionally omits per-file counts since they drift every release.
-
-**Mock types** used across unit tests:
-
-- `mockEVM` (`internal/mcp/tools_test.go`) -- full `evm.Client` implementation with configurable return values
-- `mockAnchor` (`internal/mcp/tools_test.go`) -- full `anchor.Client` implementation
-- `stubClient` (`internal/evm/tracing_test.go`) -- minimal `evm.Client` stub
-- `failingClient` (`internal/evm/resilient_test.go`) -- `evm.Client` that fails N times then succeeds
-- `mockEVMClient` (`internal/anchor/client_test.go`) -- `evm.Client` for anchor-layer tests
-- `mockChecker` (`internal/telemetry/health_test.go`) -- readiness probe mock
-- `bearerTransport` (`internal/mcp/server_e2e_test.go`) -- `http.RoundTripper` that injects `Authorization: Bearer` headers for API key auth E2E tests
-
-### 2. Golden Tests (response shape stability)
-
-Golden tests serialize a struct to JSON and compare against a checked-in `.golden.json` file. If the serialized output changes, the test fails -- protecting API response shapes from accidental drift.
-
-**EVM golden files** (`internal/evm/testdata/`):
-
-| File | Type |
-|------|------|
-| `chain_info.golden.json` | `ChainInfo` |
-| `normalized_block.golden.json` | `NormalizedBlock` |
-| `normalized_transaction.golden.json` | `NormalizedTransaction` |
-| `normalized_receipt.golden.json` | `NormalizedReceipt` |
-| `normalized_balance.golden.json` | `NormalizedBalance` |
-| `code_result.golden.json` | `CodeResult` |
-
-**Anchor golden files** (`internal/anchor/testdata/`):
-
-| File | Type |
-|------|------|
-| `registry.golden.json` | `Registry` |
-| `record.golden.json` | `Record` |
-| `get_registries_response.golden.json` | `GetRegistriesResponse` |
-| `get_records_response.golden.json` | `GetRecordsResponse` |
-| `empty_records_response.golden.json` | `GetRecordsResponse` (empty) |
-| `precompile_info.golden.json` | `PrecompileInfo` |
-| `unsigned_transaction.golden.json` | `UnsignedTransaction` |
-
-To update golden files after an intentional change, delete the `.golden.json` file and re-run the test -- it will regenerate.
-
-### 3. Integration Tests (live testnet)
-
-Integration tests connect to the NVNM Chain testnet EVM RPC at `https://evm.testnet.nvnmchain.io` (chain ID 787111). They are excluded from default `go test ./...` by the `//go:build integration` build tag.
-
-Run with: `make test-integration` or `go test -tags integration ./...`
-
-| Package | Test file | Tests | What's verified |
-|---------|----------|-------|-----------------|
-| `internal/evm` | `client_integration_test.go` | 8 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt` |
-| `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
-| `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
-| `internal/evm` | `call_integration_test.go` | 2 | `CallContract` against precompile (empty data error path), non-existent address |
-| `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID), `GetRecords` |
-| `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
-| `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
-| `internal/mcp` | `wallet_status_integration_test.go` | 1 | `eth_account` round-trip: `wallet_status` before → `PrepareAddRegistry` → sign → broadcast → receipt → `wallet_status` reflects the new nonce |
-
-Write and round-trip integration tests require testnet credentials --
-`.chain_credentials.txt` (`write_integration_test.go`,
-`wallet_status_integration_test.go`) or `NVNM_TEST_PRIVATE_KEY` from
-`.env` (`prepare_integration_test.go`) -- and skip if absent.
-
-The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
-
-Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-test-data` resolves `mcp-test-data` to its `registry_id` by scanning `GetRegistries` for an exact name match client-side (there is no on-chain by-name lookup); it reuses the existing registry if that scan finds one, otherwise it creates a new one. Every downstream call in the script, and in the anchor read tests, then operates on that numeric ID.
-
-**`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile returns `pagination.total = 0` for `registries` and `records` queries even though the client sets `countTotal: true`. The registry/record rows themselves decode correctly; only the count is unpopulated. The integration tests therefore assert on the returned slice length, not on `pagination.total`. MCP tool responses surface whatever the chain returns for `total`, so a downstream consumer should treat it as best-effort, not authoritative, on this network.
-
-### 4. MCP End-to-End HTTP Tests
-
-These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write path, API key auth, stateless behavior).
-
-**Basic E2E** (`server_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestE2E_ListTools_Returns23` | Server registers exactly 23 tools (5 onboarding + 8 EVM reads + 4 anchor reads + 5 anchor writes + 1 relay write) |
-| `TestE2E_ListTools_ContainsExpectedNames` | Every expected tool name is present |
-| `TestE2E_CallTool_ChainID` | `evm_get_chain_id` returns non-error structured content |
-| `TestE2E_CallTool_AnchorInfo` | `anchor_info` returns non-error structured content |
-| `TestE2E_CallTool_InvalidAddress` | `evm_get_balance` with bad address returns `IsError=true` |
-| `TestE2E_CallTool_MissingRegistryID` | `anchor_get_registry` with no args returns `IsError=true` |
-
-**Write path E2E** (`server_e2e_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestE2E_SendRawTx_DirectBroadcast_NoElicitation` | Writer key broadcasts directly; no elicitation round-trip; RPC result returned |
-
-**API key authentication E2E** (`server_e2e_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestE2E_Auth_ValidKey_ToolCallSucceeds` | Valid Bearer token grants access |
-| `TestE2E_Auth_InvalidKey_ConnectionFails` | Wrong Bearer token rejected |
-| `TestE2E_Auth_MissingKey_ConnectionFails` | Missing Authorization header rejected |
-| `TestE2E_Auth_DisabledKey_ConnectionFails` | Disabled key rejected (while active keys exist) |
-| `TestE2E_Auth_NoKeysConfigured_NoAuthRequired` | No keys configured = auth bypassed |
-
-**RBAC / default-deny E2E** (`server_e2e_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestE2E_RBAC_ReaderCannotCallWriteTool` | Key with `reader` role is denied on a write tool (`evm_send_raw_transaction`) |
-| `TestE2E_RBAC_NoRolesDeniedAll` | Authenticated key with no roles is denied all tools (default-deny: no roles = no access) |
-| `TestE2E_RBAC_GrantRoleRequiresAdmin` | Key with `writer` role is denied `anchor_prepare_grant_role` (requires `admin`) |
-
-**Stateless handler E2E** (`server_e2e_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestE2E_StatelessHandler_ServesUnknownSession` | Stateless handler (`Stateless: true`) serves a request with an unknown session ID without error, confirming no per-pod session map is required |
-
-**Fail-loud migration E2E** (`server_e2e_test.go` / `config_test.go` / `managed_keys_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestLoad_RejectsLegacyWriteApprovalDefault` | `WRITE_APPROVAL_DEFAULT` in environment causes startup failure with `ErrLegacyWriteApproval` |
-| `TestLoadKeysFile_RejectsLegacyWriteApproval` | Key store entry carrying `write_approval` field causes load failure with `ErrLegacyKeyWriteApproval` |
-
-This layer validates: HTTP transport, SSE/JSON response framing, MCP session management, JSON-RPC 2.0 envelope, tool registration, error propagation, Bearer token authentication with `AuthMiddleware` (API key and FusionAuth providers), stateless handler behavior, fail-loud migration guards, and client identity propagation.
-
-**Admin key management E2E** (`admin_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestAdmin_Auth_MissingToken` | Unauthenticated request returns 401 |
-| `TestAdmin_Auth_InvalidToken` | Wrong admin key returns 403 |
-| `TestAdmin_Auth_ValidToken` | Correct admin key grants access |
-| `TestAdmin_Create_Success` | Key creation returns raw key, correct metadata |
-| `TestAdmin_Create_Duplicate` | Duplicate client ID returns 409 |
-| `TestAdmin_Create_MissingClientID` | Missing client_id returns 400 |
-| `TestAdmin_List_Empty` | Empty store returns `[]` |
-| `TestAdmin_List_WithKeys` | Listed keys are redacted (no raw keys) |
-| `TestAdmin_Update_DisableAndEnable` | Disable/enable via PATCH affects Lookup |
-| `TestAdmin_Update_NotFound` | PATCH for unknown client returns 404 |
-| `TestAdmin_Update_EmptyBody` | PATCH with no fields returns 400 |
-| `TestAdmin_Delete_Success` | DELETE removes key |
-| `TestAdmin_Delete_NotFound` | DELETE for unknown client returns 404 |
-| `TestAdmin_FullLifecycle` | Create → list → disable → enable → delete (immediate effect at each step) |
-| `TestAdmin_HotReload_CreatedKeyImmediatelyUsable` | Key created via admin API is immediately findable by `ManagedKeyStore.Lookup` |
-| `TestAdmin_HotReload_DisabledKeyImmediatelyRejected` | Key disabled via admin API is immediately nil on `ManagedKeyStore.Lookup` |
-
-**ManagedKeyStore unit tests** (`managed_keys_test.go`):
-
-| Test | What's verified |
-|------|-----------------|
-| `TestManagedKeyStore_CreateAndLookup` | Create returns key, Lookup finds it |
-| `TestManagedKeyStore_CreateDuplicate` | Duplicate client ID returns error |
-| `TestManagedKeyStore_List` | List returns summaries with redacted key prefixes |
-| `TestManagedKeyStore_UpdateEnabled` | Disable → Lookup=nil, enable → Lookup=entry |
-| `TestManagedKeyStore_UpdateMissing` | Update for unknown client returns error |
-| `TestManagedKeyStore_Delete` | Delete removes from store and file |
-| `TestManagedKeyStore_DeleteMissing` | Delete for unknown client returns error |
-| `TestManagedKeyStore_PersistenceAcrossReloads` | Key survives NewManagedKeyStore from same file |
-| `TestManagedKeyStore_Counters` | ActiveCount/TotalCount track enable/disable |
-| `TestManagedKeyStore_EmptyOnNewFile` | New file → Empty()=true, TotalCount=0 |
-| `TestManagedKeyStore_FilePermissions` | Keys file written with 0600 permissions |
-
-### 5. k6 Load Tests
-
-The k6 script (`tests/load/k6_mcp_http.js`) exercises the MCP Streamable HTTP endpoint with three scenarios:
-
-| Scenario | Executor | VUs | Duration | Tools exercised |
-|----------|----------|-----|----------|-----------------|
-| `constant_reads` | constant-vus | 10 | 2 min | `evm_get_chain_id` |
-| `burst_reads` | ramping-vus | 0 → 50 → 0 | 3 min | `evm_get_chain_id` |
-| `mixed_workload` | constant-vus | 15 | 2 min | `evm_get_chain_id`, `evm_get_block`, `anchor_get_registries` |
-
-**Thresholds:**
-
-- `http_req_duration`: p(95) < 2000ms
-- `http_req_failed`: rate < 1%
-
-See `tests/load/README.md` for setup and usage details.
-
-### 6. Docker Smoke Test
-
-`make docker-smoke` performs an automated build-run-verify cycle:
-
-1. Builds the Docker image (`make docker-build`)
-2. Starts a container with testnet environment variables on ports 18080/19090
-3. Verifies `/healthz` returns `{"status":"ok"}`
-4. Verifies `/readyz` returns `{"status":"ready"}` with `evm_rpc: ok` and `abi: loaded`
-5. Sends an MCP `initialize` request and verifies HTTP 200
-6. Stops the container
-
-### 7. Seed Test Data
-
-`make seed-test-data` runs `cmd/seed-test-data/main.go`, which:
-
-1. Loads credentials from `.chain_credentials.txt`
-2. Creates a registry named `mcp-test-data` (skips if it already exists)
-3. Adds 3 records with phoney checksums, URIs, and metadata
-4. Verifies all data is readable on-chain
-
-This provides a known dataset for integration tests and manual testing.
-
-## Test Results
-
-Current results live in CI — see the GitHub Actions run for this branch/PR for pass/fail status, coverage, and timing. This document doesn't hand-maintain a results snapshot because it goes stale every release.
-
-## Test Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Test Layers                                  │
-├─────────────┬───────────────┬───────────────────────────────────┤
-│  Unit Tests │ Golden Tests  │  MCP E2E HTTP Tests               │
-│  (mocks)    │ (JSON shapes) │  (httptest + SDK client)          │
-├─────────────┴───────────────┴───────────────────────────────────┤
-│              Integration Tests (live testnet)                   │
-│              build tag: integration                             │
-├─────────────────────────────────────────────────────────────────┤
-│              k6 Load Tests (HTTP transport)                     │
-├─────────────────────────────────────────────────────────────────┤
-│              Docker Smoke Test (container lifecycle)            │
-│              build → start → healthz → readyz → stop           │
-└─────────────────────────────────────────────────────────────────┘
+Fill in at minimum:
+
+| Variable | Local value |
+|---|---|
+| `NVNM_EVM_RPC_URL` | `https://evm.testnet.nvnmchain.io` |
+| `NVNM_CHAIN_ID` | `787111` |
+| `NVNM_CHAIN_ENVIRONMENT` | `testnet` |
+| `ANCHOR_ABI_PATH` | `abi/anchoring.json` (absolute path when launched by a client — see § 5) |
+| `MCP_TRANSPORT` | `http` for loops 1 and 3; `stdio` for the stdio client path |
+| `MCP_HTTP_ADDR` | `:8180` (the `.env.example` / Makefile default) |
+| `METRICS_ADDR` | `:9190` |
+
+The `NVNM_*` prefix is the only chain-config family the server reads. Legacy
+`INVENIAM_*` variables are **hard-rejected at startup** — see
+[`RUNBOOK.md`](RUNBOOK.md) `#env-var-migration`. `.env` is gitignored; keep it
+that way.
+
+### Authentication is mandatory on HTTP
+
+The HTTP transport **fails closed at boot** with `ErrHTTPAuthRequired` when
+neither `MCP_API_KEYS_FILE` (holding at least one *enabled* key) nor
+`MCP_API_KEY` is configured. This holds even with `MCP_KEYLESS_READS=true`:
+keyless reads relax the *request* path, not the boot-time requirement that a
+validator exists.
+
+Pick one:
+
+**Multi-key store (matches production):**
+
+```sh
+make key-create NAME=local-dev ROLES=reader,writer
 ```
 
-## Adding New Tests
+The raw key is printed **once** — copy it now. It is stored hashed in
+`.mcp-keys.json` (gitignored, mode `0600`). `make key-list` shows status,
+`make key-disable NAME=local-dev` revokes it.
 
-**For a new MCP tool**: Add handler tests to `internal/mcp/tools_test.go` using the existing `mockEVM`/`mockAnchor` types. Add the tool name to `TestE2E_ListTools_ContainsExpectedNames` in `server_test.go`.
+**Single throwaway key (fastest):**
 
-**For write path or auth features**: Add E2E tests to `internal/mcp/server_e2e_test.go`. Use `startTestServerWithConfig` for write-path tests. Use `startAuthTestServer` for auth tests (configurable `KeyEntry` list and Bearer token via `bearerTransport`). Use `buildSignedTxHex` to generate real signed transactions for write path tests.
+```sh
+export MCP_API_KEYS_FILE=""            # the file path wins when both are set
+export MCP_API_KEY=local-e2e-throwaway-key
+export MCP_API_KEY_ROLES=reader,writer # REQUIRED; boot fails with ErrMissingAPIKeyRoles without it
+```
 
-**For FusionAuth-related code**: Add unit tests to `internal/auth/auth_test.go` for JWT/JWKS validation (issuer matching, audience checks, expiry, role extraction, app-scoped roles, signature failures). The existing tests use `httptest.NewServer` to serve a JWKS endpoint and `golang-jwt/jwt/v5` to construct test tokens with controlled keys.
+Authorization is default-deny: a key authorizes only what its roles permit, and
+a key with no roles authorizes nothing.
 
-**For admin key management**: Add tests to `internal/mcp/admin_test.go` for API endpoint tests (use `startAdminTestServer` and `adminRequest` helpers). Add tests to `internal/mcp/managed_keys_test.go` for `ManagedKeyStore` CRUD operations (use `tempKeysFile` helper for isolated test files).
+### stdio needs no auth
 
-**For a new EVM client method**: Add a method to `stubClient` in `tracing_test.go` and `failingClient` in `resilient_test.go`. Add a golden fixture if the method returns a new type. Add integration test in a `_integration_test.go` file with `//go:build integration`.
+Under `--transport stdio` the transport itself is the trust boundary (a local
+subprocess the client owns), so no validator is required and none of the HTTP
+middleware runs.
 
-**For a new anchor method**: Add the method to `mockAnchor` in `tools_test.go` and `mockEVMClient` in `anchor/client_test.go`. Add golden fixture for new types.
+---
 
-**Updating golden files**: Delete the `.golden.json` file, run the test, and it will regenerate. Review the diff before committing.
+## 3. Start the server
+
+```sh
+make run-local     # HTTP transport; sources .env; ports from MCP_HTTP_ADDR / METRICS_ADDR
+make run           # stdio transport; reads config from the exported environment (does NOT source .env)
+```
+
+Verify liveness and readiness (the metrics port, not the MCP port):
+
+```sh
+make healthz       # {"status":"ok","version":"dev"}
+make readyz        # {"status":"ready","checks":{"abi":"loaded","evm_rpc":"ok"}}
+```
+
+`version: dev` is correct for a `make`-built binary — the real version is
+injected at release time via `-ldflags`. `abi: loaded` failing means
+`ANCHOR_ABI_PATH` is wrong; `evm_rpc` failing means the RPC URL is unreachable.
+
+### 3b. Alternative: start via Docker Compose
+
+[`docker-compose.yml`](../docker-compose.yml) runs the same binary in a
+container, fronted by a `caddy` service that terminates TLS on
+`https://localhost:8443` with a local self-signed CA (the MCP port is not
+published on the host directly — see the header comment in
+`docker-compose.yml` for why). This is the closer analog of a hosted
+deployment and is useful when you want TLS in the loop without standing up a
+tunnel (Loop 3).
+
+```sh
+cp .env.example .env                              # if not already done
+make key-create NAME=local-dev ROLES=reader,writer # compose bind-mounts .mcp-keys.json
+make compose-up                                    # build + start; prints the endpoints
+```
+
+`make compose-up` fails fast with a clear error if `.env` or `.mcp-keys.json`
+is missing — the latter matters because Docker will otherwise create the
+bind-mount path as an empty **directory**, not a file.
+
+```sh
+curl -sk https://localhost:8443/.well-known/oauth-protected-resource -o /dev/null -w "%{http_code}\n"  # 404
+curl -sSf http://localhost:9190/healthz | python3 -m json.tool
+```
+
+`-k` (or trusting Caddy's root CA — see § 5d) is required against `:8443`
+since the cert is self-signed. `make compose-logs` follows both containers;
+`make compose-down` tears the stack down. After `make key-create` /
+`make key-disable` while the stack is already up, run `make compose-restart`
+so the server re-reads `.mcp-keys.json`.
+
+The optional Postgres profile (`KEY_STORE_BACKEND=postgres`) is started with
+`docker compose --profile postgres up --build` — see the `docker-compose.yml`
+header comment for the accompanying `.env` variables.
+
+---
+
+## 4. Loop 1 — drive the server without an MCP client
+
+### `make mcp-probe`
+
+```sh
+make mcp-probe TOOL=evm_get_chain_id ARGS='{}'
+make mcp-probe TOOL=nvnm_overview ARGS='{}'
+make mcp-probe TOOL=evm_get_balance ARGS='{"address":"0x0000000000000000000000000000000000000000"}'
+make mcp-probe-help
+```
+
+The target inlines the `initialize` → `notifications/initialized` →
+`tools/call` handshake. It reads `MCP_HTTP_ADDR` (default `:8180`); override it
+inline for a server on another port.
+
+### Raw curl
+
+The handler runs `Stateless: true`, so it mints no session map and a single
+POST is sufficient — no `Mcp-Session-Id` round-trip required (the header is
+still returned on `initialize` for spec-compliant clients):
+
+```sh
+curl -sS -X POST http://localhost:8180/ \
+  -H "Authorization: Bearer $MCP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,
+       "params":{"name":"evm_get_chain_id","arguments":{}}}'
+```
+
+Responses are `text/event-stream` framed (`event: message` / `data: {...}`).
+Both `Accept` values are required, and `Content-Type: application/json` is
+enforced. `GET` returns `405` with `Allow: POST` under the stateless handler —
+that is expected, not a defect.
+
+### MCP-authorization preflight
+
+These two behaviors are exactly what make a Claude-class client report
+"Needs authentication" when they regress. Check them before blaming the client:
+
+```sh
+# OAuth discovery paths must 404 ("no OAuth here; use configured credentials")
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  http://localhost:8180/.well-known/oauth-protected-resource       # 404
+
+# Unauthenticated requests must carry a Bearer challenge
+curl -sS -i -X POST http://localhost:8180/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1,"params":{}}'  # 401 + WWW-Authenticate: Bearer
+```
+
+Regression coverage lives in `internal/mcp/wellknown_test.go` and
+`internal/mcp/auth_test.go`; this is the manual confirmation that the deployed
+binary behaves the same.
+
+### Origin guard
+
+With no `NVNM_ALLOWED_ORIGINS` set, only loopback origins are accepted (any
+port). Requests with **no** `Origin` header — `curl`, CLI clients,
+server-to-server — pass through untouched.
+
+```sh
+# Browser-style origin, default allowlist:
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8180/ \
+  -H "Origin: https://claude.ai" -H "Authorization: Bearer $MCP_API_KEY" \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1,"params":{}}'   # 403
+```
+
+That `403` is the guard working. Loop 3 covers allowlisting the origin.
+
+---
+
+## 5. Loop 2 — connect a local Claude client
+
+### 5a. Claude Code over stdio
+
+The client launches the binary, so the chain config must reach the child
+process and **all paths must be absolute** (the working directory is not
+guaranteed):
+
+```sh
+claude mcp add --transport stdio \
+  --env NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
+  --env NVNM_CHAIN_ID=787111 \
+  --env NVNM_CHAIN_ENVIRONMENT=testnet \
+  --env ANCHOR_ABI_PATH=/abs/path/to/nvnm-mcp-server/abi/anchoring.json \
+  nvnm-local -- /abs/path/to/nvnm-mcp-server/bin/nvnm-mcp-server --transport stdio
+```
+
+Everything after `--` is the launch command, untouched. Build the binary first
+(`make build`).
+
+### 5b. Claude Code over HTTP
+
+Point the client at the already-running `make run-local` server:
+
+```sh
+claude mcp add --transport http nvnm-local http://localhost:8180/ \
+  --header "Authorization: Bearer <raw key from make key-create>"
+```
+
+Claude Code sends no browser `Origin`, so the default loopback allowlist is
+sufficient. Do not use `--scope project` for this: the header holds a
+credential and `.mcp.json` is committed.
+
+### 5c. Claude Desktop over stdio
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+and restart the app:
+
+```json
+{
+  "mcpServers": {
+    "nvnm-local": {
+      "command": "/abs/path/to/nvnm-mcp-server/bin/nvnm-mcp-server",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "NVNM_EVM_RPC_URL": "https://evm.testnet.nvnmchain.io",
+        "NVNM_CHAIN_ID": "787111",
+        "NVNM_CHAIN_ENVIRONMENT": "testnet",
+        "ANCHOR_ABI_PATH": "/abs/path/to/nvnm-mcp-server/abi/anchoring.json"
+      }
+    }
+  }
+}
+```
+
+### 5d. Claude Code against the Docker Compose stack (HTTPS)
+
+The compose stack (§ 3b) fronts the server with Caddy's self-signed cert, so a
+real client needs to trust it before `https://localhost:8443` will connect
+(unlike `curl -k`, `claude mcp add` has no insecure-TLS flag). Export and
+trust Caddy's local CA once per machine:
+
+```sh
+docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-local-root.crt
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain ./caddy-local-root.crt   # macOS
+```
+
+Then add the client exactly as in § 5b, pointed at the Caddy port instead of
+the bare server port:
+
+```sh
+claude mcp add --transport http nvnm-local https://localhost:8443/ \
+  --header "Authorization: Bearer <raw key from make key-create>"
+```
+
+### 5e. Claude Desktop against the Docker Compose stack (via a stdio bridge)
+
+`claude_desktop_config.json` only validates the stdio shape (`command` /
+`args` / `env`) — there is no `url` or `transport` field, so pasting an
+HTTPS URL into it does nothing (some builds silently drop the whole
+`mcpServers` block on next save). Settings → Connectors → *Add custom
+connector* **is not the fix either**: that path is brokered through
+Anthropic's cloud, which opens the connection to your server itself — it
+requires a URL reachable from Anthropic's public IP ranges, so
+`https://localhost:8443` can never work there (that UI is for Loop 3 § 6,
+over a real tunnel).
+
+To reach the compose stack from Desktop, bridge it with the `mcp-remote`
+stdio↔HTTP proxy so Desktop launches a subprocess exactly like any other
+stdio server. Export the Caddy CA (§ 5d) and point `NODE_EXTRA_CA_CERTS` at
+it, since Node does not consult the OS trust store the way `curl`/`security
+add-trusted-cert` does:
+
+```json
+{
+  "mcpServers": {
+    "nvnm-local": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote", "https://localhost:8443/",
+        "--header", "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer <raw key from make key-create>",
+        "NODE_EXTRA_CA_CERTS": "/abs/path/to/nvnm-mcp-server/caddy-local-root.crt"
+      }
+    }
+  }
+}
+```
+
+Fully quit and restart Claude Desktop after editing the config (closing the
+window does not reload it). If this is more machinery than a given change
+needs, stdio (§ 5c) exercises the same tool handlers without any of the
+Caddy/TLS plumbing — reach for that first unless you're specifically testing
+the HTTP/TLS path.
+
+### Verify the connection
+
+```sh
+claude mcp list          # expect: nvnm-local ✔ Connected
+claude mcp get nvnm-local
+```
+
+Inside a session, `/mcp` shows status and tool count. **A configured server is
+not a connected server** — always confirm before drawing conclusions.
+
+### Smoke prompts
+
+Exercise the surfaces an agent actually walks, in the order the onboarding
+tools recommend:
+
+1. "Use nvnm-local's `nvnm_overview` tool to describe this chain."
+2. "Call `evm_get_chain_id`." — confirms RPC reachability end to end.
+3. "Call `wallet_status` for `0x...`." — confirms the balance/nonce read path.
+4. "Call `anchor_get_registries`." — confirms ABI decode against live chain
+   state (run `make seed-test-data` first if the chain is fresh).
+
+Confirm the answer is labeled as coming from the server's tool, not from model
+knowledge.
+
+---
+
+## 6. Loop 3 — remote connector (claude.ai / Messages API)
+
+Remote clients cannot reach `localhost`. Both paths below need a public HTTPS
+URL and both treat the server exactly as a hosted deployment.
+
+> **This exposes a development server to the internet.** Use a throwaway key
+> with the narrowest roles that cover the test, leave `ENABLE_WRITE_TOOLS=false`
+> unless you are specifically testing writes, never point it at mainnet config,
+> and tear the tunnel down when you're done.
+
+**Step 1 — allowlist the origin and restart.** The default loopback-only
+allowlist rejects `https://claude.ai` with `403`:
+
+```sh
+NVNM_ALLOWED_ORIGINS="https://claude.ai" make run-local
+```
+
+**Step 2 — open a tunnel:**
+
+```sh
+cloudflared tunnel --url http://localhost:8180
+# or
+ngrok http 8180
+```
+
+**Step 3a — claude.ai custom connector.** In claude.ai → Settings →
+Connectors → *Add custom connector*, use the tunnel's HTTPS URL and supply the
+API key as the bearer token. The server answers `404` on the OAuth well-known
+paths by design, which tells the client to use the configured credential rather
+than starting a discovery flow.
+
+**Step 3b — Messages API MCP connector.** Beta header
+`anthropic-beta: mcp-client-2025-11-20`:
+
+```sh
+curl https://api.anthropic.com/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: mcp-client-2025-11-20" \
+  -d '{
+    "model": "claude-opus-5",
+    "max_tokens": 1024,
+    "messages": [{"role":"user","content":"What is the chain ID?"}],
+    "mcp_servers": [{
+      "type": "url",
+      "url": "https://<your-tunnel-host>/",
+      "name": "nvnm-local",
+      "authorization_token": "<raw API key>"
+    }],
+    "tools": [{"type":"mcp_toolset","mcp_server_name":"nvnm-local"}]
+  }'
+```
+
+Only MCP **tool calls** are supported by that connector, and stdio servers
+cannot be attached — which is why this loop needs the HTTP transport.
+
+---
+
+## 7. Write-path e2e (prepare → sign → broadcast)
+
+The write flow is the one surface where manual e2e is genuinely load-bearing,
+because the signing step lives outside the server by design.
+
+```sh
+export ENABLE_WRITE_TOOLS=true      # write tools are not registered without it
+# key must hold writer / admin / automation; grant_role additionally requires admin
+```
+
+The loop: call an `anchor_prepare_*` tool → sign `raw_tx` (or the
+`wallet_tx_request`) **client-side** → broadcast via `evm_send_raw_transaction`
+→ confirm with `evm_get_transaction_receipt`.
+
+Non-obvious constraints:
+
+- **The server never holds a key.** Do not add one to `.env` for the server's
+  benefit; testnet signing credentials belong to the test harness
+  (`.chain_credentials.txt` or `NVNM_TEST_PRIVATE_KEY`), both gitignored.
+- **`evm_send_raw_transaction` is a scoped relay.** It decodes the signed
+  transaction and refuses anything not destined for the anchor precompile.
+  `MCP_RELAY_ALLOW_ANY=true` lifts that on the authenticated path only, and is
+  a **boot error** when combined with `MCP_KEYLESS_WRITES=true`.
+- **Human confirmation is the client's job.** The server issues no approval
+  prompt; the caller-side signature is the security boundary.
+- `make seed-test-data` creates the `mcp-test-data` registry plus three records
+  so read-back has something to find.
+
+Wallet-side specifics are in [`METAMASK_GUIDE.md`](METAMASK_GUIDE.md); per-tool
+schemas are in [`TOOL_REFERENCE.md`](TOOL_REFERENCE.md).
+
+---
+
+## 8. Optional surfaces
+
+| Surface | How to exercise locally |
+|---|---|
+| Admin key API | Set `ADMIN_API_KEY`; binds `127.0.0.1:8081` by default. `curl -H "Authorization: Bearer $ADMIN_API_KEY" http://localhost:8081/admin/keys` |
+| Postgres-backed stores | `MCP_KEYLESS_PG_DSN` (write/admin audit, quota, blacklist) and `KEY_STORE_DSN` + `KEY_HMAC_PEPPER` (Postgres key store). Migrations run at boot |
+| Keyless reads / writes | `MCP_KEYLESS_READS=true` admits requests with **no** `Authorization` header (a present-but-invalid token is still `401`). `MCP_KEYLESS_WRITES=true` requires `MCP_KEYLESS_PG_DSN` |
+| Container parity | `make docker-smoke` — build, run on `18080`/`19090`, check `/healthz`, `/readyz`, `initialize`, tear down |
+| Load | `make test-load` (k6 against a running server; see `tests/load/README.md`) |
+
+---
+
+## 9. Teardown and hygiene
+
+```sh
+claude mcp remove nvnm-local        # drop the client entry
+make key-disable NAME=local-dev     # revoke the local key
+# stop the tunnel; stop the server (Ctrl-C)
+```
+
+Never commit `.env`, `.mcp-keys.json`, `.chain_credentials.txt`, or a
+`.mcp.json` containing a bearer header. `detect-secrets` runs in pre-commit and
+CI; do not extend `.secrets.baseline` to get a value past it.
+
+---
+
+## 10. Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Boot: `ErrHTTPAuthRequired` | HTTP transport with no enabled key. Set `MCP_API_KEY` (+ roles) or point `MCP_API_KEYS_FILE` at a store with an enabled entry |
+| Boot: `ErrMissingAPIKeyRoles` | `MCP_API_KEY` set without `MCP_API_KEY_ROLES` |
+| Boot: legacy-var rejection | An `INVENIAM_*` var or `WRITE_APPROVAL_DEFAULT` is present. See `RUNBOOK.md#env-var-migration` and `#write-approval-removal` |
+| Client reports "Needs authentication" | Run the § 4 preflight: well-known must be `404`, unauthenticated must be `401` + `WWW-Authenticate: Bearer`. If both pass, the bearer token is wrong, disabled, or expired |
+| `401 missing Authorization header` | No bearer sent, and `MCP_KEYLESS_READS` is off |
+| `403` on every request from a browser-based or hosted client | Origin not allowlisted. Add it to `NVNM_ALLOWED_ORIGINS` (exact match including port, except loopback) |
+| `permission denied` on a tool | Default-deny RBAC. Reads need `reader`+; writes need `writer`/`admin`/`automation`; `anchor_prepare_grant_role` / `revoke_role` need `admin` |
+| Write tools missing from `tools/list` | `ENABLE_WRITE_TOOLS` is not `true` — 17 read-only tools are registered instead of 23 |
+| `405 Method Not Allowed` on `GET` | Expected: the stateless handler serves `POST` only |
+| `415` / `400 Accept must contain...` | Send `Content-Type: application/json` and `Accept: application/json, text/event-stream` |
+| `readyz` reports `abi` not loaded | `ANCHOR_ABI_PATH` is wrong or unreadable — use an absolute path when a client launches the binary |
+| `429` | Rate limited: per-client (`MCP_RATE_LIMIT`/`BURST`), anonymous per-IP (`MCP_ANON_RATE_*`), or the pre-auth IP failure limiter after repeated `401`s |
+| Port already in use | Another server (or `make docker-smoke`) holds `:8180`/`:9190`. Override `MCP_HTTP_ADDR` / `METRICS_ADDR`; the Makefile targets honor both |

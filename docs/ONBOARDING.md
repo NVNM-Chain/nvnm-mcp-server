@@ -58,7 +58,7 @@ The request flow — how a call traverses the middleware chain before reaching a
 
 ## 4. Local workflow & the quality gate
 
-Setup and contribution conventions (branching, PRs, DCO sign-off) are in [`../CONTRIBUTING.md`](../CONTRIBUTING.md). Testing strategy is in [`TESTING.md`](TESTING.md). This section only adds the CI-parity gate.
+Setup and contribution conventions (branching, PRs, DCO sign-off) are in [`../CONTRIBUTING.md`](../CONTRIBUTING.md). The automated testing strategy is in [`TESTING_UNIT.md`](TESTING_UNIT.md); running the server locally and driving it from a real MCP client is in [`TESTING.md`](TESTING.md). This section only adds the CI-parity gate.
 
 - **Discover commands with `make help`.** Common ones: `make build`, `make test`, `make lint`, `make vet`, `make check-all`, `make format`.
 - **CI checks the whole tree; local hooks only touch changed files.** Run the equivalent of CI before your first push, not as a discovery step inside `git commit`:
