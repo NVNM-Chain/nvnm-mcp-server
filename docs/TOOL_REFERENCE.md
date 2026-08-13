@@ -566,7 +566,9 @@ Returns the balance of an address in both wei and ether. Optionally specify a bl
 |-----------|----------|----------------------------------------|
 | `address` | `string` | Queried address (0x-prefixed)          |
 | `wei`     | `string` | Balance in wei (decimal string)        |
-| `ether`   | `string` | Balance in ether (decimal string)      |
+| `balance_human` | `string` | Balance in the chain gas token, e.g. `1.5 wmantraUSD` (prefer this) |
+| `token_wrapped` | `string` | Gas-token symbol for this deployment (`wmantraUSD` / `wmmUSD`) |
+| `ether`   | `string` | Legacy alias for the same decimal amount. NOT denominated in ether -- this chain has no ether. Retained for wire compatibility |
 
 ### Error Conditions
 
