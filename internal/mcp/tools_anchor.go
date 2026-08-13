@@ -398,7 +398,7 @@ func registryNameMatcher(target, mode string) (func(name string) bool, error) {
 // latestRegistryID returns the highest currently-assigned registry ID via
 // reverse=true, limit=1 on the same "registries" precompile query
 // scanRegistriesByName pages -- the cheapest substitute this chain has for
-// pagination.total, which it always reports as 0 (docs/TESTING.md). found
+// pagination.total, which it always reports as 0 (docs/TESTING_UNIT.md). found
 // is false when no registries exist yet. This is a best-effort optimization,
 // not a correctness dependency: scanRegistriesByName's own termination (a
 // short page) never relies on it, so callers should treat a non-nil err as
@@ -478,9 +478,9 @@ func scanRegistriesByName(
 				matches = append(matches, r)
 			}
 		}
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			return nil, false, err
 		}
 		// NextKey emptiness, not the row count, is the authoritative "done"
 		// signal: the SDK only sets NextKey when it can see at least one
@@ -536,9 +536,9 @@ func scanAllRegistries(
 		}
 		totalScanned += uint64(len(resp.Registries))
 		all = append(all, resp.Registries...)
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			return nil, false, err
 		}
 		if len(nextKey) == 0 {
 			if peekErr == nil && haveHighestID && totalScanned < highestID {

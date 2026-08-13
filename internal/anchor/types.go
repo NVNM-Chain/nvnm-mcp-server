@@ -3,6 +3,11 @@
 
 package anchor
 
+import (
+	"encoding/base64"
+	"fmt"
+)
+
 // Registry is a logical container for records, analogous to a database table.
 // Each registry is created by a user who automatically becomes its admin.
 type Registry struct {
@@ -69,7 +74,41 @@ type PageResponse struct {
 	// page came back short, or it was exactly full and happened to be the
 	// last one; both cases leave NextKey empty, so its emptiness (not the
 	// returned row count) is the authoritative "done" signal.
-	NextKey []byte `json:"next_key,omitempty"`
+	//
+	// Base64 (standard encoding) of the raw cursor bytes, matching how the
+	// Cosmos SDK renders next_key in its own JSON. This is a string and not
+	// a []byte deliberately: encoding/json marshals a []byte to a base64
+	// *string*, but the MCP SDK infers a []byte field's schema as an array
+	// of integers, so the two disagreed and every response carrying a
+	// non-empty cursor failed MCP output-schema validation -- surfacing as
+	// an opaque "upstream operation failed" that made the unfiltered
+	// anchor_get_registries listing unusable. Holding the base64 form
+	// directly leaves the emitted JSON byte-for-byte identical and makes
+	// the declared schema true. Use CursorBytes to get the raw bytes back.
+	NextKey string `json:"next_key,omitempty"`
+}
+
+// CursorBytes decodes NextKey into the raw cursor bytes to feed back as
+// PageRequest.Key. It returns nil for a nil receiver or an empty cursor,
+// so callers can pass a possibly-absent Pagination straight in.
+func (p *PageResponse) CursorBytes() ([]byte, error) {
+	if p == nil || p.NextKey == "" {
+		return nil, nil
+	}
+	b, err := base64.StdEncoding.DecodeString(p.NextKey)
+	if err != nil {
+		return nil, fmt.Errorf("decode pagination cursor: %w", err)
+	}
+	return b, nil
+}
+
+// EncodeCursor renders raw cursor bytes into NextKey's base64 form. Empty
+// input yields an empty string, preserving "no more data" as the zero value.
+func EncodeCursor(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b)
 }
 
 // --- Query request/response types ---

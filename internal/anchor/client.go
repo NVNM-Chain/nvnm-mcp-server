@@ -268,7 +268,7 @@ func (c *client) GetRegistries(
 
 	return &GetRegistriesResponse{
 		Registries: toRegistries(rows),
-		Pagination: &PageResponse{Total: page.Total, NextKey: page.NextKey},
+		Pagination: &PageResponse{Total: page.Total, NextKey: EncodeCursor(page.NextKey)},
 	}, nil
 }
 
