@@ -14,11 +14,12 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
-func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
+func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config, _ *slog.Logger) {
 	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_chain_id",
 		Title: "Get Chain ID",
@@ -62,10 +63,13 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_balance",
 		Title: "Get Balance",
-		Description: "Returns the balance of an address in both wei and ether. " +
-			"Optionally specify a block number.",
+		Description: "Returns the balance of an address. balance_human is the " +
+			"amount in this chain's gas token (see token_wrapped); wei is the raw " +
+			"integer. The `ether` field is a legacy alias for the same decimal " +
+			"amount and is NOT denominated in ether -- prefer balance_human when " +
+			"reporting a balance. Optionally specify a block number.",
 		Annotations: newOpenWorldReadOnly(),
-	}, makeGetBalanceHandler(evmClient))
+	}, makeGetBalanceHandler(evmClient, cfg))
 
 	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_code",
@@ -73,7 +77,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 		Description: "Returns the contract bytecode at an address, " +
 			"and whether a contract is deployed there.",
 		Annotations: newOpenWorldReadOnly(),
-	}, makeGetCodeHandler(evmClient))
+	}, makeGetCodeHandler(evmClient, cfg))
 
 	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_logs",
@@ -247,7 +251,7 @@ func makeGetReceiptHandler(
 }
 
 func makeGetBalanceHandler(
-	c evm.Client,
+	c evm.Client, cfg *config.Config,
 ) mcp.ToolHandlerFor[getBalanceInput, balanceOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getBalanceInput,
@@ -268,12 +272,18 @@ func makeGetBalanceHandler(
 			return nil, balanceOutput{},
 				fmt.Errorf("failed to get balance: %w", err)
 		}
-		return nil, balanceOutput{NormalizedBalance: *balance, NextActions: evmGetBalanceNext()}, nil
+		naming := config.NamingFor(cfg.ChainEnvironment)
+		return nil, balanceOutput{
+			NormalizedBalance: *balance,
+			BalanceHuman:      balance.Ether + " " + naming.Wrapped,
+			TokenWrapped:      naming.Wrapped,
+			NextActions:       evmGetBalanceNext(),
+		}, nil
 	}
 }
 
 func makeGetCodeHandler(
-	c evm.Client,
+	c evm.Client, cfg *config.Config,
 ) mcp.ToolHandlerFor[getCodeInput, codeOutput] {
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input getCodeInput,
@@ -294,7 +304,11 @@ func makeGetCodeHandler(
 			return nil, codeOutput{},
 				fmt.Errorf("failed to get code: %w", err)
 		}
-		return nil, codeOutput{CodeResult: *code, NextActions: evmGetCodeNext(code.IsContract)}, nil
+		isPrecompile := strings.EqualFold(code.Address, cfg.AnchorAddress)
+		return nil, codeOutput{
+			CodeResult:  *code,
+			NextActions: evmGetCodeNext(code.IsContract, isPrecompile),
+		}, nil
 	}
 }
 
