@@ -266,14 +266,14 @@ Onboarding tools (Phase 8.8) use an `nvnm_*` / `wallet_*` prefix instead of `{do
 
 ### Tool Inventory
 
-21 tools after Phase 8.8. Each registers a `ToolAnnotations` payload (ReadOnly / Destructive / OpenWorld) and returns a response envelope carrying a `next_actions[]` array whose `tool` hints are AST-verified at test time to point at registered tool names.
+21 tools after Phase 8.8; 23 after the registry-ID migration and the two role-management additions (`anchor_prepare_update_record_status`, `anchor_prepare_revoke_role`). Each registers a `ToolAnnotations` payload (ReadOnly / Destructive / OpenWorld) and returns a response envelope carrying a `next_actions[]` array whose `tool` hints are AST-verified at test time to point at registered tool names.
 
 | Group | Count | Tools |
 |---|---|---|
 | Onboarding | 5 | `nvnm_overview`, `wallet_status`, `nvnm_setup_wizard`, `nvnm_setup_verify_hash`, `nvnm_setup_verify_signature` |
 | EVM reads | 8 | `evm_get_chain_id`, `evm_get_block`, `evm_get_transaction`, `evm_get_transaction_receipt`, `evm_get_balance`, `evm_get_code`, `evm_get_logs`, `evm_call_contract` |
 | Anchor reads | 4 | `anchor_info`, `anchor_get_registry`, `anchor_get_registries`, `anchor_get_records` |
-| Anchor + EVM writes | 4 | `anchor_prepare_add_registry`, `anchor_prepare_add_record`, `anchor_prepare_grant_role`, `evm_send_raw_transaction` |
+| Anchor + EVM writes | 6 | `anchor_prepare_add_registry`, `anchor_prepare_add_record`, `anchor_prepare_update_record_status`, `anchor_prepare_grant_role`, `anchor_prepare_revoke_role`, `evm_send_raw_transaction` |
 
 ### Input Validation
 

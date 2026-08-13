@@ -49,20 +49,38 @@ func TestRequiresAuth_UnknownToolFailsClosed(t *testing.T) {
 	}
 }
 
-func TestAuthExemptTools_ExactlyTwenty(t *testing.T) {
-	if len(authExemptTools) != 20 {
-		t.Errorf("authExemptTools has %d entries, want 20 (one per read tool)", len(authExemptTools))
+// TestAuthClassification_CoversAllRegisteredTools replaces a prior test that
+// pinned two independent literals (authExemptTools' size, the total
+// registered tool count), which could drift out of sync with each other
+// without either one catching a tool that shipped unclassified and
+// unreachable. This walks the live registered tool list instead of a
+// hand-maintained copy: every tool must be in authExemptTools XOR be the
+// conditional write tool, or the test fails naming the tool.
+func TestAuthClassification_CoversAllRegisteredTools(t *testing.T) {
+	session := startTestServer(t)
+
+	result, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(result.Tools) == 0 {
+		t.Fatal("server registered zero tools; test is vacuous")
+	}
+
+	for _, tool := range result.Tools {
+		exempt := authExemptTools[tool.Name]
+		isWriteTool := tool.Name == writeToolName
+		if exempt == isWriteTool {
+			t.Errorf("tool %q has no auth classification: in authExemptTools=%v, is writeToolName=%v; classify it in authExemptTools per the MAINTENANCE note",
+				tool.Name, exempt, isWriteTool)
+		}
 	}
 }
 
 // TestRequiresAuth_WriteToolConditional proves the write tool's exemption is
 // conditional on keylessWrites specifically, not on the static
-// authExemptTools map (which must stay reads-only at 20 entries).
+// authExemptTools map (whose coverage is checked separately, above).
 func TestRequiresAuth_WriteToolConditional(t *testing.T) {
-	// Static map unchanged: still 20 read tools.
-	if len(authExemptTools) != 20 {
-		t.Fatalf("authExemptTools = %d; want 20 (map stays reads-only)", len(authExemptTools))
-	}
 	// Write tool: gated when keyless writes OFF, exempt when ON.
 	if !RequiresAuth("evm_send_raw_transaction", false) {
 		t.Error("write tool must require auth when keylessWrites=false")

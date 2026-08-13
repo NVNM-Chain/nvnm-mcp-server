@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +57,8 @@ func signTxWithKey(t *testing.T, key *defiwallet.PrivateKey) string {
 }
 
 type e2eServerConfig struct {
-	evmClient *mockEVM
+	evmClient    *mockEVM
+	anchorClient *mockAnchor
 }
 
 func startTestServerWithConfig(
@@ -73,14 +75,17 @@ func startTestServerWithConfig(
 			sendTxHash: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		}
 	}
-	anchorClient := &mockAnchor{
-		info: anchor.PrecompileInfo{
-			Address:     testAddr,
-			ChainID:     58887,
-			ABILoaded:   true,
-			MethodCount: 5,
-		},
+	if cfg.anchorClient == nil {
+		cfg.anchorClient = &mockAnchor{
+			info: anchor.PrecompileInfo{
+				Address:     testAddr,
+				ChainID:     58887,
+				ABILoaded:   true,
+				MethodCount: 5,
+			},
+		}
 	}
+	anchorClient := cfg.anchorClient
 
 	srv := NewServer(cfg.evmClient, anchorClient, testServerConfig(true), nil, nil, nil, nil, nil, testLogger())
 
@@ -104,6 +109,179 @@ func startTestServerWithConfig(
 	t.Cleanup(func() { _ = session.Close() })
 
 	return session
+}
+
+// ---------------------------------------------------------------------------
+// anchor_get_registries by-name E2E tests (W3 post-release review)
+//
+// Handler-level tests (tools_test.go) cover the by-name scan logic directly
+// against a mocked anchor.Client -- they never cross the real HTTP/JSON-RPC
+// boundary or the MCP SDK's schema (un)marshaling for the name/match/offset/
+// limit input fields. These do: a real client sends a real tools/call over a
+// real HTTP session, through the actual generated schema, exercising the
+// exact path a live agent would use. The mode rules matter here in
+// particular because every field is optional in the generated schema, so
+// nothing below the handler enforces them.
+// ---------------------------------------------------------------------------
+
+func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
+	session := startTestServerWithConfig(t, e2eServerConfig{
+		anchorClient: &mockAnchor{
+			registries: &anchor.GetRegistriesResponse{
+				Registries: []anchor.Registry{
+					{ID: 1, Name: "fund-documents", Creator: "0xaaa"},
+					{ID: 57, Name: "fund-documents", Creator: "0xccc"},
+				},
+			},
+		},
+	})
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "anchor_get_registries",
+		Arguments: map[string]any{
+			"name":   "fund-documents",
+			"offset": 0,
+			"limit":  10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned error: %v", result.Content)
+	}
+
+	raw, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	var out registriesOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode structured content: %v", err)
+	}
+	if len(out.Registries) != 2 {
+		t.Fatalf("Registries = %+v, want 2 matches (both fund-documents)", out.Registries)
+	}
+	if out.Pagination == nil || out.Pagination.Total != 2 {
+		t.Errorf("Pagination = %+v, want Total = 2 (the match count)", out.Pagination)
+	}
+}
+
+// TestE2E_CallTool_AnchorGetRegistries_Unfiltered covers the unfiltered
+// listing path (no name filter, no registry_id) end-to-end.  The handler
+// walks the registry table cursor-based (scanAllRegistries) and applies
+// offset/limit client-side; this path was previously broken because it
+// passed small limit values directly to a precompile that requires
+// Limit=nameScanPageSize for registryId=0 unfiltered queries.
+func TestE2E_CallTool_AnchorGetRegistries_Unfiltered(t *testing.T) {
+	regs := []anchor.Registry{
+		{ID: 1, Name: "alpha"},
+		{ID: 2, Name: "beta"},
+		{ID: 3, Name: "gamma"},
+		{ID: 4, Name: "delta"},
+		{ID: 5, Name: "epsilon"},
+	}
+	session := startTestServerWithConfig(t, e2eServerConfig{
+		anchorClient: &mockAnchor{
+			registries: &anchor.GetRegistriesResponse{Registries: regs},
+		},
+	})
+
+	// limit=3 is well below nameScanPageSize -- previously this was forwarded
+	// directly to the precompile and rejected.  After the fix it is applied
+	// client-side so the call must succeed.
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "anchor_get_registries",
+		Arguments: map[string]any{"limit": 3},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned unexpected error: %v", result.Content)
+	}
+
+	var raw []byte
+	raw, err = json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	var out registriesOutput
+	if unmarshalErr := json.Unmarshal(raw, &out); unmarshalErr != nil {
+		t.Fatalf("decode structured content: %v", unmarshalErr)
+	}
+	// offset=0, limit=3 → first 3 of 5 registries.
+	if len(out.Registries) != 3 {
+		t.Fatalf("Registries = %+v, want 3", out.Registries)
+	}
+	if out.Registries[0].ID != 1 || out.Registries[2].ID != 3 {
+		t.Errorf("Registries IDs = [%d..%d], want [1..3]",
+			out.Registries[0].ID, out.Registries[2].ID)
+	}
+	// Total = full scan count (5), not the page size.
+	if out.Pagination == nil || out.Pagination.Total != 5 {
+		t.Errorf("Pagination = %+v, want Total = 5", out.Pagination)
+	}
+
+	// Also verify offset paging works end-to-end.
+	result2, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "anchor_get_registries",
+		Arguments: map[string]any{"offset": 3, "limit": 2},
+	})
+	if err != nil {
+		t.Fatalf("CallTool (offset): %v", err)
+	}
+	if result2.IsError {
+		t.Fatalf("tool returned unexpected error (offset): %v", result2.Content)
+	}
+	raw2, err := json.Marshal(result2.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content (offset): %v", err)
+	}
+	var out2 registriesOutput
+	if unmarshalErr := json.Unmarshal(raw2, &out2); unmarshalErr != nil {
+		t.Fatalf("decode structured content (offset): %v", unmarshalErr)
+	}
+	if len(out2.Registries) != 2 {
+		t.Fatalf("Registries (offset=3) = %+v, want 2", out2.Registries)
+	}
+	if out2.Registries[0].ID != 4 || out2.Registries[1].ID != 5 {
+		t.Errorf("Registries IDs (offset=3) = [%d %d], want [4 5]",
+			out2.Registries[0].ID, out2.Registries[1].ID)
+	}
+}
+
+// TestE2E_CallTool_AnchorGetRegistries_ModeViolationsRejected proves the
+// per-mode input rules survive real schema (un)marshaling: the schema marks
+// every field optional, so only the handler can reject a call that mixes the
+// deprecated registry_id lookup with listing parameters.
+func TestE2E_CallTool_AnchorGetRegistries_ModeViolationsRejected(t *testing.T) {
+	session := startTestServerWithConfig(t, e2eServerConfig{})
+
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"registry_id with name", map[string]any{"registry_id": 1, "name": "anything"}},
+		{"registry_id with match", map[string]any{"registry_id": 1, "match": "prefix"}},
+		{"registry_id with offset", map[string]any{"registry_id": 1, "offset": 10}},
+		{"registry_id with limit", map[string]any{"registry_id": 1, "limit": 10}},
+		{"match without name", map[string]any{"match": "prefix"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := session.CallTool(ctx, &mcp.CallToolParams{
+				Name:      "anchor_get_registries",
+				Arguments: tc.args,
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if !result.IsError {
+				t.Errorf("expected IsError=true for %s", tc.name)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

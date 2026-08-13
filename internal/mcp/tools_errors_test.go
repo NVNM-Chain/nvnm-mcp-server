@@ -83,7 +83,7 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 			return err
 		}},
 		{"get_registries", func() error {
-			_, _, err := makeGetRegistriesHandler(a)(denied, nil, getRegistriesInput{})
+			_, _, err := makeGetRegistriesHandler(a, testLogger())(denied, nil, getRegistriesInput{})
 			return err
 		}},
 		{"get_records", func() error {
@@ -179,7 +179,7 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_registries", func() error {
-			_, _, err := makeGetRegistriesHandler(a)(ctx, nil, getRegistriesInput{})
+			_, _, err := makeGetRegistriesHandler(a, testLogger())(ctx, nil, getRegistriesInput{})
 			return err
 		}},
 		{"get_records", func() error {

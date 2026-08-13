@@ -124,8 +124,9 @@ func (s *SMTPEmailSender) Send(_ context.Context, to, subject, body string) erro
 	// gosec G707: `to` and `subject` are validated above for CR/LF
 	// (ErrEmailHeaderInjection); body comes from a server-side template
 	// in approvalEmailBody / rejectionEmailBody that doesn't reflect
-	// caller input. Suppress the taint-analysis flag with rationale.
-	if err := smtp.SendMail( //nolint:gosec // G707: inputs validated against header injection above
+	// caller input.
+	//nolint:gosec,nolintlint // G707: CI/local lint skew; CR/LF rejected above
+	if err := smtp.SendMail(
 		addr, auth, s.cfg.From, []string{to}, []byte(msg.String()),
 	); err != nil {
 		// Do NOT log the body — it may contain the freshly-minted API

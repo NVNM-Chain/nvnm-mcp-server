@@ -297,7 +297,7 @@ func TestE2E_CallTool_InvalidAddress(t *testing.T) {
 	}
 }
 
-func TestE2E_CallTool_MissingRegistryIDAndName(t *testing.T) {
+func TestE2E_CallTool_MissingRegistryID(t *testing.T) {
 	session := startTestServer(t)
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
@@ -309,6 +309,6 @@ func TestE2E_CallTool_MissingRegistryIDAndName(t *testing.T) {
 		t.Fatalf("CallTool: %v", err)
 	}
 	if !result.IsError {
-		t.Error("expected IsError=true when neither id nor name provided")
+		t.Error("expected IsError=true when id is not provided")
 	}
 }
