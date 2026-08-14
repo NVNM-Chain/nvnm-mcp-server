@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: nvnm
-      POSTGRES_PASSWORD: nvnm-local-dev
+      POSTGRES_PASSWORD: nvnm-local-dev # pragma: allowlist secret
       POSTGRES_DB: nvnm_keys
     ports:
       - "5432:5432"
