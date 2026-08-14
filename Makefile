@@ -149,7 +149,11 @@ endif
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION_ID" \
 		-d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":2,\"params\":{\"name\":\"$(TOOL)\",\"arguments\":$$ARGS_VAL}}"); \
-	SSE_BODY=$$(printf '%s\n' "$$RESP" | sed -n 's/^data:[[:space:]]*//p'); \
+	SSE_BODY=$$(printf '%s\n' "$$RESP" | awk ' \
+		{ sub(/\r$$/, "") } \
+		/^data:/ { l = $$0; sub(/^data:[[:space:]]?/, "", l); buf = buf sep l; sep = "\n"; next } \
+		/^$$/ { if (buf != "") { event = buf; buf = ""; sep = "" } } \
+		END { if (buf != "") event = buf; printf "%s", event }'); \
 	if [ -n "$$SSE_BODY" ]; then RESP="$$SSE_BODY"; fi; \
 	if command -v jq >/dev/null 2>&1; then \
 		echo "$$RESP" | jq .; \
@@ -336,13 +340,19 @@ compose-up:
 		echo "ERROR: .env not found. Copy .env.example to .env and fill in values (see CONTRIBUTING.md § 2)."; \
 		exit 1; \
 	fi
-	@if [ ! -f .mcp-keys.json ]; then \
-		echo "ERROR: .mcp-keys.json not found. Create a key first:"; \
-		echo "         make key-create NAME=local-dev ROLES=reader,writer"; \
-		echo "       (compose bind-mounts that path; Docker would create it as a DIRECTORY if missing)."; \
-		exit 1; \
+	@KEYS_FILE=$$(sed -n 's/^[[:space:]]*MCP_API_KEYS_FILE=\(..*\)/\1/p' .env | tail -1); \
+	if [ -n "$$KEYS_FILE" ]; then \
+		if [ ! -f .mcp-keys.json ]; then \
+			echo "ERROR: .env selects the file key-store backend (MCP_API_KEYS_FILE=$$KEYS_FILE)"; \
+			echo "       but .mcp-keys.json is missing. Create a key first:"; \
+			echo "         make key-create NAME=local-dev ROLES=reader,writer"; \
+			echo "       (docker-compose.file-keys.yml bind-mounts that path; Docker would create it as a DIRECTORY if missing)."; \
+			exit 1; \
+		fi; \
+		docker compose -f docker-compose.yml -f docker-compose.file-keys.yml up --build -d; \
+	else \
+		docker compose up --build -d; \
 	fi
-	docker compose up --build -d
 	@echo ""
 	@echo "MCP endpoint : https://localhost:8443/   (Caddy local CA -- use curl -k)"
 	@echo "Health       : http://localhost:9190/healthz"
@@ -466,7 +476,7 @@ help:
 	@echo "  docker-push      Multi-arch build and push to registry"
 	@echo ""
 	@echo "Docker Compose (local stack: server + Caddy TLS on https://localhost:8443):"
-	@echo "  compose-up       Build and start the stack (needs .env + .mcp-keys.json)"
+	@echo "  compose-up       Build and start the stack (needs .env; .mcp-keys.json only in file key-store mode)"
 	@echo "  compose-restart  Restart the server container (reloads the key store)"
 	@echo "  compose-logs     Follow stack logs"
 	@echo "  compose-down     Stop and remove the stack"

@@ -9,8 +9,82 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`make compose-up` / `compose-down` / `compose-restart` / `compose-logs`
+  wrap `docker-compose.yml`** (server + Caddy TLS termination on
+  `https://localhost:8443`, optional Postgres profile) for local development.
+  `compose-up` fails fast with an actionable message if `.env` is missing, or
+  if the file key-store backend is selected without `.mcp-keys.json`, since
+  Docker would otherwise create the latter's bind-mount path as an empty
+  directory. The `.mcp-keys.json` bind mount lives in the opt-in
+  `docker-compose.file-keys.yml` override so the `MCP_API_KEY` and Postgres
+  key-store modes start without a dummy file. `docs/TESTING.md` § 3b/5d
+  cover standing the stack up and trusting Caddy's local CA so Claude Code /
+  Desktop can connect to it over HTTPS; verified end-to-end against a live
+  testnet call.
+- **`docs/TESTING.md` is now a manual end-to-end guide for standing the
+  server up locally and driving it from a real MCP client.** It covers the
+  three loops (loopback `curl` / `make mcp-probe`; a local Claude Code or
+  Claude Desktop client over stdio or HTTP; a remote claude.ai custom
+  connector or Messages API MCP connector over a tunnel), the boot-time auth
+  requirements that bite first (`ErrHTTPAuthRequired`,
+  `ErrMissingAPIKeyRoles`), the MCP-authorization preflight that determines
+  whether a Claude-class client reports "Needs authentication"
+  (well-known → `404`, unauthenticated → `401` + `WWW-Authenticate: Bearer`),
+  the Origin-allowlist behavior a hosted client hits, the write-path
+  walkthrough, and a symptom→cause troubleshooting table. Every command and
+  status code in it was verified against a locally built binary.
+
+### Changed
+
+- **Bumped the Go toolchain 1.26.5 → 1.26.6** (`go.mod`, `Dockerfile` builder
+  image and `GOTOOLCHAIN` pin) to pick up the stdlib security fixes flagged by
+  `govulncheck` (GO-2026-6218, GO-2026-6091, GO-2026-6090, GO-2026-6089,
+  GO-2026-6088, GO-2026-5972, GO-2026-5026).
+
 ### Fixed
 
+- **`evm_get_code` no longer steers precompile callers at a zero balance.**
+  Empty bytecode at the anchoring precompile is expected -- it is implemented
+  in the node -- but the `next_actions` hint treated it as an ordinary
+  bytecode-less account and suggested inspecting its (always zero) balance.
+  Precompiles now point at `anchor_info`; ordinary accounts keep the balance
+  hint, reworded to say why the address has no code.
+- **`evm_get_balance` reports the chain's actual gas token.** The response
+  labelled the amount `ether`, which is wrong on every deployment of this
+  chain (gas is `wmantraUSD` / `wmmUSD`), so an agent reading that field
+  reported the wrong unit to a user. `balance_human` and `token_wrapped` are
+  now returned alongside, matching `wallet_status`; `ether` is retained as a
+  legacy alias and the tool description marks it as such.
+- **Authorization denials now name the principal.** `requires role admin:
+  permission denied` was ambiguous on the anchor role tools, which grant and
+  revoke *on-chain* roles: a registry's own admin could be told it "requires
+  role admin" with no way to tell whether the chain or their credential had
+  refused. The message now reads "your credential (API key or JWT) does not
+  hold the server-side role this tool requires" -- credential-neutral, since
+  the same claims path serves both API-key and FusionAuth JWT callers.
+- **`anchor_prepare_update_record_status` no longer fails for callers that
+  follow its schema.** `index` was marked optional and documented as
+  "default: latest", but there is no such default: omitting it sent 0, which
+  the precompile rejects outright (`index cannot be zero`), and the
+  rejection reached the caller collapsed to `upstream operation failed`. The
+  field is now required -- so the SDK rejects the omission before any chain
+  round-trip -- documented as 1-based, and guarded by a handler check for
+  clients that bypass schema validation.
+- **On-chain role denials no longer arrive as `upstream operation failed`.**
+  `anchor_prepare_add_record` and `anchor_prepare_update_record_status`
+  collapsed the precompile's `unauthorized` revert to the generic upstream
+  message, while `grant_role`/`revoke_role` returned a curated one for the
+  same class of failure -- so whether a caller learned *why* a write was
+  refused depended on which tool refused it. The revert classifier now
+  carries a sentinel per curated reason, and the observed revert form
+  (`desc = unauthorized`) maps to `ErrPermissionDenied` so the reason
+  survives `SafeForClient`. The match is deliberately narrower than the bare
+  word `unauthorized`, so an RPC provider's own `401 Unauthorized` is not
+  misreported as a chain-side role denial. The message states that the check
+  is chain-side, distinguishing it from this server's own credential
+  authorization.
 - **`anchor_get_registries` no longer fails whenever the result carries a
   pagination cursor.** `PageResponse.NextKey` was a `[]byte`, which
   `encoding/json` marshals to a base64 *string* while the MCP SDK infers a
@@ -33,27 +107,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`make compose-up` / `compose-down` / `compose-restart` / `compose-logs`
-  wrap `docker-compose.yml`** (server + Caddy TLS termination on
-  `https://localhost:8443`, optional Postgres profile) for local development.
-  `compose-up` fails fast with an actionable message if `.env` or
-  `.mcp-keys.json` is missing, since Docker would otherwise create the
-  latter's bind-mount path as an empty directory. `docs/TESTING.md` § 3b/5d
-  cover standing the stack up and trusting Caddy's local CA so Claude Code /
-  Desktop can connect to it over HTTPS; verified end-to-end against a live
-  testnet call.
-- **`docs/TESTING.md` is now a manual end-to-end guide for standing the
-  server up locally and driving it from a real MCP client.** It covers the
-  three loops (loopback `curl` / `make mcp-probe`; a local Claude Code or
-  Claude Desktop client over stdio or HTTP; a remote claude.ai custom
-  connector or Messages API MCP connector over a tunnel), the boot-time auth
-  requirements that bite first (`ErrHTTPAuthRequired`,
-  `ErrMissingAPIKeyRoles`), the MCP-authorization preflight that determines
-  whether a Claude-class client reports "Needs authentication"
-  (well-known → `404`, unauthenticated → `401` + `WWW-Authenticate: Bearer`),
-  the Origin-allowlist behavior a hosted client hits, the write-path
-  walkthrough, and a symptom→cause troubleshooting table. Every command and
-  status code in it was verified against a locally built binary.
 - **`anchor_get_registries` supports filtering by name**: pass `name` and an
   optional `match` (`exact` (default), `prefix`, `suffix`, or `contains`, all
   case-insensitive). Since the anchoring precompile has no by-name index,
@@ -82,43 +135,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the supported way to fetch one registry by ID.
 
 ### Fixed
-- **`evm_get_code` no longer steers precompile callers at a zero balance.**
-  Empty bytecode at the anchoring precompile is expected -- it is implemented
-  in the node -- but the `next_actions` hint treated it as an ordinary
-  bytecode-less account and suggested inspecting its (always zero) balance.
-  Precompiles now point at `anchor_info`; ordinary accounts keep the balance
-  hint, reworded to say why the address has no code.
-- **`evm_get_balance` reports the chain's actual gas token.** The response
-  labelled the amount `ether`, which is wrong on every deployment of this
-  chain (gas is `wmantraUSD` / `wmmUSD`), so an agent reading that field
-  reported the wrong unit to a user. `balance_human` and `token_wrapped` are
-  now returned alongside, matching `wallet_status`; `ether` is retained as a
-  legacy alias and the tool description marks it as such.
-- **Authorization denials now name the principal.** `requires role admin:
-  permission denied` was ambiguous on the anchor role tools, which grant and
-  revoke *on-chain* roles: a registry's own admin could be told it "requires
-  role admin" with no way to tell whether the chain or their API key had
-  refused. The message now reads "your API key does not hold the role this
-  tool requires".
-- **`anchor_prepare_update_record_status` no longer fails for callers that
-  follow its schema.** `index` was marked optional and documented as
-  "default: latest", but there is no such default: omitting it sent 0, which
-  the precompile rejects outright (`index cannot be zero`), and the
-  rejection reached the caller collapsed to `upstream operation failed`. The
-  field is now required -- so the SDK rejects the omission before any chain
-  round-trip -- documented as 1-based, and guarded by a handler check for
-  clients that bypass schema validation.
-- **On-chain role denials no longer arrive as `upstream operation failed`.**
-  `anchor_prepare_add_record` and `anchor_prepare_update_record_status`
-  collapsed the precompile's `unauthorized` revert to the generic upstream
-  message, while `grant_role`/`revoke_role` returned a curated one for the
-  same class of failure -- so whether a caller learned *why* a write was
-  refused depended on which tool refused it. The revert classifier now
-  carries a sentinel per curated reason, and `unauthorized` maps to
-  `ErrPermissionDenied` so the reason survives `SafeForClient`. The message
-  states that the check is chain-side, distinguishing it from this server's
-  own API-key authorization.
-
 - **`anchor_get_registries` inline doc corrections**: the `limit` field's
   schema description no longer claims chain-side pages are capped at 200 rows
   for the caller's limit -- the caller's limit is applied client-side in all

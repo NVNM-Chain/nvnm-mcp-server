@@ -50,6 +50,14 @@ func TestClassifyPrecompileRevert(t *testing.T) {
 			err:    errors.New("estimate gas: dial tcp 10.0.0.1:8545: connect: connection refused"),
 			wantOK: false,
 		},
+		{
+			// A provider's own HTTP auth failure contains the bare word
+			// "unauthorized" but is an operator credential outage, not an
+			// on-chain role denial. It must not classify.
+			name:   "RPC provider 401 Unauthorized is NOT a role denial",
+			err:    errors.New("estimate gas: post \"https://rpc.example.com\": 401 Unauthorized"),
+			wantOK: false,
+		},
 		{"nil error", nil, false, ""},
 	}
 

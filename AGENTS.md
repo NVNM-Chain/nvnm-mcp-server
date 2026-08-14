@@ -226,9 +226,14 @@ afterwards — the main server and `.env` stay untouched:
 set -a && . ./.env && set +a && \
   MCP_HTTP_ADDR=:8280 METRICS_ADDR=:9290 ENABLE_WRITE_TOOLS=true \
   ./bin/nvnm-mcp-server --transport http > /tmp/e.log 2>&1 &
+EPHEMERAL_PID=$!
 # ... run Phase E/F against :8280 ...
-lsof -ti:8280 | xargs kill
+kill "$EPHEMERAL_PID"
 ```
+
+Kill the captured PID, never the port (`lsof -ti:8280 | xargs kill` would
+take out whatever happens to own 8280 if startup failed or the port was
+reused — see *Kill by PID, never by port* below).
 
 Never call `evm_send_raw_transaction` from that instance. It is registered
 alongside the prepare tools and it broadcasts.
@@ -379,10 +384,13 @@ responded correctly but only the error/empty path was reachable.
 Close with a tally and an explicit gap list:
 
 ```
-34/34 calls — 24 pass, 4 partial, 2 FAIL
+36/36 calls — 30 pass, 4 partial, 2 FAIL
 Not covered: evm_get_transaction_receipt happy path (idle chain);
              Phase G (mainnet — testnet only, no credentials)
 ```
+
+(36 is the full A–F call count — A: 6, B: 7, C: 8, D: 4, E: 5, F: 6 — and
+the pass/partial/FAIL categories must sum to the total.)
 
 ### Findings ledger
 
@@ -399,7 +407,7 @@ re-probed. Update the status column every run.
 | C10 | `revoke_role` description says "granting" | E5 | Resolved — now "remove admin or editor permissions" |
 | C12 | `balance_human` float64 precision artifact | post-write | Not reproduced — testnet Phase G showed full 18-dp precision (`29.899510860000000000`) |
 | C13 | `anchor_prepare_update_record_status` declares `index` optional; omitting it sends `0`, which the precompile rejects | E3 | Resolved — `index` required and 1-based; rejected by schema before any chain call |
-| C14 | RBAC denial did not say whether the chain or the API key refused | E4, E5 | Resolved — message names the API key |
+| C14 | RBAC denial did not say whether the chain or the API key refused | E4, E5 | Resolved — message names the caller's credential (API key or JWT) as the server-side principal |
 
 Then act on it: every failure gets a root cause from the span, a
 regression test in the layer that should have caught it, and a

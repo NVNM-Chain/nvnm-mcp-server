@@ -33,10 +33,14 @@ func requireRole(ctx context.Context, roles ...string) error {
 	// Name the principal explicitly. On the anchor role tools the bare
 	// "requires role admin" was genuinely ambiguous: those tools grant and
 	// revoke *on-chain* registry roles, so a denial naturally reads as "the
-	// signing address lacks the registry role" when it actually means "this
-	// API key lacks the role". A registry's own admin could be told it
-	// "requires role admin" with no way to tell which authorization failed.
+	// signing address lacks the registry role" when it actually means "the
+	// caller's credential lacks the role". A registry's own admin could be
+	// told it "requires role admin" with no way to tell which authorization
+	// failed. Claims here are unified across API-key and FusionAuth JWT
+	// validation (internal/auth/claims.go), so name the credential neutrally
+	// rather than assuming an API key.
 	return fmt.Errorf(
-		"your API key does not hold the role this tool requires (needs %s): %w",
+		"your credential (API key or JWT) does not hold the server-side role "+
+			"this tool requires (needs %s): %w",
 		strings.Join(roles, " or "), apperrors.ErrPermissionDenied)
 }

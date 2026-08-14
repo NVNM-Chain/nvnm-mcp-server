@@ -551,7 +551,7 @@ Returns the receipt for a mined transaction, including status, gas used, logs, a
 
 ## 5. evm\_get\_balance
 
-Returns the balance of an address in both wei and ether. Optionally specify a block number.
+Returns the balance of an address as raw wei plus a human-readable amount in the chain's gas token (`balance_human`, see `token_wrapped`). The `ether` field is a legacy alias for the same decimal amount and is NOT denominated in ether. Optionally specify a block number.
 
 ### Input Parameters
 
