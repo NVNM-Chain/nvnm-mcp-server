@@ -1,0 +1,17 @@
+# Opt-in Compose override for the file-backed multi-key store
+# (MCP_API_KEYS_FILE). The bind mount lives here rather than in
+# docker-compose.yml so the other documented auth backends -- the
+# MCP_API_KEY single-key dev override and KEY_STORE_BACKEND=postgres --
+# can start without a dummy .mcp-keys.json on disk.
+#
+# Usage (create the file first -- Docker creates a missing host path as a
+# DIRECTORY, which then fails the server's key-store load):
+#   make key-create NAME=local-dev ROLES=reader,writer
+#   docker compose -f docker-compose.yml -f docker-compose.file-keys.yml up --build
+#
+# `make compose-up` applies this override automatically when .env sets
+# MCP_API_KEYS_FILE.
+services:
+  nvnm-mcp-server:
+    volumes:
+      - ./.mcp-keys.json:/app/.mcp-keys.json:ro

@@ -40,11 +40,11 @@ services:
       NVNM_TRUSTED_PROXY_HOPS: "1"
     ports:
       - "9190:9190"   # Prometheus metrics (plain HTTP)
-    # Multi-key store file: uncomment when using MCP_API_KEYS_FILE (create the
-    # file first -- a missing host path would be created as a directory).
-    # For quick local runs, prefer MCP_API_KEY + MCP_API_KEY_ROLES in .env.
-    volumes:
-      - ./.mcp-keys.json:/app/.mcp-keys.json:ro
+    # Multi-key store file: the ./.mcp-keys.json bind mount lives in the
+    # opt-in docker-compose.file-keys.yml override, applied automatically by
+    # `make compose-up` when .env sets MCP_API_KEYS_FILE. Keeping it out of
+    # this file lets the MCP_API_KEY and Postgres key-store modes start
+    # without a dummy file on disk.
     working_dir: /app
     read_only: true
     security_opt:

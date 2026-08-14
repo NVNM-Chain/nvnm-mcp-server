@@ -114,7 +114,11 @@ func TestOutputSchemasAcceptEmittedJSON(t *testing.T) {
 	})
 
 	t.Run("balanceOutput", func(t *testing.T) {
-		assertSchemaAcceptsMarshaled(t, balanceOutput{NextActions: nextActions})
+		assertSchemaAcceptsMarshaled(t, balanceOutput{
+			BalanceHuman: "1 wmantraUSD",
+			TokenWrapped: "wmantraUSD",
+			NextActions:  nextActions,
+		})
 	})
 
 	t.Run("codeOutput", func(t *testing.T) {
@@ -127,6 +131,115 @@ func TestOutputSchemasAcceptEmittedJSON(t *testing.T) {
 
 	t.Run("unsignedTxOutput", func(t *testing.T) {
 		assertSchemaAcceptsMarshaled(t, unsignedTxOutput{NextActions: nextActions})
+	})
+
+	t.Run("overviewOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, overviewOutput{
+			ChainName:        "NVNM Chain Testnet",
+			ChainEnvironment: "testnet",
+			ChainID:          58887,
+			AnchorPrecompile: "0x0000000000000000000000000000000000000900",
+			ExplorerURL:      "https://explorer.example.com",
+			DocsURL:          "https://docs.example.com",
+			BridgeURL:        "https://bridge.example.com",
+			TokenNative:      "mantraUSD",
+			TokenWrapped:     "wmantraUSD",
+			WhatIsNVNMChain:  "notary chain",
+			PrivacyByDesign:  "hashes only",
+			Prereqs:          []string{"a funded wallet"},
+			CanonicalJourney: []canonicalJourneyStep{{Step: 1, Tool: "wallet_status", Hint: "check funding"}},
+			NextActions:      nextActions,
+		})
+	})
+
+	t.Run("setupWizardOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, setupWizardOutput{
+			State:   "funded_unused",
+			Message: "wallet is funded",
+			Wallet: &walletSnapshot{
+				Address:          "0x1234567890abcdef1234567890abcdef12345678",
+				BalanceWei:       "1000000000000000000",
+				BalanceHuman:     "1 wmantraUSD",
+				Nonce:            0,
+				HasSentTx:        false,
+				ChainID:          58887,
+				ChainEnvironment: "testnet",
+				TokenNative:      "mantraUSD",
+				TokenWrapped:     "wmantraUSD",
+			},
+			SampleCode:         []sampleCode{{Language: "go", Title: "anchor a hash", Code: "// sample"}},
+			BridgeURL:          "https://bridge.example.com",
+			WalletGeneratorURL: "https://wallet.example.com",
+			NextActions:        nextActions,
+		})
+	})
+
+	t.Run("walletStatusOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, walletStatusOutput{
+			Address:          "0x1234567890abcdef1234567890abcdef12345678",
+			BalanceWei:       "1000000000000000000",
+			BalanceHuman:     "1 wmantraUSD",
+			Nonce:            7,
+			HasSentTx:        true,
+			Status:           "funded_active",
+			ChainID:          58887,
+			ChainEnvironment: "testnet",
+			TokenNative:      "mantraUSD",
+			TokenWrapped:     "wmantraUSD",
+			NextActions:      nextActions,
+		})
+	})
+
+	t.Run("verifyHashOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, verifyHashOutput{
+			OK:          true,
+			Address:     "0x1234567890abcdef1234567890abcdef12345678",
+			Challenge:   "0xabc",
+			Expected:    "0xdef",
+			Got:         "0xdef",
+			NextActions: nextActions,
+		})
+	})
+
+	t.Run("verifySignatureOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, verifySignatureOutput{
+			OK:          false,
+			Address:     "0x1234567890abcdef1234567890abcdef12345678",
+			Challenge:   "0xabc",
+			RecoveredAt: "0xfedcba0987654321fedcba0987654321fedcba09",
+			NextActions: nextActions,
+		})
+	})
+
+	t.Run("getLogsOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, getLogsOutput{
+			Logs: []evm.NormalizedLog{{
+				Address:     "0x0000000000000000000000000000000000000900",
+				Topics:      []string{"0xtopic0"},
+				Data:        "0x",
+				BlockNumber: 42,
+				TxHash:      "0xhash",
+				TxIndex:     1,
+				LogIndex:    2,
+				Removed:     false,
+			}},
+			Count:       1,
+			NextActions: nextActions,
+		})
+	})
+
+	t.Run("callContractOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, callContractOutput{
+			Result:      "0x0000000000000000000000000000000000000000000000000000000000000001",
+			NextActions: nextActions,
+		})
+	})
+
+	t.Run("sendRawTxOutput", func(t *testing.T) {
+		assertSchemaAcceptsMarshaled(t, sendRawTxOutput{
+			TxHash:      "0x6b175474e89094c44da98b954eedeac495271d0f6b175474e89094c44da98b95",
+			NextActions: nextActions,
+		})
 	})
 }
 

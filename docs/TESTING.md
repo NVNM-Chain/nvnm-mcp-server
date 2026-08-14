@@ -85,10 +85,23 @@ The raw key is printed **once** — copy it now. It is stored hashed in
 
 **Single throwaway key (fastest):**
 
+Shell `export`s alone are NOT enough here: `make run-local` sources `.env`
+after them, and `.env.example` sets `MCP_API_KEYS_FILE=.mcp-keys.json` — the
+file path wins when both are set, so the server would silently keep using the
+file store. Put the values in `.env` itself:
+
 ```sh
-export MCP_API_KEYS_FILE=""            # the file path wins when both are set
-export MCP_API_KEY=local-e2e-throwaway-key
-export MCP_API_KEY_ROLES=reader,writer # REQUIRED; boot fails with ErrMissingAPIKeyRoles without it
+# in .env: comment out MCP_API_KEYS_FILE=..., then set
+MCP_API_KEY=local-e2e-throwaway-key
+MCP_API_KEY_ROLES=reader,writer   # REQUIRED; boot fails with ErrMissingAPIKeyRoles without it
+```
+
+Or leave `.env` untouched and launch the binary directly — nothing sources
+`.env` on this path, so the environment you pass is what the server sees:
+
+```sh
+MCP_API_KEYS_FILE="" MCP_API_KEY=local-e2e-throwaway-key \
+  MCP_API_KEY_ROLES=reader,writer ./bin/nvnm-mcp-server --transport http
 ```
 
 Authorization is default-deny: a key authorizes only what its roles permit, and
@@ -440,9 +453,14 @@ The write flow is the one surface where manual e2e is genuinely load-bearing,
 because the signing step lives outside the server by design.
 
 ```sh
-export ENABLE_WRITE_TOOLS=true      # write tools are not registered without it
+# in .env: ENABLE_WRITE_TOOLS=true   # write tools are not registered without it
 # key must hold writer / admin / automation; grant_role additionally requires admin
 ```
+
+Set it in `.env` (or pass it directly to a binary launched without `make`) —
+an `export` alone is overwritten when `make run-local` sources `.env`, which
+leaves the flag off. Restore `.env` afterwards: leaving write tools enabled is
+how a later `make run-http` ends up serving broadcast tools by accident.
 
 The loop: call an `anchor_prepare_*` tool → sign `raw_tx` (or the
 `wallet_tx_request`) **client-side** → broadcast via `evm_send_raw_transaction`

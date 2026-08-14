@@ -23,6 +23,7 @@ import (
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/auth"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
@@ -838,4 +839,122 @@ func TestE2E_Keyless_AuthedWriteReachesHandler(t *testing.T) {
 	if strings.Contains(msg, apperrors.ErrAuthRequired.Error()) {
 		t.Fatalf("authed write must not see auth-required rejection; got: %s", msg)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// evm_get_balance chain-unit fields E2E (PR #88)
+//
+// balance_human and token_wrapped changed the public MCP response shape.
+// The handler unit tests cover the computation; this proves the fields
+// survive the real tools/call round trip -- the SDK's output-schema
+// validation and JSON (un)marshaling -- exactly as a live agent sees them.
+// ---------------------------------------------------------------------------
+
+func TestE2E_CallTool_EvmGetBalance_ReportsChainUnits(t *testing.T) {
+	session := startTestServerWithConfig(t, e2eServerConfig{
+		evmClient: &mockEVM{
+			chainInfo: &evm.ChainInfo{ChainID: 58887, LatestBlockNumber: 100},
+			balance: &evm.NormalizedBalance{
+				Address: testAddr,
+				Wei:     "1000000000000000000",
+				Ether:   "1.000000000000000000",
+			},
+		},
+	})
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "evm_get_balance",
+		Arguments: map[string]any{"address": testAddr},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool returned error: %v", result.Content)
+	}
+
+	raw, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	var out balanceOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode structured content: %v", err)
+	}
+
+	// The test server runs as testnet (testServerConfig), whose gas token
+	// is the wrapped symbol from the environment naming table.
+	wantToken := config.NamingFor(config.EnvTestnet).Wrapped
+	if out.TokenWrapped != wantToken {
+		t.Errorf("token_wrapped = %q, want %q", out.TokenWrapped, wantToken)
+	}
+	wantHuman := "1.000000000000000000 " + wantToken
+	if out.BalanceHuman != wantHuman {
+		t.Errorf("balance_human = %q, want %q", out.BalanceHuman, wantHuman)
+	}
+	// The legacy alias must still be present for wire compatibility.
+	if out.Ether != "1.000000000000000000" {
+		t.Errorf("ether (legacy alias) = %q, want %q", out.Ether, "1.000000000000000000")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// anchor_prepare_update_record_status index-required E2E (PR #88)
+//
+// Dropping `omitempty` from Index claims the generated input schema now
+// rejects an omitted index BEFORE dispatch. Only a real tools/call through
+// the SDK's schema validation can prove that; the handler unit test only
+// covers the defense-in-depth zero check behind it.
+// ---------------------------------------------------------------------------
+
+func TestE2E_CallTool_UpdateRecordStatus_IndexRequired(t *testing.T) {
+	prepared := &anchor.UnsignedTransaction{}
+	session := startTestServerWithConfig(t, e2eServerConfig{
+		anchorClient: &mockAnchor{
+			info: anchor.PrecompileInfo{
+				Address:     testAddr,
+				ChainID:     58887,
+				ABILoaded:   true,
+				MethodCount: 5,
+			},
+			unsignedTx: prepared,
+		},
+	})
+
+	base := map[string]any{
+		"from":        "0x1234567890abcdef1234567890abcdef12345678",
+		"registry_id": 1,
+		"record_id":   1,
+		"status":      "Superseded",
+	}
+
+	t.Run("omitted index is rejected by the schema", func(t *testing.T) {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "anchor_prepare_update_record_status",
+			Arguments: base,
+		})
+		// The SDK surfaces schema validation failures either as a call-level
+		// error or as an error result, depending on version; both mean the
+		// omission never reached the chain. A success is the regression.
+		if err == nil && (result == nil || !result.IsError) {
+			t.Fatal("omitting index must be rejected before dispatch; call succeeded")
+		}
+	})
+
+	t.Run("index 1 is accepted", func(t *testing.T) {
+		args := map[string]any{"index": 1}
+		for k, v := range base {
+			args[k] = v
+		}
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "anchor_prepare_update_record_status",
+			Arguments: args,
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("index=1 must prepare successfully, got error: %v", result.Content)
+		}
+	})
 }

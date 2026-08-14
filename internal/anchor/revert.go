@@ -59,7 +59,14 @@ var safePrecompileReverts = []struct {
 		// On-chain role denial. Deliberately worded to distinguish it from
 		// this server's own API-key RBAC denial, which is about the caller's
 		// credential rather than the signing address's registry role.
-		"unauthorized",
+		//
+		// The match is the full observed revert fragment ("desc =
+		// unauthorized", from the chain's gRPC error surface), NOT the bare
+		// word "unauthorized": an RPC provider's own HTTP auth failure ("401
+		// Unauthorized") must not be reported as a role denial, or an
+		// operator credential outage would masquerade as a chain-side
+		// permission check.
+		"desc = unauthorized",
 		"on-chain authorization failed: the `from` address does not hold the " +
 			"role this write requires on the target registry (creating a " +
 			"registry makes you its admin; an admin grants editor with " +
