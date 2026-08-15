@@ -9,8 +9,9 @@ import (
 
 // ParseSignature parses the function, constructor, fallback, receive, event or
 // error signature. The syntax is similar to that of Solidity, but it is less
-// strict. The argument names are always optional, and the return keyword can
-// be omitted.
+// strict. The argument names are always optional, the parameter list may be
+// omitted if it is empty, and the "returns" keyword may be omitted as well.
+// Trailing semicolons are ignored.
 //
 // Tuples are represented as a list of types enclosed in parentheses, optionally
 // prefixed with the "tuple" keyword.
@@ -36,8 +37,8 @@ import (
 //   - event Foo(uint256 a, uint256 b)
 //   - error Foo(uint256 a, uint256 b)
 //
-// Signatures that are syntactically correct, but semantically invalid are
-// rejected by the parser.
+// The parser rejects signatures that are syntactically correct, but
+// semantically invalid.
 func ParseSignature(signature string) (Signature, error) {
 	return ParseSignatureAs(UnknownKind, signature)
 }
@@ -54,14 +55,15 @@ func ParseSignatureAs(kind SignatureKind, signature string) (Signature, error) {
 	if err != nil {
 		return Signature{}, err
 	}
-	if !p.onlyWhitespaceOrDelimiterLeft() {
-		return Signature{}, fmt.Errorf(`unexpected character %q at the end of the signature`, p.peek())
+	if c, found := p.firstUnexpected(); found {
+		return Signature{}, fmt.Errorf(`unexpected character %q at the end of the signature`, c)
 	}
 	return sig, nil
 }
 
-// ParseParameter parses the single parameter. The syntax is same as for
-// parameters in the ParseSignature function.
+// ParseParameter parses the single parameter.
+//
+// The parameter name, the data location, and the indexed flag are optional.
 func ParseParameter(signature string) (Parameter, error) {
 	p := &parser{in: []byte(signature)}
 	p.parseWhitespace()
@@ -69,8 +71,8 @@ func ParseParameter(signature string) (Parameter, error) {
 	if err != nil {
 		return Parameter{}, err
 	}
-	if !p.onlyWhitespaceOrDelimiterLeft() {
-		return Parameter{}, fmt.Errorf(`unexpected character %q at the end of the parameter`, p.peek())
+	if c, found := p.firstUnexpected(); found {
+		return Parameter{}, fmt.Errorf(`unexpected character %q at the end of the parameter`, c)
 	}
 	return typ, nil
 }
@@ -86,8 +88,8 @@ func ParseStruct(definition string) (Parameter, error) {
 	if err != nil {
 		return Parameter{}, err
 	}
-	if !p.onlyWhitespaceOrDelimiterLeft() {
-		return Parameter{}, fmt.Errorf(`unexpected character %q at the end of the struct`, p.peek())
+	if c, found := p.firstUnexpected(); found {
+		return Parameter{}, fmt.Errorf(`unexpected character %q at the end of the struct`, c)
 	}
 	return str, nil
 }
@@ -435,7 +437,7 @@ func (p *parser) parseSignature(kind SignatureKind) (Signature, error) {
 		sig.Kind = kind
 	}
 	if kind != UnknownKind && sig.Kind != kind {
-		return sig, fmt.Errorf("invalid signature kind: %s", sig.Kind)
+		return Signature{}, fmt.Errorf("invalid signature kind: expected %s, got %s", kind, sig.Kind)
 	}
 	// Parse name.
 	p.parseWhitespace()
@@ -453,6 +455,15 @@ func (p *parser) parseSignature(kind SignatureKind) (Signature, error) {
 	if sig.Outputs, err = p.parseOutputs(); err != nil {
 		return Signature{}, err
 	}
+	// Constructors, fallbacks and receives have no name; all other kinds
+	// require one.
+	if len(sig.Name) == 0 && (sig.Kind == UnknownKind || sig.Kind == FunctionKind || sig.Kind == EventKind || sig.Kind == ErrorKind) {
+		noun := "function"
+		if sig.Kind == EventKind || sig.Kind == ErrorKind {
+			noun = sig.Kind.String()
+		}
+		return Signature{}, fmt.Errorf(`missing %s name`, noun)
+	}
 	// Validate signature based on its kind.
 	switch sig.Kind {
 	case ConstructorKind:
@@ -469,7 +480,9 @@ func (p *parser) parseSignature(kind SignatureKind) (Signature, error) {
 		if len(sig.Name) > 0 {
 			return Signature{}, fmt.Errorf(`unexpected fallback name %q`, sig.Name)
 		}
-		validInOut := len(sig.Inputs) == 1 && sig.Inputs[0].Type == "bytes" && len(sig.Outputs) == 1 && sig.Outputs[0].Type == "bytes"
+		// A fallback function takes no arguments, unless it takes a single
+		// "bytes" argument and returns a single "bytes" value.
+		validInOut := len(sig.Inputs) == 1 && isBytes(sig.Inputs[0]) && len(sig.Outputs) == 1 && isBytes(sig.Outputs[0])
 		if !validInOut && len(sig.Inputs) > 0 {
 			return Signature{}, fmt.Errorf(`unexpected fallback inputs`)
 		}
@@ -532,17 +545,17 @@ func (p *parser) parseSignature(kind SignatureKind) (Signature, error) {
 // parseSignatureKind parses signature kind.
 func (p *parser) parseSignatureKind() SignatureKind {
 	switch {
-	case p.readBytes([]byte("function")):
+	case p.readNamedKeyword([]byte("function")):
 		return FunctionKind
-	case p.readBytes([]byte("constructor")):
+	case p.readKeyword([]byte("constructor")):
 		return ConstructorKind
-	case p.readBytes([]byte("fallback")):
+	case p.readKeyword([]byte("fallback")):
 		return FallbackKind
-	case p.readBytes([]byte("receive")):
+	case p.readKeyword([]byte("receive")):
 		return ReceiveKind
-	case p.readBytes([]byte("event")):
+	case p.readNamedKeyword([]byte("event")):
 		return EventKind
-	case p.readBytes([]byte("error")):
+	case p.readNamedKeyword([]byte("error")):
 		return ErrorKind
 	}
 	return UnknownKind
@@ -550,7 +563,7 @@ func (p *parser) parseSignatureKind() SignatureKind {
 
 func (p *parser) parseInputs() ([]Parameter, error) {
 	if p.peekByte('(') {
-		// Parameter list have exactly the same syntax as composite type, except
+		// Parameter lists have exactly the same syntax as composite type, except
 		// that it cannot have arrays.
 		args, err := p.parseCompositeType()
 		if err != nil {
@@ -567,7 +580,7 @@ func (p *parser) parseInputs() ([]Parameter, error) {
 func (p *parser) parseOutputs() ([]Parameter, error) {
 	returnsKeyword := false
 	p.parseWhitespace()
-	if p.readBytes([]byte("returns")) { // optional "returns" keyword
+	if p.readKeyword([]byte("returns")) { // optional "returns" keyword
 		returnsKeyword = true
 		p.parseWhitespace()
 	}
@@ -595,14 +608,14 @@ func (p *parser) parseOutputs() ([]Parameter, error) {
 func (p *parser) parseStruct() (Parameter, error) {
 	s := Parameter{}
 	// Parse struct keyword.
-	if !p.readBytes([]byte("struct")) {
+	if !p.readKeyword([]byte("struct")) {
 		if !p.hasNext() {
 			return Parameter{}, fmt.Errorf(`unexpected end of input, 'struct' keyword expected`)
 		}
 		return Parameter{}, fmt.Errorf(`unexpected character %q, 'struct' keyword expected`, p.peek())
 	}
 	p.parseWhitespace()
-	// Parse struct name.
+	// Parse struct name (optional).
 	s.Name = string(p.parseName())
 	p.parseWhitespace()
 	// Parse struct fields.
@@ -626,7 +639,10 @@ func (p *parser) parseStruct() (Parameter, error) {
 		// Parse field name.
 		field.Name = string(p.parseName())
 		if len(field.Name) == 0 {
-			return Parameter{}, fmt.Errorf(`unexpected end of input, field name expected`)
+			if !p.hasNext() {
+				return Parameter{}, fmt.Errorf(`unexpected end of input, field name expected`)
+			}
+			return Parameter{}, fmt.Errorf(`unexpected character %q, field name expected`, p.peek())
 		}
 		s.Tuple = append(s.Tuple, field)
 		p.parseWhitespace()
@@ -645,7 +661,7 @@ func (p *parser) parseStruct() (Parameter, error) {
 func (p *parser) parseModifiers() []string {
 	var mods []string
 	for {
-		if !p.hasNext() || p.peekByte('(') || p.peekBytes([]byte("returns")) {
+		if !p.hasNext() || p.peekByte('(') || p.peekKeyword([]byte("returns")) {
 			break
 		}
 		mod := string(p.parseName())
@@ -679,6 +695,11 @@ func (p *parser) parseParameter() (Parameter, error) {
 		if err != nil {
 			return Parameter{}, err
 		}
+		// An empty parameter list is a valid signature, but an empty tuple is
+		// not a valid type.
+		if len(arg.Tuple) == 0 {
+			return Parameter{}, fmt.Errorf(`empty tuple is not a valid type`)
+		}
 	case isAlpha(p.peek()) || isIdentifierSymbol(p.peek()):
 		arg, err = p.parseElementaryType()
 		if err != nil {
@@ -692,16 +713,16 @@ func (p *parser) parseParameter() (Parameter, error) {
 		p.parseWhitespace()
 		has := false
 		switch {
-		case p.readBytes([]byte("indexed")):
+		case p.readKeyword([]byte("indexed")):
 			arg.Indexed = true
 			has = true
-		case p.readBytes([]byte("storage")):
+		case p.readKeyword([]byte("storage")):
 			arg.DataLocation = Storage
 			has = true
-		case p.readBytes([]byte("memory")):
+		case p.readKeyword([]byte("memory")):
 			arg.DataLocation = Memory
 			has = true
-		case p.readBytes([]byte("calldata")):
+		case p.readKeyword([]byte("calldata")):
 			arg.DataLocation = CallData
 			has = true
 		}
@@ -778,6 +799,12 @@ func (p *parser) parseElementaryType() (Parameter, error) {
 			continue
 		}
 		break
+	}
+	if pos == p.pos {
+		if !p.hasNext() {
+			return Parameter{}, fmt.Errorf(`unexpected end of input, type expected`)
+		}
+		return Parameter{}, fmt.Errorf(`unexpected character %q, type expected`, p.peek())
 	}
 	arg.Type = string(p.in[pos:p.pos])
 	// Parse array declaration, if any.
@@ -871,15 +898,23 @@ func (p *parser) parseArray() ([]int, error) {
 	return arr, nil
 }
 
-// onlyWhitespaceOrDelimiterLeft returns true if there are only whitespaces left in the
-// input or if the remaining input is empty.
+// onlyWhitespaceOrDelimiterLeft returns true if there are only whitespaces
+// and semicolons left in the input or if the remaining input is empty.
 func (p *parser) onlyWhitespaceOrDelimiterLeft() bool {
+	_, found := p.firstUnexpected()
+	return !found
+}
+
+// firstUnexpected returns the first byte after the current position that is
+// neither a whitespace nor a semicolon. The second return value is false if
+// there is no such byte.
+func (p *parser) firstUnexpected() (byte, bool) {
 	for pos := p.pos; pos < len(p.in); pos++ {
 		if !isWhitespace(p.in[pos]) && p.in[pos] != ';' {
-			return false
+			return p.in[pos], true
 		}
 	}
-	return true
+	return 0, false
 }
 
 // hasNext returns true if there are more bytes to read.
@@ -940,6 +975,55 @@ func (p *parser) readBytes(b []byte) bool {
 	return false
 }
 
+// peekKeyword returns true if the next bytes are equal to b and b is not
+// followed by an identifier character.
+func (p *parser) peekKeyword(b []byte) bool {
+	if !p.peekBytes(b) {
+		return false
+	}
+	next := p.pos + len(b)
+	if next >= len(p.in) {
+		return true
+	}
+	return !isIdentifierChar(p.in[next])
+}
+
+// peekNamedKeyword returns true if the next bytes are equal to b and b is
+// followed by whitespace.
+func (p *parser) peekNamedKeyword(b []byte) bool {
+	if !p.peekBytes(b) {
+		return false
+	}
+	next := p.pos + len(b)
+	return next < len(p.in) && isWhitespace(p.in[next])
+}
+
+// readKeyword returns true if the next bytes are equal to b and advances the
+// position.
+func (p *parser) readKeyword(b []byte) bool {
+	if p.peekKeyword(b) {
+		p.pos += len(b)
+		return true
+	}
+	return false
+}
+
+// readNamedKeyword returns true if the next bytes are equal to b and advances
+// the position.
+func (p *parser) readNamedKeyword(b []byte) bool {
+	if p.peekNamedKeyword(b) {
+		p.pos += len(b)
+		return true
+	}
+	return false
+}
+
+// isBytes returns true if the parameter is a plain "bytes" type, that is, it
+// is not an array of bytes.
+func isBytes(p Parameter) bool {
+	return p.Type == "bytes" && len(p.Arrays) == 0
+}
+
 // isDigit returns true if b is a digit.
 func isDigit(c byte) bool {
 	return c >= '0' && c <= '9'
@@ -952,10 +1036,15 @@ func isAlpha(c byte) bool {
 
 // isWhitespace returns true if b is a whitespace character.
 func isWhitespace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n'
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 // isIdentifierSymbol returns true if b is a valid identifier symbol.
 func isIdentifierSymbol(c byte) bool {
 	return c == '$' || c == '_'
+}
+
+// isIdentifierChar returns true if b may occur inside an identifier.
+func isIdentifierChar(c byte) bool {
+	return isAlpha(c) || isDigit(c) || isIdentifierSymbol(c)
 }
