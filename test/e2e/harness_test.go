@@ -27,6 +27,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -252,6 +253,23 @@ func (f *flow) call(t *testing.T, tool string, args map[string]any) *mcp.CallToo
 	return result
 }
 
+// tryCall is call without the assertion that the transport survived. It
+// returns the transport error instead of failing on it, which only a
+// phase probing how the server behaves under a pathological input needs
+// -- a request that never comes back is a finding to report, not a
+// reason to abort the suite.
+func (f *flow) tryCall(
+	t *testing.T, tool string, args map[string]any,
+) (*mcp.CallToolResult, error) {
+	t.Helper()
+
+	f.calledTools[tool] = true
+	return f.session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      tool,
+		Arguments: args,
+	})
+}
+
 // callOK invokes a tool, asserts it did not return a tool-level error,
 // and decodes its structured content into out (which may be nil when
 // only the success itself matters).
@@ -299,42 +317,42 @@ func resultText(result *mcp.CallToolResult) string {
 }
 
 // --- Prepare / sign / broadcast / confirm ---
-
-// unsignedTx mirrors the JSON an anchor_prepare_* tool returns. Only the
-// fields this suite needs are declared.
-type unsignedTx struct {
-	RawTx    string `json:"raw_tx"`
-	Type     uint8  `json:"type"`
-	To       string `json:"to"`
-	Data     string `json:"data"`
-	Nonce    uint64 `json:"nonce"`
-	Gas      uint64 `json:"gas"`
-	GasPrice string `json:"gas_price"`
-	ChainID  int64  `json:"chain_id"`
-}
-
-// receipt mirrors the JSON evm_get_transaction_receipt returns.
-type receipt struct {
-	TxHash      string `json:"tx_hash"`
-	BlockNumber uint64 `json:"block_number"`
-	BlockHash   string `json:"block_hash"`
-	Status      string `json:"status"`
-	GasUsed     uint64 `json:"gas_used"`
-	Logs        []struct {
-		Address string   `json:"address"`
-		Topics  []string `json:"topics"`
-		Data    string   `json:"data"`
-		TxHash  string   `json:"tx_hash"`
-	} `json:"logs"`
-}
+//
+// The wire shapes these work with (unsignedTx, receipt) live in
+// wire_test.go with the rest of the published JSON contract.
 
 // prepare drives one of the anchor_prepare_* tools and returns the
-// unsigned transaction it produced.
+// unsigned transaction it produced. A tool-level rejection is fatal.
 func (f *flow) prepare(t *testing.T, tool string, args map[string]any) *unsignedTx {
 	t.Helper()
 
+	utx, errText := f.tryPrepare(t, tool, args)
+	if utx == nil {
+		t.Fatalf("%s returned a tool error: %s", tool, errText)
+	}
+	return utx
+}
+
+// tryPrepare is prepare without the demand that the tool accept the call:
+// it returns the unsigned transaction on success, or nil plus the tool's
+// error text when the tool rejected it. Phases probing behavior the docs
+// do not pin down -- whether the precompile accepts an explicit historical
+// version index, say -- need to observe a rejection and classify it rather
+// than die on it.
+//
+// A rejection here is usually a gas-estimation revert: anchor_prepare_*
+// estimates gas, which runs the precompile, so caller-input rejections
+// surface at prepare time rather than at broadcast time.
+func (f *flow) tryPrepare(t *testing.T, tool string, args map[string]any) (*unsignedTx, string) {
+	t.Helper()
+
+	result := f.call(t, tool, args)
+	if result.IsError {
+		return nil, resultText(result)
+	}
+
 	var utx unsignedTx
-	f.callOK(t, tool, args, &utx)
+	decodeStructured(t, tool, result, &utx)
 
 	if utx.RawTx == "" {
 		t.Fatalf("%s: raw_tx is empty", tool)
@@ -349,7 +367,73 @@ func (f *flow) prepare(t *testing.T, tool string, args map[string]any) *unsigned
 		t.Errorf("%s: to = %s, want the anchor precompile %s", tool, utx.To, f.anchorAddress)
 	}
 	t.Logf("  prepared %s: type=%d nonce=%d gas=%d", tool, utx.Type, utx.Nonce, utx.Gas)
-	return &utx
+	return &utx, ""
+}
+
+// assertUnsignedTxShape checks the envelope every anchor_prepare_* tool
+// promises, so each prepare phase can assert its own arguments and lean
+// on this for the rest. It is deliberately strict about the two
+// encodings: unsignedTx carries decimal strings, wallet_tx_request the
+// same values as 0x-hex quantities, and a caller pasting the wrong one
+// into a wallet gets a transaction that silently means something else.
+func assertUnsignedTxShape(t *testing.T, f *flow, utx *unsignedTx) {
+	t.Helper()
+
+	if !strings.HasPrefix(utx.RawTx, "0x") {
+		t.Errorf("raw_tx = %q, want a 0x-prefixed RLP hex string", utx.RawTx)
+	}
+	if !strings.HasPrefix(utx.Data, "0x") || len(utx.Data) < 10 {
+		t.Errorf("data = %q, want 0x + at least a 4-byte selector", utx.Data)
+	}
+	if utx.Type != 2 {
+		t.Errorf("type = %d, want 2 (EIP-1559 is the default since Phase 8.4)", utx.Type)
+	}
+	if utx.Value != "0" {
+		t.Errorf("value = %q, want %q; an anchor call never transfers native funds", utx.Value, "0")
+	}
+	if utx.MaxFeePerGas == "" || utx.MaxPriorityFeePerGas == "" {
+		t.Error("a type-2 transaction must carry both max_fee_per_gas and max_priority_fee_per_gas")
+	}
+	if utx.GasPrice != utx.MaxFeePerGas {
+		t.Errorf("gas_price = %q but max_fee_per_gas = %q; gas_price is dual-populated with "+
+			"max_fee_per_gas so a legacy signer still has a usable value", utx.GasPrice, utx.MaxFeePerGas)
+	}
+
+	// The browser-wallet form of the same transaction. That path is the
+	// one no test process can drive end to end, which is exactly why its
+	// shape is worth pinning here.
+	w := utx.WalletTxRequest
+	if w == nil {
+		t.Fatal("wallet_tx_request is absent; the browser-wallet signing path has nothing to hand to a wallet")
+	}
+	if !strings.EqualFold(w.From, f.address) {
+		t.Errorf("wallet_tx_request.from = %s, want %s", w.From, f.address)
+	}
+	if !strings.EqualFold(w.To, utx.To) {
+		t.Errorf("wallet_tx_request.to = %s, but the unsigned tx targets %s", w.To, utx.To)
+	}
+	if w.Data != utx.Data {
+		t.Error("wallet_tx_request.data differs from the unsigned tx calldata; the two signing " +
+			"paths would produce different transactions")
+	}
+	// The gas-pricing fields track the transaction type: a type-2 request
+	// carries the EIP-1559 pair and omits gasPrice.
+	for field, value := range map[string]string{
+		"value":                w.Value,
+		"chainId":              w.ChainID,
+		"gas":                  w.Gas,
+		"maxFeePerGas":         w.MaxFeePerGas,
+		"maxPriorityFeePerGas": w.MaxPriorityFeePerGas,
+	} {
+		if !strings.HasPrefix(value, "0x") {
+			t.Errorf("wallet_tx_request.%s = %q, want a 0x-hex quantity (EIP-1193 takes hex, "+
+				"not the decimal strings on the unsigned tx)", field, value)
+		}
+	}
+	if w.GasPrice != "" {
+		t.Errorf("wallet_tx_request.gasPrice = %q on a type-2 transaction; a wallet given both "+
+			"pricing schemes has to guess which one the caller meant", w.GasPrice)
+	}
 }
 
 // signBroadcastConfirm signs an unsigned transaction with the local key,
@@ -357,6 +441,20 @@ func (f *flow) prepare(t *testing.T, tool string, args map[string]any) *unsigned
 // evm_get_transaction_receipt until it is mined. It fails unless the
 // transaction lands with status "success".
 func (f *flow) signBroadcastConfirm(t *testing.T, utx *unsignedTx) *receipt {
+	t.Helper()
+
+	r := f.signBroadcastAllowRevert(t, utx)
+	if r.Status != "success" {
+		t.Fatalf("transaction %s did not succeed: status=%s", r.TxHash, r.Status)
+	}
+	return r
+}
+
+// signBroadcastAllowRevert is signBroadcastConfirm without the demand that
+// the transaction succeed: it returns the receipt whatever its status, so
+// a caller can treat an on-chain revert as an outcome to classify. A
+// transport failure or a receipt that never appears is still fatal.
+func (f *flow) signBroadcastAllowRevert(t *testing.T, utx *unsignedTx) *receipt {
 	t.Helper()
 
 	signedHex := f.sign(t, utx)
@@ -370,13 +468,42 @@ func (f *flow) signBroadcastConfirm(t *testing.T, utx *unsignedTx) *receipt {
 	}
 	t.Logf("  broadcast: tx=%s", sent.TxHash)
 
-	return f.waitForReceipt(t, sent.TxHash)
+	return f.pollReceipt(t, sent.TxHash)
 }
 
 // sign decodes the RLP raw_tx, signs it locally, and returns the
 // 0x-prefixed signed hex. This is the headless-signer path; the browser
 // path (wallet_tx_request) is not exercisable from a test process.
 func (f *flow) sign(t *testing.T, utx *unsignedTx) string {
+	t.Helper()
+	return f.signDecoded(t, f.decodeUnsigned(t, utx))
+}
+
+// signTo re-points an unsigned transaction at a different destination
+// before signing it. Only the relay-scope check in
+// evm_send_raw_transaction_test.go needs this: proving the relay refuses
+// a non-anchor destination takes a validly signed transaction that has
+// one, and nothing else can produce that.
+//
+// The result carries value=0, so even if a future change let it through
+// it would move no funds.
+func (f *flow) signTo(t *testing.T, utx *unsignedTx, to string) string {
+	t.Helper()
+
+	toAddr, err := defitypes.AddressFromHex(to)
+	if err != nil {
+		t.Fatalf("destination %q: %v", to, err)
+	}
+	tx := f.decodeUnsigned(t, utx)
+	tx.SetTo(toAddr)
+	tx.SetValue(big.NewInt(0))
+	return f.signDecoded(t, tx)
+}
+
+// decodeUnsigned turns the RLP raw_tx back into a transaction and pins
+// the chain ID, which the RLP of an unsigned type-2 transaction does not
+// always carry through the round trip.
+func (f *flow) decodeUnsigned(t *testing.T, utx *unsignedTx) *defitypes.Transaction {
 	t.Helper()
 
 	txBytes, err := hex.DecodeString(strings.TrimPrefix(utx.RawTx, "0x"))
@@ -391,6 +518,11 @@ func (f *flow) sign(t *testing.T, utx *unsignedTx) string {
 		t.Fatalf("negative chain_id %d", utx.ChainID)
 	}
 	tx.SetChainID(uint64(utx.ChainID))
+	return tx
+}
+
+func (f *flow) signDecoded(t *testing.T, tx *defitypes.Transaction) string {
+	t.Helper()
 
 	if signErr := f.key.SignTransaction(context.Background(), tx); signErr != nil {
 		t.Fatalf("sign tx: %v", signErr)
@@ -402,9 +534,11 @@ func (f *flow) sign(t *testing.T, utx *unsignedTx) string {
 	return "0x" + hex.EncodeToString(signedBytes)
 }
 
-// waitForReceipt polls evm_get_transaction_receipt (the real tool, not a
-// local chain client) until the transaction is mined.
-func (f *flow) waitForReceipt(t *testing.T, txHash string) *receipt {
+// pollReceipt polls evm_get_transaction_receipt (the real tool, not a
+// local chain client) until the transaction is mined, and returns the
+// receipt whatever status it carries. Judging that status is the caller's
+// job.
+func (f *flow) pollReceipt(t *testing.T, txHash string) *receipt {
 	t.Helper()
 
 	deadline := time.Now().Add(receiptTimeout)
@@ -420,9 +554,6 @@ func (f *flow) waitForReceipt(t *testing.T, txHash string) *receipt {
 		var r receipt
 		decodeStructured(t, "evm_get_transaction_receipt", result, &r)
 		t.Logf("  mined: status=%s block=%d gasUsed=%d", r.Status, r.BlockNumber, r.GasUsed)
-		if r.Status != "success" {
-			t.Fatalf("transaction %s did not succeed: status=%s", txHash, r.Status)
-		}
 		return &r
 	}
 
