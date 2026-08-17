@@ -11,7 +11,7 @@ LDFLAGS := -s -w
 
 .PHONY: all build run run-http run-local healthz readyz metrics \
         mcp-probe mcp-probe-help seed-test-data \
-        test test-unit test-integration test-coverage coverage-check test-verbose \
+        test test-unit test-integration test-e2e test-coverage coverage-check test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
@@ -138,6 +138,12 @@ test-unit:
 
 test-integration:
 	$(GO) test $(GOFLAGS) -tags integration ./...
+
+# Drives every MCP tool against a real deployed server and the real
+# chain. Spends testnet gas; skips without .chain_credentials.txt.
+# See test/e2e/README.md for configuration.
+test-e2e:
+	$(GO) test $(GOFLAGS) -tags e2e -v -timeout 20m ./test/e2e/...
 
 test-coverage:
 	$(GO) test -race -coverprofile=coverage.out ./...
@@ -337,6 +343,7 @@ help:
 	@echo "  test             Run all tests"
 	@echo "  test-unit        Unit tests only (-short)"
 	@echo "  test-integration Integration tests (-tags integration)"
+	@echo "  test-e2e         Every MCP tool against a live server + chain (see test/e2e/README.md)"
 	@echo "  test-coverage    Tests with -race + coverage report"
 	@echo "  coverage-check   test-coverage + enforce the $(COVERAGE_THRESHOLD)% total coverage gate"
 	@echo "  test-verbose     Verbose test output"
