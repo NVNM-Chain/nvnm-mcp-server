@@ -17,28 +17,29 @@ import (
 // already-anchored record.
 //
 // This is the deepest file in the suite, because the tool's one
-// interesting parameter is the one its documentation gets wrong.
+// interesting parameter is the one that cannot be checked without state.
 //
-// `index` selects which version of a record to update. The tool schema
-// and docs/TOOL_REFERENCE.md both call it optional, "default: latest".
-// Nothing implements that default: index is a plain uint64 from
-// prepareUpdateRecordStatusInput through
-// anchor.PrepareUpdateRecordStatusRequest to EncodeArgs, and
-// abi/anchoring.json declares a required uint64 -- so an omitted index
-// goes on the wire as a literal 0, indistinguishable from a caller who
-// typed "index": 0. Version indexes are 1-based, and the precompile
-// rejects 0 outright. There is currently no way to say "the latest
-// version".
+// `index` selects which version of a record to update, and the tool
+// schema and docs/TOOL_REFERENCE.md both call it optional, defaulting to
+// the latest version. The ABI has no way to express "absent" --
+// abi/anchoring.json declares a plain uint64, and version indexes are
+// 1-based, so the 0 an omitted index would encode as names no version at
+// all. The server closes that gap itself: PrepareUpdateRecordStatus
+// resolves nil and 0 alike to a concrete index with one `records` read
+// before packing the call, so the transaction a caller signs always
+// names the version it will move.
 //
-// Note the asymmetry with the read side, which is where that "default:
-// latest" wording presumably came from: anchor_get_records takes
-// *uint64, checks for nil, and the precompile does treat a zero index as
-// "latest" there. Reading works the way the docs describe. Writing does
-// not.
+// That makes the write path agree with the read side, which is where the
+// "default: latest" wording came from in the first place:
+// anchor_get_records takes *uint64 and the precompile treats a zero
+// index as "latest". Both tools now spell "latest" the same two ways.
 //
-// The phases below are ordered by how much they can see:
+// So the claims under test here are chain-level, not code-level: an
+// omitted index must move the latest version, an explicit 0 must do
+// exactly what omitting it does, and neither may touch any other
+// version. The phases are ordered by how much they can see:
 //
-//	phaseUpdateRecordStatus           one version  -- the happy path and the broken default
+//	phaseUpdateRecordStatus           one version  -- the happy path and the rejections
 //	phaseUpdateRecordStatusVersioned  three versions -- where index actually selects something
 //
 // A single-version record cannot distinguish "latest" from "version 1"
@@ -50,33 +51,22 @@ import (
 const versionCount = 3
 
 // phaseUpdateRecordStatus drives the tool against the single-version
-// fixture record: the documented call form, the one that actually works,
-// the read-back, and the input rejections.
+// fixture record: the documented call form, the read-back, and the input
+// rejections.
 func phaseUpdateRecordStatus(t *testing.T, f *flow) {
 	const wantStatus = "Revoked"
 
 	t.Logf("fixture record: record_id=%d index=%d", f.recordID, f.recordIndex)
 
-	// The documented form: no index at all, which the schema says means
-	// "latest".
+	// The documented form: no index at all, which means "latest".
 	if outcome := tryUpdateStatus(t, f, f.recordID, nil, wantStatus); !outcome.applied {
-		t.Errorf("updating with index omitted %s -- but index is documented as optional, "+
+		t.Fatalf("updating with index omitted %s -- but index is documented as optional, "+
 			"defaulting to the latest version, in both the tool schema and "+
-			"docs/TOOL_REFERENCE.md. An omitted index is encoded as a literal 0, which the "+
-			"precompile does not accept as a version selector", outcome.describe())
-
-		// Fall back to the form that does work, so the read-back below is
-		// still exercised rather than lost behind the failure above.
-		index := f.recordIndex
-		if retry := tryUpdateStatus(t, f, f.recordID, &index, wantStatus); !retry.applied {
-			t.Fatalf("updating record %d with its own index=%d %s; the tool cannot change a "+
-				"record's status by any documented form of the call",
-				f.recordID, index, retry.describe())
-		}
-		t.Logf("the same update with an explicit index=%d was applied", index)
+			"docs/TOOL_REFERENCE.md, and the server resolves an omitted index to the "+
+			"record's current version before building the transaction", outcome.describe())
 	}
 
-	// Whatever form landed it, a subsequent read must show the new status.
+	// The update must be visible on a subsequent read.
 	var out recordsResponse
 	f.callOK(t, "anchor_get_records", map[string]any{
 		"registry_id": f.registryID,
@@ -122,6 +112,13 @@ func phaseUpdateRecordStatus(t *testing.T, f *flow) {
 			"from": f.address, "registry_id": f.registryID, "record_id": uint64(1 << 40),
 			"index": index, "status": "Active",
 		}},
+		// The same record, with the index omitted, is rejected a step
+		// earlier: there is no latest version to resolve, and the server
+		// will not invent one to hand to gas estimation.
+		{"unknown record_id, index omitted", map[string]any{
+			"from": f.address, "registry_id": f.registryID, "record_id": uint64(1 << 40),
+			"status": "Active",
+		}},
 		{"index past the last version", map[string]any{
 			"from": f.address, "registry_id": f.registryID, "record_id": f.recordID,
 			"index": index + 100, "status": "Active",
@@ -140,9 +137,10 @@ func phaseUpdateRecordStatus(t *testing.T, f *flow) {
 // the latest version and a historical one, and checks each update landed
 // on the version it named and on no other.
 //
-// Three versions are three distinct rows, so "index omitted" (encoded as
-// 0), "index = the latest version" and "index = an older version" now
-// select different things. Every version is read back by
+// Three versions are three distinct rows, so "index omitted", "index =
+// the latest version" and "index = an older version" now select
+// different things -- and the first two must select the same thing.
+// Every version is read back by
 // (registry_id, record_id, index) after each write -- the only lookup
 // mode that can see a superseded version, and so the only way to know
 // which row moved.
@@ -194,16 +192,17 @@ func phaseUpdateRecordStatusVersioned(t *testing.T, f *flow) {
 
 	// The documented default. "index optional, default: latest" is a
 	// promise about this exact call, and with several versions it is
-	// finally falsifiable.
+	// finally falsifiable: only now can a landed update be attributed to
+	// the latest version rather than merely to some version.
 	var omitted updateOutcome
 	t.Run("index_omitted", func(t *testing.T) {
 		const want = "Superseded"
 		omitted = tryUpdateStatus(t, f, recordID, nil, want)
 		if !omitted.applied {
-			t.Errorf("updating with index omitted %s -- but the tool schema and "+
+			t.Errorf("updating with index omitted %s -- the tool schema and "+
 				"docs/TOOL_REFERENCE.md document index as optional, defaulting to the latest "+
-				"version; an omitted index is encoded as a literal 0, and this is what the "+
-				"precompile makes of it", omitted.describe())
+				"version, and the server resolves it against the chain before signing",
+				omitted.describe())
 			assertUnchanged(t, f, recordID, versions, before)
 			return
 		}
@@ -211,19 +210,19 @@ func phaseUpdateRecordStatusVersioned(t *testing.T, f *flow) {
 		before = readVersions(t, f, recordID, versions)
 	})
 
-	// An explicit index=0, which is byte-for-byte the same calldata the
-	// omitted form produces. Asserting the two outcomes match is what
-	// turns "an omitted index is encoded as 0" from a claim about the
-	// code into something the chain confirms -- and it pins the ambiguity
-	// a caller is left with: there is no way to say "latest" that does
-	// not also mean "version zero".
+	// An explicit index=0. Version indexes are 1-based, so 0 names no
+	// version and both tools read it as "latest" -- the server resolves
+	// it exactly as it resolves an omitted index. This case asserts the
+	// two forms agree rather than asserting either one's outcome: a
+	// caller who writes 0 and a caller who writes nothing must not end up
+	// moving different rows.
 	t.Run("index_zero", func(t *testing.T) {
 		const want = "Superseded"
 		zero := uint64(0)
 		outcome := tryUpdateStatus(t, f, recordID, &zero, want)
 		if outcome.applied != omitted.applied {
 			t.Errorf("index=0 %s but omitting index %s; the two must be indistinguishable, "+
-				"since an omitted uint64 is encoded as 0 in the calldata either way",
+				"since the server resolves both to the record's latest version",
 				outcome.describe(), omitted.describe())
 		}
 		if !outcome.applied {
@@ -235,10 +234,9 @@ func phaseUpdateRecordStatusVersioned(t *testing.T, f *flow) {
 		before = readVersions(t, f, recordID, versions)
 	})
 
-	// The same update, naming the latest version explicitly. If this
-	// works and index_omitted does not, "default: latest" is
-	// documentation for behavior that does not exist and callers must
-	// always pass an index.
+	// The same update, naming the latest version explicitly. This is the
+	// tool's whole job -- changing a record's current status -- and it
+	// must work whether or not the caller leans on the default.
 	t.Run("explicit_latest_index", func(t *testing.T) {
 		const want = "Revoked"
 		outcome := tryUpdateStatus(t, f, recordID, &latest.Index, want)
@@ -424,8 +422,8 @@ func tryUpdateStatus(
 // assertOnlyChanged checks that a landed update moved the version it
 // named to wantStatus and left every other version alone. The second half
 // is the point: an update that reports success while changing a different
-// version is precisely the failure an unimplemented index default would
-// produce.
+// version is precisely the failure a mis-resolved index default would
+// produce, and the only way to catch it is to read every version back.
 func assertOnlyChanged(
 	t *testing.T,
 	f *flow,

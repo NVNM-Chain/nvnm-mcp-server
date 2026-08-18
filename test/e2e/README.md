@@ -113,65 +113,72 @@ as loudly as a missing one.
 ## Notes for maintainers
 
 **Status: run against `mcp-testnet.nvnmchain.io` (nvnm-testnet-1) on
-2026-08-17.** 23/23 tools covered. Four phases fail, all of them reporting
+2026-08-17.** 23/23 tools covered. Three phases fail, all of them reporting
 real defects rather than suite bugs:
 
 | Failing phase | What the server does |
 |---|---|
-| `anchor_prepare_update_record_status` (and `..._versioned/index_omitted`) | Omitting `index` is rejected, though the schema documents it as optional and defaulting to the latest version. See below. |
 | `anchor_get_registry` | `creator` comes back bech32 (`nvnm1d3s…`), not the `0x` address the field is documented as — and the same docs tell callers to disambiguate duplicate registry names on it. |
 | `evm_get_transaction` | `block_number` and `block_hash` are both absent for a transaction that already has a receipt, with `is_pending` false. A caller cannot locate a mined transaction from the response. |
 | `evm_get_transaction_receipt` | A lookup for a hash that was never broadcast does not answer within the 30s client timeout. The harness polls this tool on every write expecting a prompt not-found, so this is on the path every write already takes. |
 
-**Omitting `index` from `anchor_prepare_update_record_status` does not
-work, and there is no way to say "latest".** The tool schema and
-`docs/TOOL_REFERENCE.md` both call `index` optional, "default: latest".
-Nothing implements that default: `index` is a plain `uint64` from
-`prepareUpdateRecordStatusInput` through
-`anchor.PrepareUpdateRecordStatusRequest` to `EncodeArgs`, and
-`abi/anchoring.json` declares it a required `uint64`, so an omitted index
-goes on the wire as a literal `0` — indistinguishable from a caller who
-typed `"index": 0`. The chain confirms both halves: the two forms fail
-identically (gas estimation reverts, so the tool rejects the call before
-anything is signed), and an explicit `index` matching a real version
-succeeds. Version indexes are 1-based, so `0` is no version at all.
+A fourth phase used to fail here — `anchor_prepare_update_record_status`
+rejected the documented index-omitted call. That is fixed in this
+repository, and the two status phases pass against it; they were verified
+by running the built server locally against the same testnet chain
+(`NVNM_MCP_TEST_SERVER_URL=http://127.0.0.1:8181`), because a deployment
+still carrying the old build will keep failing them until it is updated.
+What those phases now pin is described next.
 
-Note the asymmetry with the read path, which is where the "default:
-latest" wording presumably came from: `anchor_get_records` *does* treat
-`index=0` as "latest" — it takes `*uint64` and checks for nil
-(`internal/anchor/client.go`) — while the write path has no such
-optionality. Reading works the way the docs describe; writing does not.
+**`index` is optional, and both `0` and omitting it mean "latest".** The
+tool schema and `docs/TOOL_REFERENCE.md` call `index` optional,
+"default: latest", and the server implements that default rather than
+passing the caller's silence through to the ABI. It cannot pass it
+through: `abi/anchoring.json` declares a plain `uint64`, version indexes
+are 1-based, and the `0` an omitted index would encode as names no
+version at all — gas estimation reverts on it. So
+`anchor.PrepareUpdateRecordStatus` takes `Index *uint64` and resolves nil
+and `0` alike with one `records` read before packing the call
+(`internal/anchor/prepare.go`). The transaction a caller signs therefore
+always carries a concrete index, and a record with no version to update
+is rejected up front with `record not found` instead of an opaque
+gas-estimation revert.
 
-`phaseUpdateRecordStatus` covers the single-version record. The
-distinction cannot be drawn there — one version means "latest", "first"
-and "whatever `0` selects" would all be the same row — so that phase tries
-the documented form, reports its rejection, and then does the update the
-way a caller actually has to, so the read-back assertion still runs.
-`phaseUpdateRecordStatusVersioned` is where the readings come apart: it
-anchors three versions of one document and updates the latest and a
-historical one, reading every version back by
-`(registry_id, record_id, index)` after each write — the only lookup mode
-that can see a superseded version, and so the only way to know *which* row
-moved.
+That makes the write path agree with the read path, which is where the
+"default: latest" wording came from: `anchor_get_records` also treats
+`index=0` as "latest" (`internal/anchor/client.go`), pinned by
+`phaseGetRecords`. Both tools now spell "latest" the same two ways.
+
+`phaseUpdateRecordStatus` covers the single-version record: it makes the
+documented call, requires it to land, and reads the status back. The
+version distinction cannot be drawn there — with one version, "latest",
+"first" and "whatever `0` selects" are all the same row — which is why
+`phaseUpdateRecordStatusVersioned` exists. It anchors three versions of
+one document and updates the latest and a historical one, reading every
+version back by `(registry_id, record_id, index)` after each write — the
+only lookup mode that can see a superseded version, and so the only way
+to know *which* row moved.
 
 Its four cases assert different things on purpose. `index_omitted` must
-work, because the schema promises it (this is the failing one).
-`index_zero` asserts only that it behaves *identically* to the omitted
-form, which is what makes "an omitted index is encoded as `0`" a fact
-about the chain rather than a reading of the code. `explicit_latest_index`
-must work, because changing a record's current status is the tool's whole
-job. `explicit_historical_index` presumes no answer: the precompile
-accepts it today (statuses are per-version and independent), but if a
-future rule forbids it, the case records the rejection and asserts nothing
-moved. What every case asserts either way is that the write agreed with
-the read — landed, and only the named version changed; rejected, and
-nothing changed at all. A call that reports success while moving a
-different version is the failure they exist to catch.
+work, because the schema promises it, and must land on the latest
+version — with three rows, that is finally an attributable claim.
+`index_zero` asserts that `0` behaves *identically* to the omitted form,
+which is the chain-level statement that the two spellings resolve to one
+version rather than two. `explicit_latest_index` must work, because
+changing a record's current status is the tool's whole job.
+`explicit_historical_index` presumes no answer: the precompile accepts it
+today (statuses are per-version and independent), but if a future rule
+forbids it, the case records the rejection and asserts nothing moved.
+What every case asserts either way is that the write agreed with the
+read — landed, and only the named version changed; rejected, and nothing
+changed at all. A call that reports success while moving a different
+version is the failure they exist to catch.
 
 An earlier revision of this file claimed a missing index "means the latest
 version", claimed an explicit index "is rejected on chain", and told
-maintainers not to pass `rec.Index`. All three are false; none had been
-verified.
+maintainers not to pass `rec.Index`. All three were false; none had been
+verified. The first is true now only because the server was changed to
+make it true.
 
 **Versions are keyed by checksum, not by URI.** `anchor_prepare_add_record`
 hardcodes `recordId=0` and `index=0` in the record tuple and exposes no

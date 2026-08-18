@@ -106,8 +106,10 @@ func phaseGetRecords(t *testing.T, f *flow) {
 
 	// index=0 is how the read path spells "latest": GetRecordsRequest
 	// takes *uint64 and treats absent as unset, and the precompile reads
-	// a zero index as the latest version. Worth pinning, because the
-	// write path does NOT accept 0 -- see anchor_prepare_update_record_status_test.go.
+	// a zero index as the latest version. Worth pinning, because
+	// anchor_prepare_update_record_status is specified against it -- it
+	// resolves a zero or omitted index to the latest version too, so the
+	// two tools have to agree on what 0 means.
 	var byZeroIndex recordsResponse
 	f.callOK(t, "anchor_get_records", map[string]any{
 		"registry_id": f.registryID,

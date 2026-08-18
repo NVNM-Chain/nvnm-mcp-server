@@ -1273,8 +1273,17 @@ Construct an unsigned `updateRecordStatus` transaction to change the status of a
 | `from`          | `string` | required | Editor EVM address (0x-prefixed)               |
 | `registry_id`   | `uint64` | required | Registry numeric ID                            |
 | `record_id`     | `uint64` | required | Record numeric ID                              |
-| `index`         | `uint64` | optional | Version index of the record (default: latest)  |
+| `index`         | `uint64` | optional | Version index of the record, 1-based. Omit it, or pass `0`, to update the latest version. |
 | `status`        | `string` | required | New record status, e.g. `Active`, `Superseded`, `Revoked` |
+
+Version indexes are 1-based, so `0` names no version and — as on
+[anchor\_get\_records](#12-anchor_get_records) — means "latest" on this tool too.
+Because the on-chain `updateRecordStatus` method takes a plain `uint64` and has
+no way to encode "absent", the server resolves an omitted or zero `index` to the
+record's current version (one `records` read) *before* building the transaction.
+The unsigned transaction you sign therefore always names a concrete version, and
+a `record_id` with no versions is rejected up front rather than reverting during
+gas estimation.
 
 ### Output Fields
 
@@ -1284,6 +1293,8 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
 
 - Invalid `from` address.
 - Missing/empty `status` (validated client-side before any RPC; wraps `missing required parameter`).
+- `record not found` when `index` is omitted (or `0`) and `(registry_id, record_id)` has no version to resolve.
+- Latest-version lookup failure (RPC error), reported as `resolve latest version index`.
 - ABI encoding failure.
 - Nonce lookup failure (RPC error).
 - Gas estimation failure (RPC error or EVM revert, e.g., record not found, or caller lacks the editor role).

@@ -118,9 +118,13 @@ type mockAnchor struct {
 	// lastRegistriesReq records the most recent GetRegistries request so
 	// tests can assert how tool inputs map onto the precompile call.
 	lastRegistriesReq anchor.GetRegistriesRequest
-	records           *anchor.GetRecordsResponse
-	unsignedTx        *anchor.UnsignedTransaction
-	returnErr         error
+	// lastUpdateStatusReq records the most recent
+	// PrepareUpdateRecordStatus request so tests can assert that an
+	// omitted index reaches the anchor client as nil rather than 0.
+	lastUpdateStatusReq anchor.PrepareUpdateRecordStatusRequest
+	records             *anchor.GetRecordsResponse
+	unsignedTx          *anchor.UnsignedTransaction
+	returnErr           error
 }
 
 func (m *mockAnchor) Info() anchor.PrecompileInfo { return m.info }
@@ -156,8 +160,9 @@ func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddReco
 	return m.unsignedTx, m.returnErr
 }
 func (m *mockAnchor) PrepareUpdateRecordStatus(
-	_ context.Context, _ anchor.PrepareUpdateRecordStatusRequest,
+	_ context.Context, req anchor.PrepareUpdateRecordStatusRequest,
 ) (*anchor.UnsignedTransaction, error) {
+	m.lastUpdateStatusReq = req
 	return m.unsignedTx, m.returnErr
 }
 func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
@@ -1688,6 +1693,70 @@ func TestHandler_PrepareUpdateRecordStatus_Happy(t *testing.T) {
 	}
 	if out.Gas != 63000 {
 		t.Errorf("Gas = %d, want 63000", out.Gas)
+	}
+	// An omitted index must stay omitted all the way to the anchor client,
+	// which is the only layer that can resolve it to the latest version. A
+	// value uint64 here would collapse "latest" into a literal 0 -- the
+	// version index that names no version at all.
+	if m.lastUpdateStatusReq.Index != nil {
+		t.Errorf("Index = %d, want nil for an omitted index", *m.lastUpdateStatusReq.Index)
+	}
+}
+
+// TestHandler_PrepareUpdateRecordStatus_IndexForwarded pins the other half:
+// an index the caller did name is passed through untouched.
+func TestHandler_PrepareUpdateRecordStatus_IndexForwarded(t *testing.T) {
+	tests := []struct {
+		name  string
+		index uint64
+	}{
+		{"explicit version", 3},
+		{"explicit zero means latest", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &mockAnchor{unsignedTx: sampleUnsignedTx}
+			handler := makePrepareUpdateRecordStatusHandler(m, testLogger())
+
+			index := tc.index
+			if _, _, err := handler(ctx, nil, prepareUpdateRecordStatusInput{
+				From:       testAddr,
+				RegistryID: 1,
+				RecordID:   7,
+				Index:      &index,
+				Status:     "Superseded",
+			}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got := m.lastUpdateStatusReq.Index
+			if got == nil {
+				t.Fatalf("Index = nil, want %d", tc.index)
+			}
+			if *got != tc.index {
+				t.Errorf("Index = %d, want %d", *got, tc.index)
+			}
+		})
+	}
+}
+
+func TestAuditIndex(t *testing.T) {
+	one, zero := uint64(1), uint64(0)
+	tests := []struct {
+		name  string
+		index *uint64
+		want  string
+	}{
+		{"omitted", nil, "latest"},
+		{"explicit zero", &zero, "latest"},
+		{"explicit version", &one, "1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := auditIndex(tc.index); got != tc.want {
+				t.Errorf("auditIndex = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
