@@ -9,6 +9,23 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`anchor_prepare_update_record_status` now implements the documented
+  `index` default.** The tool schema and `docs/TOOL_REFERENCE.md` have always
+  called `index` optional, "default: latest", but nothing implemented it: the
+  parameter was a plain `uint64` all the way to `EncodeArgs`, so an omitted
+  index went on the wire as a literal `0`. Version indexes are 1-based, so `0`
+  names no version, the precompile reverted during gas estimation, and there
+  was no way to say "latest" at all. `index` is now a pointer end to end, and
+  the anchor client resolves an omitted (or `0`) index to the record's current
+  version with one `records` read before building the transaction — so the
+  unsigned transaction always names a concrete version. As on
+  `anchor_get_records`, an explicit `0` also means "latest", and the two tools
+  now agree on what a zero index selects. A `(registry_id, record_id)` with no
+  version to resolve is rejected up front with `record not found` instead of an
+  opaque gas-estimation revert. Found by `test/e2e`.
+
 ## [1.0.0-rc18] - 2026-08-13
 
 ### Added

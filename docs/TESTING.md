@@ -18,6 +18,7 @@ CI additionally enforces a **minimum total statement coverage of 80%** on every 
 make test              # All unit tests (no integration)
 make test-unit         # Unit tests with -short flag
 make test-integration  # Integration tests against live testnet (requires network)
+make test-e2e          # Every MCP tool against a live server + live chain (spends testnet gas)
 make test-coverage     # Unit tests with race detector + HTML coverage report
 make coverage-check    # test-coverage + enforce the 80% total-coverage gate (same check CI runs)
 make test-verbose      # Verbose output, no caching
@@ -32,6 +33,7 @@ make seed-test-data    # Create a test registry with phoney records on-chain
 |---------|-------------|---------|
 | `make test` | Go 1.26+ | -- |
 | `make test-integration` | Network access to `https://evm.testnet.nvnmchain.io` | -- |
+| `make test-e2e` | Reachable MCP server + funded `.chain_credentials.txt` wallet | See `test/e2e/README.md` |
 | `make test-load` | k6, running server on `:8080` | `brew install k6` |
 | `make docker-smoke` | Docker Desktop | -- |
 | `make seed-test-data` | `.chain_credentials.txt` in project root | See below |
@@ -138,6 +140,8 @@ Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-tes
 
 These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write path, API key auth, stateless behavior).
 
+Note the scope: these exercise the real MCP protocol stack (HTTP transport, JSON-RPC framing, session management, auth middleware) but wire **mock** `evm.Client` / `anchor.Client` underneath, so no chain is involved. For the fully-live variant — a real deployed server and the real chain — see layer 4a below.
+
 **Basic E2E** (`server_test.go`):
 
 | Test | What's verified |
@@ -224,6 +228,24 @@ This layer validates: HTTP transport, SSE/JSON response framing, MCP session man
 | `TestManagedKeyStore_Counters` | ActiveCount/TotalCount track enable/disable |
 | `TestManagedKeyStore_EmptyOnNewFile` | New file → Empty()=true, TotalCount=0 |
 | `TestManagedKeyStore_FilePermissions` | Keys file written with 0600 permissions |
+
+### 4a. Full End-to-End Tests (`test/e2e`, live server + live chain)
+
+`test/e2e` holds one ordered run that drives **every MCP tool the server advertises** against a **real deployed server** over real HTTP, backed by the **real testnet chain**. Nothing is mocked and nothing is started in-process; signing happens locally, so the server never receives a key. Excluded from default builds by the `//go:build e2e` tag.
+
+```bash
+make test-e2e     # or: go test -tags e2e -v ./test/e2e/...
+```
+
+Writes are real transactions — each run creates a registry and a record, updates that record's status, and grants + revokes a role, spending testnet gas. Requires `.chain_credentials.txt` (same file as the integration write tests) and a funded wallet; skips cleanly without either.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NVNM_MCP_TEST_SERVER_URL` | `https://mcp-testnet.nvnmchain.io` | MCP server under test |
+| `NVNM_MCP_TEST_API_KEY` | *(unset)* | Bearer token; omit against a keyless deployment |
+| `NVNM_MCP_TEST_CREDENTIALS` | `../../.chain_credentials.txt` | Signing credentials file |
+
+The final `coverage` phase compares the tools the run called against the server's `tools/list`, so a tool added without a corresponding phase fails the suite rather than silently going untested. See `test/e2e/README.md` for the full details.
 
 ### 5. k6 Load Tests
 
