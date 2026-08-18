@@ -48,14 +48,14 @@ const (
 
 	// envAPIKey, when set, is sent as a Bearer token on every request.
 	// Leave unset against a keyless deployment.
-	envAPIKey = "NVNM_MCP_TEST_API_KEY"
+	envAPIKey = "NVNM_MCP_TEST_API_KEY" //nolint:gosec
 
 	// envCredentials overrides the path to the signing credentials file.
-	envCredentials = "NVNM_MCP_TEST_CREDENTIALS"
+	envCredentials = "NVNM_MCP_TEST_CREDENTIALS" //nolint:gosec
 	// defaultCredentialsPath is the git-ignored credentials file at the
 	// repository root, the same one the integration tests and
 	// cmd/seed-test-data read.
-	defaultCredentialsPath = "../../.chain_credentials.txt"
+	defaultCredentialsPath = "../../.chain_credentials.txt" //nolint:gosec
 
 	// httpTimeout bounds a single MCP request.
 	httpTimeout = 30 * time.Second
