@@ -9,6 +9,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Test coverage for the two rc17 write methods.** `PrepareUpdateRecordStatus`
+  and `PrepareRevokeRole` were at 0% statement coverage: the MCP layer only ever
+  exercised them through a mocked `anchor.Client`, so the real implementations --
+  their validation branches and their ABI argument order -- were never run.
+  Added unit tests (`internal/anchor/prepare_rolestatus_test.go`) pinning the
+  encoded calldata against a fresh encode of the same arguments, which is what
+  catches a transposition of the adjacent `registryId`/`recordId`/`index`
+  uint64s, plus the checksum normalization on `revokeRole` and the fail-closed
+  behavior when the ABI is not loaded. Both methods are now at 100%; the
+  `internal/anchor` package goes 88.5% -> 99.3%.
+- **On-chain round trips for the same two methods**
+  (`internal/anchor/lifecycle_integration_test.go`, build tag `integration`):
+  `updateRecordStatus` reads the record back to confirm the status change
+  actually landed, and `revokeRole` grants before revoking so the revoke is not
+  vacuous, including the checksum-scoped grant/revoke pair. These were the only
+  write methods with no live-testnet coverage. They skip cleanly without
+  credentials.
+
+### Fixed
+
+- **`docs/TESTING.md` integration inventory** corrected: `client_integration_test.go`
+  lists 10 tests (was 8, `TransactionByHash` was added without a doc update), the
+  new lifecycle file is listed, and the credentials note now states that the test
+  wallet must be funded.
+
 ## [1.0.0-rc18] - 2026-08-13
 
 ### Added
