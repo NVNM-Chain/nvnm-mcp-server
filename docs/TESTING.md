@@ -114,19 +114,23 @@ Run with: `make test-integration` or `go test -tags integration ./...`
 
 | Package | Test file | Tests | What's verified |
 |---------|----------|-------|-----------------|
-| `internal/evm` | `client_integration_test.go` | 8 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt` |
+| `internal/evm` | `client_integration_test.go` | 10 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt`, `TransactionByHash` |
 | `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
 | `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
 | `internal/evm` | `call_integration_test.go` | 2 | `CallContract` against precompile (empty data error path), non-existent address |
 | `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
 | `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
+| `internal/anchor` | `prepare_rolestatus_integration_test.go` | 3 | Prepare-sign-submit for the methods: `UpdateRecordStatus` (record read back to confirm the status change landed) and `RevokeRole` (grant-then-revoke, plus the checksum-scoped pair) |
 | `internal/mcp` | `wallet_status_integration_test.go` | 1 | `eth_account` round-trip: `wallet_status` before → `PrepareAddRegistry` → sign → broadcast → receipt → `wallet_status` reflects the new nonce |
 
 Write and round-trip integration tests require testnet credentials --
 `.chain_credentials.txt` (`write_integration_test.go`,
+`prepare_rolestatus_integration_test.go`,
 `wallet_status_integration_test.go`) or `NVNM_TEST_PRIVATE_KEY` from
-`.env` (`prepare_integration_test.go`) -- and skip if absent.
+`.env` (`prepare_integration_test.go`) -- and skip if absent. The wallet
+must be funded: these tests broadcast real transactions and wait for
+receipts.
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
 
