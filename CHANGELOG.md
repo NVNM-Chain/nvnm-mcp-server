@@ -22,7 +22,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   behavior when the ABI is not loaded. Both methods are now at 100%; the
   `internal/anchor` package goes 88.5% -> 99.3%.
 - **On-chain round trips for the same two methods**
-  (`internal/anchor/lifecycle_integration_test.go`, build tag `integration`):
+  (`internal/anchor/prepare_rolestatus_integration_test.go`, build tag
+  `integration`):
   `updateRecordStatus` reads the record back to confirm the status change
   actually landed, and `revokeRole` grants before revoking so the revoke is not
   vacuous, including the checksum-scoped grant/revoke pair. These were the only
