@@ -36,8 +36,9 @@ type fakeRPC struct {
 	tx    *defitypes.OnChainTransaction
 	txErr error
 
-	receipt    *defitypes.TransactionReceipt
-	receiptErr error
+	receipt     *defitypes.TransactionReceipt
+	receiptErr  error
+	receiptHang bool
 
 	balance     *big.Int
 	balanceErr  error
@@ -99,8 +100,12 @@ func (f *fakeRPC) GetTransactionByHash(
 }
 
 func (f *fakeRPC) GetTransactionReceipt(
-	_ context.Context, _ defitypes.Hash,
+	ctx context.Context, _ defitypes.Hash,
 ) (*defitypes.TransactionReceipt, error) {
+	if f.receiptHang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return f.receipt, f.receiptErr
 }
 
@@ -319,12 +324,19 @@ func TestClient_BlockByHash_Error(t *testing.T) {
 }
 
 func TestClient_TransactionByHash_Mined(t *testing.T) {
+	blockHash := defitypes.MustHashFromHex(
+		"0x4e3a3754410177e6937ef1f84bba68ea139e8d1a2258c5f85db9f1cd715a1bdd",
+		defitypes.PadNone,
+	)
+	idx := uint64(3)
 	tx := &defitypes.OnChainTransaction{
 		Hash: defitypes.MustHashFromHexPtr(
 			"0x1111111111111111111111111111111111111111111111111111111111111111",
 			defitypes.PadNone,
 		),
-		BlockNumber: big.NewInt(1000),
+		BlockNumber:      big.NewInt(1000),
+		BlockHash:        &blockHash,
+		TransactionIndex: &idx,
 	}
 	c := newFakeClient(&fakeRPC{tx: tx})
 	nt, err := c.TransactionByHash(context.Background(), *tx.Hash)
@@ -336,6 +348,15 @@ func TestClient_TransactionByHash_Mined(t *testing.T) {
 	}
 	if nt.Hash != tx.Hash.String() {
 		t.Errorf("hash = %q, want %q", nt.Hash, tx.Hash.String())
+	}
+	if nt.BlockNumber == nil || *nt.BlockNumber != 1000 {
+		t.Errorf("block_number = %v, want 1000", nt.BlockNumber)
+	}
+	if nt.BlockHash == nil || *nt.BlockHash != blockHash.String() {
+		t.Errorf("block_hash = %v, want %s", nt.BlockHash, blockHash)
+	}
+	if nt.Index == nil || *nt.Index != 3 {
+		t.Errorf("index = %v, want 3", nt.Index)
 	}
 }
 
@@ -353,6 +374,9 @@ func TestClient_TransactionByHash_Pending(t *testing.T) {
 	}
 	if !nt.IsPending {
 		t.Error("transaction without block number should be pending")
+	}
+	if nt.BlockNumber != nil || nt.BlockHash != nil || nt.Index != nil {
+		t.Errorf("pending tx = %+v, want omitted block placement", nt)
 	}
 }
 
@@ -416,6 +440,32 @@ func TestClient_TransactionReceipt_Error(t *testing.T) {
 	_, err := c.TransactionReceipt(context.Background(), defitypes.Hash{})
 	if !errors.Is(err, errRPCDown) {
 		t.Errorf("error = %v, want %v", err, errRPCDown)
+	}
+}
+
+func TestReceiptLookupDuration(t *testing.T) {
+	if got := receiptLookupDuration(15 * time.Second); got != ReceiptLookupTimeout {
+		t.Errorf("15s client timeout: duration = %s, want cap %s", got, ReceiptLookupTimeout)
+	}
+	if got := receiptLookupDuration(2 * time.Second); got != 2*time.Second {
+		t.Errorf("2s client timeout: duration = %s, want 2s (tighter than the cap)", got)
+	}
+	if got := receiptLookupDuration(0); got != ReceiptLookupTimeout {
+		t.Errorf("zero client timeout: duration = %s, want cap %s", got, ReceiptLookupTimeout)
+	}
+}
+
+func TestClient_TransactionReceipt_HungRPCIsNotFound(t *testing.T) {
+	c := newFakeClient(&fakeRPC{receiptHang: true})
+	c.timeout = 30 * time.Millisecond
+	start := time.Now()
+	_, err := c.TransactionReceipt(context.Background(), defitypes.Hash{})
+	elapsed := time.Since(start)
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("error = %v, want ErrTxNotFound", err)
+	}
+	if elapsed < 20*time.Millisecond || elapsed > 250*time.Millisecond {
+		t.Errorf("hung receipt lookup took %s, want an abort around 30ms", elapsed)
 	}
 }
 

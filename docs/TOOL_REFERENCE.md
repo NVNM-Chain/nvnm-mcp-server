@@ -519,7 +519,9 @@ Returns the receipt for a mined transaction, including status, gas used, logs, a
 ### Error Conditions
 
 - Invalid `tx_hash` format (not 0x-prefixed, not 32 bytes).
-- Receipt not found (transaction may be pending or nonexistent).
+- Receipt not found (transaction may be pending or nonexistent). A single
+  lookup is aborted after 5 seconds so a hung node cannot pin the client;
+  poll this tool rather than waiting out the HTTP timeout.
 - RPC connection failure.
 
 ### Example

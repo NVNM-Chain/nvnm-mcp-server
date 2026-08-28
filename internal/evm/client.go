@@ -6,6 +6,7 @@ package evm
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -14,6 +15,12 @@ import (
 
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
+
+// ReceiptLookupTimeout is how long a single eth_getTransactionReceipt probe
+// may wait on the node. A missing or hung receipt is not-found: callers
+// poll. Without this abort a Cosmos-EVM node can pin an MCP client for
+// the full HTTP/request timeout (finding 13).
+const ReceiptLookupTimeout = 5 * time.Second
 
 // Client wraps defiweb/go-eth's JSON-RPC client and returns normalized
 // response types. The interface is intentionally narrower than the
@@ -82,6 +89,21 @@ func blockNumOrLatest(b *big.Int) defitypes.BlockNumber {
 
 func (c *client) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, c.timeout)
+}
+
+func receiptLookupDuration(clientTimeout time.Duration) time.Duration {
+	if clientTimeout > 0 && clientTimeout < ReceiptLookupTimeout {
+		return clientTimeout
+	}
+	return ReceiptLookupTimeout
+}
+
+func (c *client) withReceiptTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, receiptLookupDuration(c.timeout))
+}
+
+func isReceiptLookupAborted(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 // guardNodeDecode runs fn -- which reads and normalizes an untrusted node/RPC
@@ -205,13 +227,19 @@ func (c *client) TransactionByHash(ctx context.Context, hash defitypes.Hash) (*N
 }
 
 // TransactionReceipt returns a normalized receipt by transaction hash.
+// A hung or canceled lookup is ErrTxNotFound: the receipt is not
+// available within the probe window, which is the same answer as a
+// null RPC result. The resilient wrapper must not retry that.
 func (c *client) TransactionReceipt(ctx context.Context, hash defitypes.Hash) (*NormalizedReceipt, error) {
-	ctx, cancel := c.withTimeout(ctx)
+	ctx, cancel := c.withReceiptTimeout(ctx)
 	defer cancel()
 	var out *NormalizedReceipt
 	err := guardNodeDecode("get transaction receipt", func() error {
 		receipt, err := c.rpc.GetTransactionReceipt(ctx, hash)
 		if err != nil {
+			if isReceiptLookupAborted(err) {
+				return apperrors.ErrTxNotFound
+			}
 			return fmt.Errorf("failed to get transaction receipt: %w", err)
 		}
 		if receipt == nil {

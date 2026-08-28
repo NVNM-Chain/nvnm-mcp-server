@@ -89,15 +89,21 @@ func TestGolden_NormalizedBlock(t *testing.T) {
 
 func TestGolden_NormalizedTransaction(t *testing.T) {
 	to := "0x0000000000000000000000000000000000000A00"
+	blockHash := "0x4e3a3754410177e6937ef1f84bba68ea139e8d1a2258c5f85db9f1cd715a1bdd"
+	blockNumber := uint64(46147)
+	index := uint64(0)
 	tx := NormalizedTransaction{
-		Hash:      "0x1111111111111111111111111111111111111111111111111111111111111111",
-		To:        &to,
-		Value:     "0",
-		Gas:       120000,
-		GasPrice:  "8000000000",
-		Nonce:     42,
-		Data:      "0xcafebabe",
-		IsPending: false,
+		Hash:        "0x1111111111111111111111111111111111111111111111111111111111111111",
+		BlockNumber: &blockNumber,
+		BlockHash:   &blockHash,
+		Index:       &index,
+		To:          &to,
+		Value:       "0",
+		Gas:         120000,
+		GasPrice:    "8000000000",
+		Nonce:       42,
+		Data:        "0xcafebabe",
+		IsPending:   false,
 	}
 	assertGolden(t, "normalized_transaction", tx)
 }

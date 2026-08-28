@@ -138,6 +138,23 @@ func normalizeOnChainTransaction(tx *defitypes.OnChainTransaction, isPending boo
 	if tx.From != nil {
 		nt.From = AddressHex(*tx.From)
 	}
+	// On-chain placement is what distinguishes a mined transaction from a
+	// pending one. Dropping these while is_pending=false left callers unable
+	// to locate a transaction they already had a receipt for.
+	if !isPending {
+		if tx.BlockNumber != nil {
+			n := tx.BlockNumber.Uint64()
+			nt.BlockNumber = &n
+		}
+		if tx.BlockHash != nil {
+			h := tx.BlockHash.String()
+			nt.BlockHash = &h
+		}
+		if tx.TransactionIndex != nil {
+			idx := *tx.TransactionIndex
+			nt.Index = &idx
+		}
+	}
 	return nt
 }
 

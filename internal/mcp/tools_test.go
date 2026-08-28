@@ -342,6 +342,33 @@ func TestHandler_GetReceipt_Happy(t *testing.T) {
 	}
 }
 
+func TestHandler_GetReceipt_NotFound_MessageNotDoubled(t *testing.T) {
+	handler := makeGetReceiptHandler(&mockEVM{returnErr: apperrors.ErrTxNotFound})
+
+	_, _, err := handler(ctx, nil, txHashInput{TxHash: testTxHash})
+	if err == nil {
+		t.Fatal("expected not-found error")
+	}
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("error should wrap ErrTxNotFound; got %v", err)
+	}
+	if got, want := err.Error(), apperrors.ErrTxNotFound.Error(); got != want {
+		t.Errorf("client-visible message = %q, want %q", got, want)
+	}
+}
+
+func TestHandler_GetReceipt_DeadlineIsNotFound(t *testing.T) {
+	handler := makeGetReceiptHandler(&mockEVM{returnErr: context.DeadlineExceeded})
+
+	_, _, err := handler(ctx, nil, txHashInput{TxHash: testTxHash})
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("deadline should surface as ErrTxNotFound; got %v", err)
+	}
+	if got, want := err.Error(), apperrors.ErrTxNotFound.Error(); got != want {
+		t.Errorf("client-visible message = %q, want %q", got, want)
+	}
+}
+
 func TestHandler_GetReceipt_InvalidHash(t *testing.T) {
 	handler := makeGetReceiptHandler(&mockEVM{})
 
