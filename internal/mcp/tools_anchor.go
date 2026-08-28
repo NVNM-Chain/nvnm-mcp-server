@@ -63,6 +63,9 @@ func registerAnchorTools(
 			"can create a registry named identically to another, so a caller resolving " +
 			"by name must consider all matches (check creator/created_at to " +
 			"disambiguate), not just take the first. " +
+			"A listing or name filter pages the whole table over RPC and paginates " +
+			"in memory, so the call commonly takes 20-30s on a populated chain; " +
+			"wait for it (HTTP client timeout of at least 90s) instead of retrying. " +
 			"registry_id is DEPRECATED: it returns that one registry and cannot be " +
 			"combined with name, match, offset, or limit -- use anchor_get_registry " +
 			"instead. " +
@@ -398,7 +401,7 @@ func registryNameMatcher(target, mode string) (func(name string) bool, error) {
 // latestRegistryID returns the highest currently-assigned registry ID via
 // reverse=true, limit=1 on the same "registries" precompile query
 // scanRegistriesByName pages -- the cheapest substitute this chain has for
-// pagination.total, which it always reports as 0 (docs/TESTING_UNIT.md). found
+// pagination.total, which it always reports as 0 (docs/TESTING.md). found
 // is false when no registries exist yet. This is a best-effort optimization,
 // not a correctness dependency: scanRegistriesByName's own termination (a
 // short page) never relies on it, so callers should treat a non-nil err as

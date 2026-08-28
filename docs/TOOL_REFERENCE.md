@@ -875,15 +875,18 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 
 > **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Compare `pagination.total` against the rows returned -- authoritative for a `name` filter, always `0` from this chain otherwise -- or keep paging until a page comes back short.
 
-> **Operator note (scan cost):** each name-filtered call pages the *entire* registry
-> table through the upstream RPC -- one sequential call per 200 registries plus one
-> peek -- measured at roughly 5–9 seconds per lookup at ~2.6k registries, growing
-> linearly with the table. `offset`/`limit` window the result, they do **not** reduce
-> this cost: every page of a match set re-runs the full scan. Every scan emits a
-> structured log line (`anchor_get_registries by-name scan`: duration, matches, offset,
-> limit, truncated) so operators can watch frequency and cost. The client-side scan is
-> a stopgap: if the chain gains a by-name index as expected, or if indexing is solved
-> off-chain, it can be retired. Issue #79 tracks the options.
+> **Operator note (scan cost):** each listing or name-filtered call pages the
+> *entire* registry table through the upstream RPC -- one sequential call per
+> 200 registries plus one peek -- commonly **20–30 seconds** on a populated
+> chain, growing linearly with the table. `offset`/`limit` window the result,
+> they do **not** reduce this cost: every page of a match set re-runs the full
+> scan. HTTP clients must wait at least **90s** (retrying at 30s aborts a
+> still-running scan). Every scan emits a structured log line
+> (`anchor_get_registries by-name scan` / full-table scan: duration, matches,
+> offset, limit, truncated) so operators can watch frequency and cost. The
+> client-side scan is a stopgap: if the chain gains a by-name index as
+> expected, or if indexing is solved off-chain, it can be retired. Issue #79
+> tracks the options.
 
 ### Input Parameters
 

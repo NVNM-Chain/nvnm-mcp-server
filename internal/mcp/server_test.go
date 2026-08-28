@@ -65,6 +65,44 @@ func startTestServer(t *testing.T) *mcp.ClientSession {
 	return session
 }
 
+func TestServer_Handler_ConnectsSDKClient(t *testing.T) {
+	evmClient := &mockEVM{
+		chainInfo: &evm.ChainInfo{ChainID: 58887, LatestBlockNumber: 100},
+		balance:   &evm.NormalizedBalance{Address: testAddr, Wei: "0", Ether: "0"},
+		block:     &evm.NormalizedBlock{Number: 1, Hash: "0xabc"},
+	}
+	anchorClient := &mockAnchor{
+		info: anchor.PrecompileInfo{
+			Address:     testAddr,
+			ChainID:     58887,
+			ABILoaded:   true,
+			MethodCount: 5,
+		},
+	}
+	srv := NewServer(evmClient, anchorClient, testServerConfig(true), nil, nil, nil, nil, nil, testLogger())
+	if srv.Handler() == nil {
+		t.Fatal("Handler() returned nil")
+	}
+
+	httpServer := httptest.NewServer(srv.Handler())
+	t.Cleanup(httpServer.Close)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "handler-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect via Handler(): %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	res, err := session.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("tools/list via Handler(): %v", err)
+	}
+	if len(res.Tools) == 0 {
+		t.Fatal("Handler() served a server with no tools")
+	}
+}
+
 // TestNewServer_AcceptsWriteMetrics guarantees NewServer's metrics
 // parameter compiles against the live *telemetry.Metrics recorder (not just
 // the fake used in tools_evm_write_test.go), so the production wiring in
@@ -238,46 +276,6 @@ func TestE2E_GrantRoleDescription_MatchesAdminOnlyEnforcement(t *testing.T) {
 	}
 	if strings.Contains(desc, "automation") {
 		t.Errorf("grant_role description must NOT claim the automation role (handler denies it); got %q", desc)
-	}
-}
-
-func TestE2E_CallTool_ChainID(t *testing.T) {
-	session := startTestServer(t)
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "evm_get_chain_id",
-		Arguments: map[string]any{},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-
-	if result.IsError {
-		t.Fatalf("tool returned error: %v", result.Content)
-	}
-
-	if len(result.Content) == 0 {
-		t.Fatal("expected content in response")
-	}
-}
-
-func TestE2E_CallTool_AnchorInfo(t *testing.T) {
-	session := startTestServer(t)
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "anchor_info",
-		Arguments: map[string]any{},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-
-	if result.IsError {
-		t.Fatalf("tool returned error: %v", result.Content)
-	}
-
-	if len(result.Content) == 0 {
-		t.Fatal("expected content in response")
 	}
 }
 

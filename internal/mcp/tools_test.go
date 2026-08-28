@@ -120,7 +120,10 @@ type mockAnchor struct {
 	lastRegistriesReq anchor.GetRegistriesRequest
 	records           *anchor.GetRecordsResponse
 	unsignedTx        *anchor.UnsignedTransaction
-	returnErr         error
+	// unsignedTxByMethod, when set, returns a distinct unsigned tx per
+	// prepare method so a handler wired to the wrong Prepare* still fails.
+	unsignedTxByMethod map[string]*anchor.UnsignedTransaction
+	returnErr          error
 }
 
 func (m *mockAnchor) Info() anchor.PrecompileInfo { return m.info }
@@ -132,9 +135,15 @@ func (m *mockAnchor) GetRegistry(_ context.Context, _ anchor.GetRegistryRequest)
 	return m.registry, m.returnErr
 }
 func (m *mockAnchor) GetRegistries(_ context.Context, req anchor.GetRegistriesRequest) (*anchor.GetRegistriesResponse, error) {
-	idx := m.registriesCallCount
-	m.registriesCallCount++
 	m.lastRegistriesReq = req
+	m.registriesCallCount++
+	// registry_id > 0 is the deprecated single-registry lookup. Keep it on
+	// the fixed `registries` payload so listing mocks (pages / fn) can
+	// coexist with a cursor-bearing by-id response in the same server.
+	if req.RegistryID != nil && *req.RegistryID > 0 {
+		return m.registries, m.returnErr
+	}
+	idx := m.registriesCallCount - 1
 	if m.registriesFn != nil {
 		return m.registriesFn(idx)
 	}
@@ -149,22 +158,32 @@ func (m *mockAnchor) GetRegistries(_ context.Context, req anchor.GetRegistriesRe
 func (m *mockAnchor) GetRecords(_ context.Context, _ anchor.GetRecordsRequest) (*anchor.GetRecordsResponse, error) {
 	return m.records, m.returnErr
 }
-func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRegistryRequest) (*anchor.UnsignedTransaction, error) {
+
+func (m *mockAnchor) prepareTx(method string) (*anchor.UnsignedTransaction, error) {
+	if m.unsignedTxByMethod != nil {
+		if tx, ok := m.unsignedTxByMethod[method]; ok {
+			return tx, m.returnErr
+		}
+	}
 	return m.unsignedTx, m.returnErr
 }
+
+func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRegistryRequest) (*anchor.UnsignedTransaction, error) {
+	return m.prepareTx("addRegistry")
+}
 func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddRecordRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("addRecord")
 }
 func (m *mockAnchor) PrepareUpdateRecordStatus(
 	_ context.Context, _ anchor.PrepareUpdateRecordStatusRequest,
 ) (*anchor.UnsignedTransaction, error) {
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("updateRecordStatus")
 }
 func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("grantRole")
 }
 func (m *mockAnchor) PrepareRevokeRole(_ context.Context, _ anchor.PrepareRevokeRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("revokeRole")
 }
 
 // ---------------------------------------------------------------------------
