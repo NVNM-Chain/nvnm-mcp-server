@@ -115,11 +115,12 @@ func TestPrepareUpdateRecordStatus_EncodesArgsInABIOrder(t *testing.T) {
 		status            = "Archived"
 	)
 
+	idx := index
 	tx, err := c.PrepareUpdateRecordStatus(context.Background(), PrepareUpdateRecordStatusRequest{
 		From:       testFrom,
 		RegistryID: registryID,
 		RecordID:   recordID,
-		Index:      index,
+		Index:      &idx,
 		Status:     status,
 	})
 	if err != nil {
@@ -153,10 +154,12 @@ func TestPrepareUpdateRecordStatus_EncodesArgsInABIOrder(t *testing.T) {
 func TestPrepareUpdateRecordStatus_LegacyOptOut(t *testing.T) {
 	c := prepareTestClient(t)
 
+	idx := uint64(1)
 	tx, err := c.PrepareUpdateRecordStatus(context.Background(), PrepareUpdateRecordStatusRequest{
 		From:         testFrom,
 		RegistryID:   1,
 		RecordID:     1,
+		Index:        &idx,
 		Status:       "Active",
 		PreferLegacy: true,
 	})
@@ -272,10 +275,12 @@ func TestPrepareRoleStatus_PackErrors(t *testing.T) {
 	]`)
 	c := NewClient(&mockEVMClient{}, PrecompileAddress, 58887, abiPath, logging.New("error"))
 
+	idx := uint64(1)
 	_, err := c.PrepareUpdateRecordStatus(context.Background(), PrepareUpdateRecordStatusRequest{
 		From:       testFrom,
 		RegistryID: 1,
 		RecordID:   1,
+		Index:      &idx,
 		Status:     "Archived",
 	})
 	if err == nil || !strings.Contains(err.Error(), "pack updateRecordStatus") {

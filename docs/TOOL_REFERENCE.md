@@ -1273,7 +1273,7 @@ Construct an unsigned `updateRecordStatus` transaction to change the status of a
 | `from`          | `string` | required | Editor EVM address (0x-prefixed)               |
 | `registry_id`   | `uint64` | required | Registry numeric ID                            |
 | `record_id`     | `uint64` | required | Record numeric ID                              |
-| `index`         | `uint64` | optional | Version index of the record (default: latest)  |
+| `index`         | `uint64` | optional | Version index, 1-based. Omit it or pass `0` to update the latest version -- the server looks the version up before building the transaction. |
 | `status`        | `string` | required | New record status, e.g. `Active`, `Superseded`, `Revoked` |
 
 ### Output Fields

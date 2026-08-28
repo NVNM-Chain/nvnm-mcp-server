@@ -1673,6 +1673,20 @@ func TestHandler_PrepareGrantRole_Error(t *testing.T) {
 	}
 }
 
+func TestAuditIndex(t *testing.T) {
+	if got := auditIndex(nil); got != "latest" {
+		t.Errorf("nil = %q, want latest", got)
+	}
+	zero := uint64(0)
+	if got := auditIndex(&zero); got != "latest" {
+		t.Errorf("0 = %q, want latest", got)
+	}
+	three := uint64(3)
+	if got := auditIndex(&three); got != "3" {
+		t.Errorf("3 = %q, want 3", got)
+	}
+}
+
 func TestHandler_PrepareUpdateRecordStatus_Happy(t *testing.T) {
 	m := &mockAnchor{unsignedTx: sampleUnsignedTx}
 	handler := makePrepareUpdateRecordStatusHandler(m, testLogger())

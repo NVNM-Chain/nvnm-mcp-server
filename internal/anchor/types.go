@@ -261,12 +261,18 @@ type PrepareAddRecordRequest struct {
 
 // PrepareUpdateRecordStatusRequest contains the parameters for preparing an
 // updateRecordStatus transaction. From is the editor's EVM address (0x...).
+//
+// Index selects which version of the record to update. Version indexes are
+// 1-based, so nil and a pointer to 0 both mean "the latest version" -- the
+// same spelling the read path accepts (see GetRecordsRequest.Index) -- and
+// PrepareUpdateRecordStatus resolves them to a concrete index before
+// encoding, since the ABI has no way to express "absent".
 type PrepareUpdateRecordStatusRequest struct {
-	From       string `json:"from"`
-	RegistryID uint64 `json:"registry_id"`
-	RecordID   uint64 `json:"record_id"`
-	Index      uint64 `json:"index"`
-	Status     string `json:"status"`
+	From       string  `json:"from"`
+	RegistryID uint64  `json:"registry_id"`
+	RecordID   uint64  `json:"record_id"`
+	Index      *uint64 `json:"index,omitempty"`
+	Status     string  `json:"status"`
 	// PreferLegacy: see PrepareAddRegistryRequest.PreferLegacy.
 	PreferLegacy bool `json:"prefer_legacy,omitempty"`
 }

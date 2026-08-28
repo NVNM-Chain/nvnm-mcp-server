@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"log/slog"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -127,8 +128,9 @@ type prepareUpdateRecordStatusInput struct {
 	From       string `json:"from" jsonschema:"Editor EVM address (0x...)"`
 	RegistryID uint64 `json:"registry_id" jsonschema:"Registry numeric ID"`
 	RecordID   uint64 `json:"record_id" jsonschema:"Record numeric ID"`
-	Index      uint64 `json:"index,omitempty" jsonschema:"Version index of the record (default: latest)"`
-	Status     string `json:"status" jsonschema:"New record status, e.g. Active, Superseded, Revoked"`
+	//nolint:lll // descriptive prose for agents
+	Index  *uint64 `json:"index,omitempty" jsonschema:"Version index of the record, 1-based. Omit it (or pass 0) to update the latest version -- the server looks the version up before building the transaction."`
+	Status string  `json:"status" jsonschema:"New record status, e.g. Active, Superseded, Revoked"`
 	//nolint:lll // descriptive prose for agents
 	PreferLegacyTx bool `json:"prefer_legacy_tx,omitempty" jsonschema:"Opt back into a type-0 LegacyTx instead of the EIP-1559 (type-2) default."`
 }
@@ -251,11 +253,23 @@ func makePrepareUpdateRecordStatusHandler(
 				logging.SafeAddr("from", input.From),
 				slog.Uint64("registry_id", input.RegistryID),
 				slog.Uint64("record_id", input.RecordID),
+				slog.String("index", auditIndex(input.Index)),
 				slog.String("status", input.Status),
 			),
 		)
 		return nil, unsignedTxOutput{UnsignedTransaction: *tx, NextActions: anchorPrepareWriteNext()}, nil
 	}
+}
+
+// auditIndex renders the version index a caller asked for. Both an omitted
+// index and an explicit 0 mean "latest" (indexes are 1-based), and the audit
+// log should say which version the caller named, not which one the chain
+// happened to hold -- so it records the request, not the resolved index.
+func auditIndex(index *uint64) string {
+	if index == nil || *index == 0 {
+		return "latest"
+	}
+	return strconv.FormatUint(*index, 10)
 }
 
 func makePrepareGrantRoleHandler(
