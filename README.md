@@ -129,7 +129,7 @@ make help
 # Build
 make build
 
-# Run the test suite (unit + MCP E2E; hermetic, no chain access needed)
+# Run the test suite (unit + TestMCP_Tools; no chain access needed)
 make test
 
 # Verify the same coverage gate CI enforces (-race + >=80% total coverage)
@@ -464,7 +464,8 @@ make docker-push    # Multi-arch build and push to registry -- local manual oper
 make docker-run     # Run in Docker
 make docker-smoke   # Build, run, verify healthz + MCP, tear down
 make test-load      # Run k6 load tests (requires k6)
-make test-integration # Integration tests against live testnet
+make test-integration # TestMCP_Tools, then live client tests
+make test-e2e         # Deployment hot path (set NVNM_MCP_TEST_SERVER_URL)
 make seed-test-data # Create test registry with phoney records on-chain
 make clean          # Remove build artifacts
 ```
@@ -486,7 +487,7 @@ The default suite is hermetic — no chain access, no credentials — and is the
 same one CI runs on every PR:
 
 ```bash
-make test             # Unit + golden + MCP E2E tests (fast, no network)
+make test             # Unit + golden + TestMCP_Tools (fast, no network)
 make coverage-check   # -race + coverage report + the 80% total-coverage gate
 open coverage.html    # Inspect per-line coverage after coverage-check/test-coverage
 ```
@@ -494,8 +495,8 @@ open coverage.html    # Inspect per-line coverage after coverage-check/test-cove
 CI fails any PR whose total statement coverage drops below **80%**
 (`scripts/check_coverage.sh`), so run `make coverage-check` before pushing.
 Every new feature needs unit tests for its success/error paths and, if it
-changes the MCP surface, E2E tests through the HTTP transport — see
-[AGENTS.md](AGENTS.md) for the full requirements.
+changes the MCP surface, a mocked SDK invocation in
+`TestMCP_Tools` — see [AGENTS.md](AGENTS.md).
 
 Optional local layers:
 
@@ -505,7 +506,8 @@ Optional local layers:
 export NVNM_TEST_PG_DSN='postgres://nvnm:nvnm@localhost:5432/nvnm_test?sslmode=disable'  # pragma: allowlist secret -- throwaway local dev creds
 make test
 
-make test-integration # Live-testnet integration tests (needs network + .env credentials)
+make test-integration # TestMCP_Tools, then live client tests (needs network)
+make test-e2e         # Deployment hot path (set NVNM_MCP_TEST_SERVER_URL)
 make docker-smoke     # Build image, boot container, verify healthz/readyz + MCP init
 ```
 

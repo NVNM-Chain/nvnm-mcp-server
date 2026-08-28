@@ -11,6 +11,30 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **MCP integration covering all 23 advertised tools**
+  (`internal/mcp/mcp_tools_test.go`). The mocked SDK client
+  previously invoked 8 tools; the rest had no MCP-layer test at any
+  speed. `TestMCP_Tools` drives every
+  `tools/list` name through an in-process server with mock chain
+  clients and fails if a registered tool has no invocation. No
+  `//go:build integration` tag — it runs under `go test ./...` so a
+  pipeline can catch tool regressions without RPC or a wallet. Live
+  chain facts stay in the per-package tagged `*_integration_test.go`
+  files. Deployment hot-path stays in `tests/e2e`.
+- **Client integration gaps.** `CallContract` against a known EOA with
+  empty calldata; mined-tx `block_number`/`block_hash`; `TransactionReceipt`
+  not-found abort. These sit next to the other `internal/evm`
+  integration tests.
+- **Deployment hot-path e2e** (`tests/e2e`, `make test-e2e`).
+  `TestE2E_HotPath_AnchorDocument` (prepare → sign → broadcast →
+  confirm → read back) against `NVNM_MCP_TEST_SERVER_URL`. Credentials
+  resolve from `NVNM_TEST_PRIVATE_KEY` then `.chain_credentials.txt`;
+  `NVNM_E2E_REQUIRE_CHAIN=1` turns a local skip into a hard failure.
+  Tool-level regression belongs in
+  `TestMCP_Tools`, not here. A dedicated
+  GitHub Action for this suite is later work.
+- **`Server.Handler()`** exports the Streamable HTTP handler so a host
+  process (or the in-process e2e target) can embed the server.
 - **Test coverage for the two rc17 write methods.** `PrepareUpdateRecordStatus`
   and `PrepareRevokeRole` were at 0% statement coverage: the MCP layer only ever
   exercised them through a mocked `anchor.Client`, so the real implementations --
@@ -30,8 +54,73 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   write methods with no live-testnet coverage. They skip cleanly without
   credentials.
 
+### Changed
+
+- **E2E is the deployment hot path only.** `make test-e2e` runs
+  `TestE2E_HotPath_AnchorDocument`. There is no live all-tools MCP
+  suite; tool-level regression is `TestMCP_Tools`. Auth/RBAC stays in
+  `internal/mcp/server_e2e_test.go`.
+- **`TestMCP_Tools` binds to the published JSON contract.** It decodes
+  into local wire types (not the handler envelopes), pins `0x`
+  addresses / 64-char checksum / documented status, requires type-2
+  `wallet_tx_request` hex quantities to match the decimal unsigned-tx
+  fields, puts a pagination cursor on the wire so SDK output-schema
+  validation actually runs, requires `next_actions` (except the two
+  tools that emit none), pins the first hint tool, gives each prepare
+  tool distinct mock calldata, and invokes `anchor_get_registries` by
+  name as well as by deprecated id.
+- **Hot-path e2e anchors a document, not only a registry.** Onboard
+  (wizard, verify hash/signature, chain id, balance, `anchor_info`) →
+  create registry → add record → list the registry by name
+  (`anchor_get_registries`, 90s HTTP wait, fail if slower than 60s) →
+  read back `uri` / `is_latest` / `registry_id` →
+  `update_record_status` → Superseded → observe the write through
+  `evm_get_transaction` / logs / `evm_get_code` (address only — the
+  precompile has no EVM bytecode) / `evm_call_contract`. Grant/revoke
+  are not in this journey (admin-only MCP role).
+- **`docs/TESTING.md` states each chain-facing layer's claim and the
+  regressions it can turn red.** Hermetic MCP is the all-23 PR net; live
+  client tests own precompile packing (including grant/revoke); e2e is
+  the 21-tool operator journey on a deployed server. Tool coverage
+  matrix lists who actually invokes each advertised name.
+- **Dropped two thin hermetic success samples** (`TestE2E_CallTool_ChainID`,
+  `TestE2E_CallTool_AnchorInfo`). `TestMCP_Tools`
+  already invokes both tools and asserts published fields. Error-path SDK
+  samples (`InvalidAddress`, `MissingRegistryID`) stay.
+
 ### Fixed
 
+- **Live `findRegistryIDByName` looks at the tip first.** After
+  `cmd/seed-test-data`, `make test-integration` enters `internal/anchor`
+  and used to walk the registry table from ID 1 (~thousands of rows,
+  tens of seconds per page) to find a registry the test had just
+  created. Reverse-first lookup returns in one RPC; a stuck cursor or
+  per-page timeout fails instead of hanging. `make test-integration`
+  now also sets `-timeout 20m`.
+- **`make test-integration` no longer runs `go test ./...`.** That
+  continued after a failed package, so the last lines were a green
+  `internal/telemetry` / `internal/version` and a bare `FAIL`. It also
+  ran live write packages in parallel against one wallet. The target
+  now runs `internal/evm`, then `internal/anchor`, then `internal/mcp`,
+  with `-failfast -p` implied by separate invocations.
+- **Hot-path e2e waits 90s for `anchor_get_registries`.** Listing and
+  name-filtered calls page the full registry table over RPC and paginate
+  in memory (commonly 20-30s). The previous 30s MCP HTTP timeout aborted
+  those calls before headers arrived.
+- **`evm_get_transaction` now returns `block_number`, `block_hash`, and
+  `index` for mined transactions.** The normalizer already knew the tx
+  was not pending but dropped the on-chain placement fields, so a caller
+  with a receipt could not locate the transaction from this tool.
+- **`evm_get_transaction_receipt` aborts a hung lookup after 5s** and
+  returns `transaction not found` instead of pinning the MCP client for
+  the HTTP timeout. A missing receipt is still a poll-and-retry, not a
+  30-second wait (finding 13).
+- **`anchor_prepare_update_record_status` honours an omitted (or zero)
+  `index` as "latest".** The schema and tool reference already called it
+  optional; the ABI is a plain 1-based `uint64`, so passing the caller's
+  silence through encoded `0` and gas estimation reverted. The prepare
+  path now resolves nil and `0` with one `records` read before packing
+  the call. A record with no version is rejected as `record not found`.
 - **`anchor_get_registries` no longer fails whenever the result carries a
   pagination cursor.** `PageResponse.NextKey` was a `[]byte`, which
   `encoding/json` marshals to a base64 *string* while the MCP SDK infers a

@@ -343,8 +343,10 @@ slog.Info("anchor stored",
 
 ### Integration Tests
 
-- Tag with `//go:build integration`
-- Run with `make test-integration`
+- Tag live client tests with `//go:build integration`
+- Run with `make test-integration` (`TestMCP_Tools` first, then live packages)
+- MCP tool-regression is `TestMCP_Tools` in `internal/mcp/mcp_tools_test.go` — no integration tag
+- Deployment hot-path is `make test-e2e` / `tests/e2e`, not a live all-tools MCP file
 - For RPC-dependent tests: use recorded responses or test against testnet endpoint
 
 ### Coverage

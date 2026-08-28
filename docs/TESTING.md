@@ -4,20 +4,101 @@ This document describes the testing strategy and framework for the NVNM Chain MC
 
 ## Overview
 
-The project uses a layered testing approach: unit tests with mocks for fast feedback, golden tests for response shape stability, integration tests against the live NVNM testnet, HTTP end-to-end tests through the MCP protocol layer, k6 load tests for performance, and Docker smoke tests for deployment verification.
+The project uses three chain-facing layers with **distinct claims**. Live
+client tests and e2e both mine testnet transactions; that overlap is the
+fixture (you cannot prove a write lands with a mock), not a duplicate suite.
 
-The suite runs via `make test`; CI enforces green on every PR. Exact test counts aren't tracked here — they drift every release. Run `go test ./...` (or check the CI job output) for current numbers.
+| Layer | Question it answers | Entry point | Chain | When |
+|---|---|---|---|---|
+| **Hermetic MCP integration** | Is the advertised MCP surface still the contract we publish? | MCP SDK → in-process HTTP → **mock** chain | No | Every PR (`go test ./...`; first half of `make test-integration`) |
+| **Client live tests** | Will this Go client method pack calldata the precompile mines? | `anchor.Client` / `evm.Client` directly | Testnet | `make test-integration` (tagged `*_integration_test.go`) |
+| **Deployment e2e** | Does the operator journey still work on the server we shipped? | MCP SDK → **running server** → real chain | Testnet | `make test-e2e` locally; a dedicated CI job is later work |
+
+`TestMCP_Tools` is the MCP tool-regression net
+(all 23 tools, mocks). Do not name it `TestE2E_*` and do not put
+`//go:build integration` on it. Auth/RBAC samples stay in
+`internal/mcp/server_e2e_test.go` (hermetic HTTP). Deployment e2e is only
+`tests/e2e`.
+
+The suite runs via `make test`; CI enforces green on every PR. Exact test
+counts aren't tracked here — they drift every release. Run `go test ./...`
+(or check the CI job output) for current numbers.
 
 CI additionally enforces a **minimum total statement coverage of 80%** on every PR (`scripts/check_coverage.sh`, run after the test step). Reproduce the exact gate locally with `make coverage-check`; the threshold lives in the Makefile (`COVERAGE_THRESHOLD`) and the CI workflow together.
+
+### Purpose and regressions
+
+**Hermetic MCP** (`TestMCP_Tools`). Catches: a
+tool listed but never invoked; JSON tag rename / dropped field;
+`next_actions` missing or first hint pointing at the wrong tool; prepare
+handler wired to the wrong `Prepare*` method (distinct mock calldata);
+by-id cursor vs by-name listing envelope. Does **not** catch: ABI argument
+order, gas-estimate reverts, EIP-1559 vs legacy packing, deployed-server
+config, or HTTP timeout on a large on-chain registry table.
+
+**Client live tests** (build tag `integration`, next to evm/anchor).
+Catches: precompile reject of packed calldata; type-2 vs type-0 round-trip;
+`updateRecordStatus` encoding (status actually lands on read-back);
+grant-then-revoke (and checksum-scoped revoke); RPC not-found abort vs
+hang; resilient wrapper against the live RPC. Does **not** catch: MCP
+handler field mapping, tool registration, `next_actions`, API-key RBAC, or
+a stale deployed binary.
+
+**Deployment e2e** (`TestE2E_HotPath_AnchorDocument`). One operator
+journey: onboard → create registry → anchor a record → supersede it →
+observe the write. 21 of 23 advertised tools appear as **steps**, not as a
+checklist. Catches: deployed auth / write-tools flag / stale binary;
+MCP JSON on a real precompile response; by-name listing slower than 60s or
+killed by the 90s HTTP wait; read-back of `uri` / `is_latest` /
+`registry_id` after a mined write. Does **not** catch: the two tools it
+never calls (`anchor_prepare_grant_role`, `anchor_prepare_revoke_role`);
+per-tool error/RBAC (hermetic); ABI order (live client tests).
+
+Grant/revoke stay out of the document journey (admin-only MCP role, no
+role-read tool). Live client tests already mine both. A later
+`TestE2E_HotPath_ShareRegistry` only if a later CI job has an admin key.
+
+### Tool coverage (23 advertised)
+
+Hermetic = invoked as an MCP tool against mocks. Live = corresponding Go
+client method against testnet (not an MCP call). E2E = invoked as an MCP
+tool on a running server with a real chain.
+
+| Tool | Hermetic MCP | Live client | E2E hot path |
+|---|---|---|---|
+| `nvnm_overview` | yes | — | onboard |
+| `wallet_status` | yes | nonce round-trip | onboard |
+| `nvnm_setup_wizard` | yes | — | onboard |
+| `nvnm_setup_verify_hash` | yes | — | onboard |
+| `nvnm_setup_verify_signature` | yes | — | onboard |
+| `evm_get_chain_id` | yes | `ChainID` | onboard |
+| `evm_get_block` | yes | `BlockByNumber` | onboard |
+| `evm_get_balance` | yes | `BalanceAt` | onboard |
+| `anchor_info` | yes | `Info` | onboard |
+| `anchor_prepare_add_registry` | yes | prepare + mine | registry |
+| `anchor_get_registries` | yes | `GetRegistries` | registry (by name) |
+| `anchor_get_registry` | yes | `GetRegistry` | registry |
+| `anchor_prepare_add_record` | yes | prepare + mine | record |
+| `anchor_get_records` | yes | `GetRecords` | record + lifecycle |
+| `evm_send_raw_transaction` | yes | write tests | every write |
+| `evm_get_transaction_receipt` | yes | `TransactionReceipt` | confirm |
+| `anchor_prepare_update_record_status` | yes | mine + read-back | lifecycle |
+| `evm_get_transaction` | yes | `TransactionByHash` | observe |
+| `evm_get_logs` | yes | `FilterLogs` | observe |
+| `evm_get_code` | yes | `CodeAt` | observe (address only) |
+| `evm_call_contract` | yes | `CallContract` | observe |
+| `anchor_prepare_grant_role` | yes | prepare + mine | **not called** |
+| `anchor_prepare_revoke_role` | yes | grant then revoke | **not called** |
 
 ## Running Tests
 
 ### Quick Reference
 
 ```bash
-make test              # All unit tests (no integration)
+make test              # Unit + TestMCP_Tools (all 23 tools, no chain)
 make test-unit         # Unit tests with -short flag
-make test-integration  # Integration tests against live testnet (requires network)
+make test-integration  # TestMCP_Tools, then live client tests (need network)
+make test-e2e          # Deployment hot path (NVNM_MCP_TEST_SERVER_URL)
 make test-coverage     # Unit tests with race detector + HTML coverage report
 make coverage-check    # test-coverage + enforce the 80% total-coverage gate (same check CI runs)
 make test-verbose      # Verbose output, no caching
@@ -32,6 +113,7 @@ make seed-test-data    # Create a test registry with phoney records on-chain
 |---------|-------------|---------|
 | `make test` | Go 1.26+ | -- |
 | `make test-integration` | Network access to `https://evm.testnet.nvnmchain.io` | -- |
+| `make test-e2e` | Funded signing key + RPC (in-process) or `NVNM_MCP_TEST_SERVER_URL` | See `tests/e2e/README.md` |
 | `make test-load` | k6, running server on `:8080` | `brew install k6` |
 | `make docker-smoke` | Docker Desktop | -- |
 | `make seed-test-data` | `.chain_credentials.txt` in project root | See below |
@@ -44,7 +126,8 @@ Address: 0x...
 PrivateKey: 0x...
 ```
 
-Used by integration write tests and `seed-test-data`. Tests skip gracefully if the file is missing.
+Used by integration write tests, `make test-e2e`, and `seed-test-data`.
+Tests skip gracefully if the file and `NVNM_TEST_PRIVATE_KEY` are both missing.
 
 **Postgres-backed tests.** A subset of `internal/mcp` tests exercise the audit log, signer-quota, signer-blacklist, write-audit, and migration surface against a real Postgres database, gated on `NVNM_TEST_PG_DSN` (e.g. `postgres://.../nvnm?sslmode=disable`). They call `t.Skip` cleanly when the variable is unset, so `make test` passes without it — set `NVNM_TEST_PG_DSN` to actually exercise that surface.
 
@@ -106,31 +189,40 @@ Golden tests serialize a struct to JSON and compare against a checked-in `.golde
 
 To update golden files after an intentional change, delete the `.golden.json` file and re-run the test -- it will regenerate.
 
-### 3. Integration Tests (live testnet)
+### 3. Client live tests (live testnet, build tag `integration`)
 
-Integration tests connect to the NVNM Chain testnet EVM RPC at `https://evm.testnet.nvnmchain.io` (chain ID 787111). They are excluded from default `go test ./...` by the `//go:build integration` build tag.
+These sit next to the client code (`internal/evm`, `internal/anchor`). They
+are not the MCP tool-regression net — that is section 4. They connect to
+the NVNM Chain testnet EVM RPC at `https://evm.testnet.nvnmchain.io`
+(chain ID 787111) and are excluded from default `go test ./...` by the
+`//go:build integration` build tag.
 
-Run with: `make test-integration` or `go test -tags integration ./...`
+`make test-integration` runs `TestMCP_Tools` first, then
+the tagged live tests in `internal/evm`, `internal/anchor`, and
+`internal/mcp` **one package at a time**. Do not replace that with
+`go test -tags integration ./...`: packages run in parallel by default,
+so a failure in an early package is hidden under later `ok` / `PASS`
+lines, and the write tests share one funded key (nonce collisions).
+If you invoke `go test` yourself, pass `-p 1 -failfast` and list those
+three packages.
 
 | Package | Test file | Tests | What's verified |
 |---------|----------|-------|-----------------|
-| `internal/evm` | `client_integration_test.go` | 10 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt`, `TransactionByHash` |
+| `internal/evm` | `client_integration_test.go` | 12 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt`, `TransactionByHash` (placement fields + not-found), `TransactionReceipt` (mined + not-found abort) |
 | `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
 | `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
-| `internal/evm` | `call_integration_test.go` | 2 | `CallContract` against precompile (empty data error path), non-existent address |
 | `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
 | `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
 | `internal/anchor` | `prepare_rolestatus_integration_test.go` | 3 | Prepare-sign-submit for the methods: `UpdateRecordStatus` (record read back to confirm the status change landed) and `RevokeRole` (grant-then-revoke, plus the checksum-scoped pair) |
 | `internal/mcp` | `wallet_status_integration_test.go` | 1 | `eth_account` round-trip: `wallet_status` before → `PrepareAddRegistry` → sign → broadcast → receipt → `wallet_status` reflects the new nonce |
+| `internal/evm` | `call_integration_test.go` | 1 | `CallContract` against a known EOA with empty calldata returns empty data |
 
-Write and round-trip integration tests require testnet credentials --
-`.chain_credentials.txt` (`write_integration_test.go`,
-`prepare_rolestatus_integration_test.go`,
-`wallet_status_integration_test.go`) or `NVNM_TEST_PRIVATE_KEY` from
-`.env` (`prepare_integration_test.go`) -- and skip if absent. The wallet
-must be funded: these tests broadcast real transactions and wait for
-receipts.
+Write and round-trip integration tests require testnet credentials,
+resolved environment-first then file: `NVNM_TEST_PRIVATE_KEY` (optional
+`NVNM_TEST_ADDRESS`), then `.chain_credentials.txt`. They skip if both
+are absent. The wallet must be funded: these tests broadcast real
+transactions and wait for receipts.
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
 
@@ -138,18 +230,65 @@ Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-tes
 
 **`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile returns `pagination.total = 0` for `registries` and `records` queries even though the client sets `countTotal: true`. The registry/record rows themselves decode correctly; only the count is unpopulated. The integration tests therefore assert on the returned slice length, not on `pagination.total`. MCP tool responses surface whatever the chain returns for `total`, so a downstream consumer should treat it as best-effort, not authoritative, on this network.
 
-### 4. MCP End-to-End HTTP Tests
+### 3b. Deployment e2e (`tests/e2e`, tag `e2e`)
 
-These tests spin up a real MCP HTTP server using `httptest.NewServer` with mock clients, then connect using the official MCP SDK client (`mcp.NewClient` + `StreamableClientTransport`). Tests are split across `server_test.go` (basic tool registration and calls) and `server_e2e_test.go` (write path, API key auth, stateless behavior).
+Hot-path check against a **running MCP server** — typically a deployment.
+Set `NVNM_MCP_TEST_SERVER_URL`. `make test-e2e` runs
+`TestE2E_HotPath_AnchorDocument` only: onboard → create registry →
+anchor a record → supersede it → observe the write through EVM tools.
+Registry read-back uses `anchor_get_registries` by name (full-table
+scan; HTTP wait 90s, fail if slower than 60s) then
+`anchor_get_registry` by id. Record read-back asserts `uri`,
+`is_latest`, and `registry_id`. Grant/revoke are not in this journey
+(admin-only MCP role, no role-read tool). Decode uses published JSON
+field names so a read/prepare contract change fails. It is not the
+all-tools net; that is `TestMCP_Tools`.
 
-**Basic E2E** (`server_test.go`):
+Run locally with `make test-e2e`. Wiring a dedicated GitHub Action is later
+work; it is not a pull-request gate.
+
+| Target | How |
+|---|---|
+| Deployment (intended) | `NVNM_MCP_TEST_SERVER_URL=https://...` |
+| In-process fallback | URL unset; needs `NVNM_EVM_RPC_URL` |
+
+Credentials: `NVNM_TEST_PRIVATE_KEY` then `.chain_credentials.txt`. `NVNM_E2E_REQUIRE_CHAIN=1` turns skip into fail.
+
+See `tests/e2e/README.md`.
+
+**Where a new test belongs**
+
+| What you are pinning | Layer |
+|---|---|
+| Branch / error-path coverage | Unit tests (`internal/*_test.go`) |
+| Response JSON shape | Golden files + schema tests |
+| Envelope, schema, `next_actions`, all 23 tools without a chain | Hermetic MCP: `TestMCP_Tools` |
+| Precompile packing, one client method vs testnet | Live `*_integration_test.go` next to evm/anchor |
+| Operator path on a deployed server | `tests/e2e` journey stage — not a per-tool e2e file |
+| Auth / RBAC denials | `internal/mcp/server_e2e_test.go` (hermetic) |
+
+### 4. MCP integration tests (hermetic)
+
+These stand up a real MCP HTTP server with **mock** chain clients and drive
+it through the official SDK client. No RPC, no wallet. This is the
+tool-regression net.
+
+**MCP tools** (`mcp_tools_test.go`):
+
+| Test | What's verified |
+|------|-----------------|
+| `TestMCP_Tools` | Every name in `tools/list` invoked through the SDK with mocks; published JSON field names (local wire types); `next_actions` required and first hint pinned; `0x` addresses, 64-char checksum, status enum; type-2 unsigned tx + distinct per-prepare calldata + `wallet_tx_request` hex quantities; by-id cursor and by-name listing; coverage assert vs `tools/list` |
+
+Transport, auth, and RBAC samples stay in `server_test.go` / `server_e2e_test.go`.
+Those files still use historical `TestE2E_*` names; they are hermetic HTTP
+tests, not the deployment suite in `tests/e2e`.
+
+**Registration samples** (`server_test.go`):
 
 | Test | What's verified |
 |------|-----------------|
 | `TestE2E_ListTools_Returns23` | Server registers exactly 23 tools (5 onboarding + 8 EVM reads + 4 anchor reads + 5 anchor writes + 1 relay write) |
 | `TestE2E_ListTools_ContainsExpectedNames` | Every expected tool name is present |
-| `TestE2E_CallTool_ChainID` | `evm_get_chain_id` returns non-error structured content |
-| `TestE2E_CallTool_AnchorInfo` | `anchor_info` returns non-error structured content |
 | `TestE2E_CallTool_InvalidAddress` | `evm_get_balance` with bad address returns `IsError=true` |
 | `TestE2E_CallTool_MissingRegistryID` | `anchor_get_registry` with no args returns `IsError=true` |
 
@@ -231,13 +370,14 @@ This layer validates: HTTP transport, SSE/JSON response framing, MCP session man
 
 ### 5. k6 Load Tests
 
-The k6 script (`tests/load/k6_mcp_http.js`) exercises the MCP Streamable HTTP endpoint with three scenarios:
+The k6 script (`tests/load/k6_mcp_http.js`) exercises the MCP Streamable HTTP endpoint with four scenarios:
 
 | Scenario | Executor | VUs | Duration | Tools exercised |
 |----------|----------|-----|----------|-----------------|
 | `constant_reads` | constant-vus | 10 | 2 min | `evm_get_chain_id` |
 | `burst_reads` | ramping-vus | 0 → 50 → 0 | 3 min | `evm_get_chain_id` |
 | `mixed_workload` | constant-vus | 15 | 2 min | `evm_get_chain_id`, `evm_get_block`, `anchor_get_registries` |
+| `hot_path` | constant-vus | 1 | 1 min | Same discover / optional prepare / read-back steps as `TestE2E_HotPath_AnchorDocument`. Set `HOTPATH_FROM` to exercise `wallet_status` + `anchor_prepare_add_registry`. Does not broadcast. |
 
 **Thresholds:**
 
@@ -278,11 +418,14 @@ Current results live in CI — see the GitHub Actions run for this branch/PR for
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Test Layers                                  │
 ├─────────────┬───────────────┬───────────────────────────────────┤
-│  Unit Tests │ Golden Tests  │  MCP E2E HTTP Tests               │
-│  (mocks)    │ (JSON shapes) │  (httptest + SDK client)          │
+│  Unit Tests │ Golden Tests  │  MCP integration (all 23 tools)   │
+│  (mocks)    │ (JSON shapes) │  SDK + httptest + mock chain      │
+│             │               │  PR / pipeline tool-regression    │
 ├─────────────┴───────────────┴───────────────────────────────────┤
-│              Integration Tests (live testnet)                   │
-│              build tag: integration                             │
+│         Client live tests (testnet, tag integration)            │
+├─────────────────────────────────────────────────────────────────┤
+│         E2E hot path vs deployment (tests/e2e, tag e2e)         │
+│         NVNM_MCP_TEST_SERVER_URL; run locally (CI job later)    │
 ├─────────────────────────────────────────────────────────────────┤
 │              k6 Load Tests (HTTP transport)                     │
 ├─────────────────────────────────────────────────────────────────┤
@@ -293,7 +436,7 @@ Current results live in CI — see the GitHub Actions run for this branch/PR for
 
 ## Adding New Tests
 
-**For a new MCP tool**: Add handler tests to `internal/mcp/tools_test.go` using the existing `mockEVM`/`mockAnchor` types. Add the tool name to `TestE2E_ListTools_ContainsExpectedNames` in `server_test.go`.
+**For a new MCP tool**: Add handler tests to `internal/mcp/tools_test.go` using the existing `mockEVM`/`mockAnchor` types. Add the tool name to `TestE2E_ListTools_ContainsExpectedNames` in `server_test.go`. Add a mocked SDK invocation to `TestMCP_Tools` in `mcp_tools_test.go` — a tool that is listed but not invoked fails the coverage subtest. Add a tagged `*_integration_test.go` next to the client code when the change crosses the live-testnet boundary. Do not add a live all-tools MCP file; client-layer tests already cover chain facts. Deployment hot-path stays in `tests/e2e`.
 
 **For write path or auth features**: Add E2E tests to `internal/mcp/server_e2e_test.go`. Use `startTestServerWithConfig` for write-path tests. Use `startAuthTestServer` for auth tests (configurable `KeyEntry` list and Bearer token via `bearerTransport`). Use `buildSignedTxHex` to generate real signed transactions for write path tests.
 
