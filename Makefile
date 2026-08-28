@@ -11,7 +11,7 @@ LDFLAGS := -s -w
 
 .PHONY: all build run run-http run-local healthz readyz metrics \
         mcp-probe mcp-probe-help seed-test-data \
-        test test-unit test-integration test-coverage coverage-check test-verbose \
+        test test-unit test-integration test-e2e test-coverage coverage-check test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
@@ -206,6 +206,13 @@ test-integration:
 	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/anchor
 	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/mcp
 
+# Deployment hot-path. Set NVNM_MCP_TEST_SERVER_URL at a running server.
+# Without a URL the suite falls back to in-process (developer convenience).
+# See tests/e2e/README.md.
+test-e2e:
+	@echo ">> test-e2e: hot path (NVNM_MCP_TEST_SERVER_URL = deployment; unset = in-process)"
+	$(GO) test -mod=vendor $(GOFLAGS) -tags e2e -v -timeout 20m -run TestE2E_HotPath_AnchorDocument ./tests/e2e
+
 test-coverage:
 	$(GO) test -race -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
@@ -228,7 +235,8 @@ test-load:
 ## Quality
 
 # Format this module's packages only. Both tools are pointed at the package
-# directories `go list ./...` reports rather than at `.`, because `gofmt -w .`
+# directories `go list` reports (plus the e2e-tagged tests/e2e tree) rather
+# than at `.`, because `gofmt -w .`
 # and `goimports -w .` recurse into vendor/ and rewrite vendored dependencies
 # in place. That damage is quiet: the files reformat cleanly, then surface as
 # a pile of unrelated modifications in `git status` and get clobbered by the
@@ -239,7 +247,7 @@ test-load:
 format:
 	@command -v goimports >/dev/null 2>&1 || \
 		{ echo "goimports is required: make install-dev"; exit 1; }
-	@dirs=$$($(GO) list -f '{{.Dir}}' ./...) || exit 1; \
+	@dirs=$$({ $(GO) list -f '{{.Dir}}' ./...; $(GO) list -tags e2e -f '{{.Dir}}' ./tests/e2e/...; } | sort -u) || exit 1; \
 	echo "gofmt -w <$$(echo "$$dirs" | wc -l | tr -d ' ') package dirs, vendor excluded>"; \
 	gofmt -w $$dirs; \
 	echo "goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server <same>"; \
@@ -418,6 +426,7 @@ help:
 	@echo "  test             Run all tests"
 	@echo "  test-unit        Unit tests only (-short)"
 	@echo "  test-integration TestMCP_Tools + live client tests"
+	@echo "  test-e2e         Deployment hot path (set NVNM_MCP_TEST_SERVER_URL)"
 	@echo "  test-coverage    Tests with -race + coverage report"
 	@echo "  coverage-check   test-coverage + enforce the $(COVERAGE_THRESHOLD)% total coverage gate"
 	@echo "  test-verbose     Verbose test output"

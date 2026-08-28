@@ -64,6 +64,7 @@ Scenarios:
 | `constant_reads` | constant-vus  | 10 VUs for 2 minutes; `evm_get_chain_id` |
 | `burst_reads`    | ramping-vus   | 0 to 50 VUs in 1m, hold 1m, ramp to 0 in 1m; `evm_get_chain_id` |
 | `mixed_workload` | constant-vus  | 15 VUs for 2 minutes; mix of `evm_get_chain_id`, `evm_get_block` (latest), `anchor_get_registries` |
+| `hot_path`       | constant-vus  | 1 VU for 1 minute; same steps as `TestE2E_HotPath_AnchorDocument` (discover / optional prepare / read-back). Set `HOTPATH_FROM` to exercise `wallet_status` + `anchor_prepare_add_registry`. Does not broadcast. |
 
 ## Interpreting results
 
