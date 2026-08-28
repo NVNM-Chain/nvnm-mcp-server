@@ -188,8 +188,23 @@ test:
 test-unit:
 	$(GO) test $(GOFLAGS) -short ./...
 
+# Live client tests (build tag integration) plus TestMCP_Tools.
+# The MCP tools half needs no RPC; the tagged half talks to testnet.
+# Future CI can run the tool net alone:
+#   go test ./internal/mcp -run TestMCP_Tools
+#
+# Live packages are invoked one at a time on purpose. `go test ./...`
+# runs packages in parallel (default -p = GOMAXPROCS), so a FAIL in
+# internal/anchor is buried under later PASS lines (telemetry, version)
+# and write tests in internal/anchor + internal/mcp share one funded
+# key — concurrent broadcasts collide on nonce. Do not switch this back
+# to ./... without -p 1.
 test-integration:
-	$(GO) test $(GOFLAGS) -tags integration ./...
+	$(GO) test -mod=vendor $(GOFLAGS) ./internal/mcp -run 'TestMCP_Tools'
+	@echo ">> live client tests (tag integration, timeout 20m, one package at a time)"
+	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/evm
+	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/anchor
+	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/mcp
 
 test-coverage:
 	$(GO) test -race -coverprofile=coverage.out ./...
@@ -402,7 +417,7 @@ help:
 	@echo "Test:"
 	@echo "  test             Run all tests"
 	@echo "  test-unit        Unit tests only (-short)"
-	@echo "  test-integration Integration tests (-tags integration)"
+	@echo "  test-integration TestMCP_Tools + live client tests"
 	@echo "  test-coverage    Tests with -race + coverage report"
 	@echo "  coverage-check   test-coverage + enforce the $(COVERAGE_THRESHOLD)% total coverage gate"
 	@echo "  test-verbose     Verbose test output"

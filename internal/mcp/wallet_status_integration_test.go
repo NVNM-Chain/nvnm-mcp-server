@@ -138,30 +138,38 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 func rtLoadCredentials(t *testing.T) (address string, key *defiwallet.PrivateKey) {
 	t.Helper()
 
-	data, err := os.ReadFile(rtCredentialsPath)
-	if err != nil {
-		t.Skipf("credentials file not found (%s): %v", rtCredentialsPath, err)
-	}
-
-	var keyHex string
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "Address:"); ok {
-			address = strings.TrimSpace(after)
+	keyHex := strings.TrimSpace(os.Getenv("NVNM_TEST_PRIVATE_KEY"))
+	address = strings.TrimSpace(os.Getenv("NVNM_TEST_ADDRESS"))
+	if keyHex == "" {
+		data, err := os.ReadFile(rtCredentialsPath) //nolint:gosec // test fixture
+		if err != nil {
+			t.Skipf("NVNM_TEST_PRIVATE_KEY unset and credentials file not found (%s): %v",
+				rtCredentialsPath, err)
 		}
-		if after, ok := strings.CutPrefix(line, "PrivateKey:"); ok {
-			keyHex = strings.TrimSpace(after)
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if after, ok := strings.CutPrefix(line, "Address:"); ok {
+				address = strings.TrimSpace(after)
+			}
+			if after, ok := strings.CutPrefix(line, "PrivateKey:"); ok {
+				keyHex = strings.TrimSpace(after)
+			}
 		}
 	}
-	if address == "" || keyHex == "" {
-		t.Fatal("credentials file missing Address or PrivateKey")
+	if keyHex == "" {
+		t.Fatal("signing key missing a PrivateKey value")
 	}
 
 	keyBytes, err := hex.DecodeString(strings.TrimPrefix(keyHex, "0x"))
 	if err != nil {
 		t.Fatalf("invalid private key hex: %v", err)
 	}
-	return address, defiwallet.NewKeyFromBytes(keyBytes)
+	priv := defiwallet.NewKeyFromBytes(keyBytes)
+	derived := priv.Address().String()
+	if address != "" && !strings.EqualFold(address, derived) {
+		t.Fatalf("credentials Address %s does not match key-derived %s", address, derived)
+	}
+	return derived, priv
 }
 
 // rtSignUnsignedTx decodes an UnsignedTransaction's RLP raw_tx, signs
