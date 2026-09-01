@@ -211,7 +211,7 @@ test-integration:
 # See tests/e2e/README.md.
 test-e2e:
 	@echo ">> test-e2e: hot path (NVNM_MCP_TEST_SERVER_URL = deployment; unset = in-process)"
-	$(GO) test -mod=vendor $(GOFLAGS) -tags e2e -v -timeout 20m -run TestE2E_HotPath_AnchorDocument ./tests/e2e
+	$(GO) test -mod=vendor $(GOFLAGS) -tags e2e -v -count=1 -timeout 20m -run TestE2E_HotPath_AnchorDocument ./tests/e2e
 
 test-coverage:
 	$(GO) test -race -coverprofile=coverage.out ./...
