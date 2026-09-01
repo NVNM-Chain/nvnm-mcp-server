@@ -60,10 +60,29 @@ func evmGetBalanceNext() []NextAction {
 	return nil
 }
 
-func evmGetCodeNext(isContract bool) []NextAction {
+// evmGetCodeNext takes isPrecompile so the empty-bytecode branch can tell a
+// precompile apart from an ordinary account. A precompile is implemented in
+// the node, not as deployed EVM bytecode, so `is_contract: false` there is
+// expected rather than a sign the address is wrong -- and steering the caller
+// to its (always zero) balance was actively unhelpful.
+func evmGetCodeNext(isContract, isPrecompile bool) []NextAction {
 	if !isContract {
+		if isPrecompile {
+			return []NextAction{
+				{
+					Tool: "anchor_info",
+					Hint: "This is the anchoring precompile: it is implemented in the node, " +
+						"not as deployed bytecode, so empty code and is_contract=false are " +
+						"expected. Use anchor_info for its status, or the anchor_* tools to query it.",
+				},
+			}
+		}
 		return []NextAction{
-			{Tool: "evm_get_balance", Hint: "Address has no contract bytecode -- inspect its balance instead."},
+			{
+				Tool: "evm_get_balance",
+				Hint: "No contract bytecode at this address, so it is an externally owned " +
+					"account (or nothing has been deployed yet); inspect its balance instead.",
+			},
 		}
 	}
 	return []NextAction{

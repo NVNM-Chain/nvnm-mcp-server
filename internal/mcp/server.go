@@ -131,7 +131,7 @@ func NewServer(
 	registerVerifySignatureTool(mcpSrv)
 
 	// 2-3. Existing read tools.
-	registerEVMTools(mcpSrv, evmClient, logger)
+	registerEVMTools(mcpSrv, evmClient, cfg, logger)
 	registerAnchorTools(mcpSrv, anchorClient, logger)
 
 	// 4. Write tools, gated.

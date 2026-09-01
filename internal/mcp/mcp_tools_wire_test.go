@@ -93,9 +93,11 @@ type wireReceipt struct {
 }
 
 type wireBalance struct {
-	Address string `json:"address"`
-	Wei     string `json:"wei"`
-	Ether   string `json:"ether"`
+	Address      string `json:"address"`
+	Wei          string `json:"wei"`
+	Ether        string `json:"ether"`
+	BalanceHuman string `json:"balance_human"`
+	TokenWrapped string `json:"token_wrapped"`
 }
 
 type wireCode struct {

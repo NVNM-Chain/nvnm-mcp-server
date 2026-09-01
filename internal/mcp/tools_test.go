@@ -399,7 +399,7 @@ func TestHandler_GetReceipt_InvalidHash(t *testing.T) {
 
 func TestHandler_GetBalance_Happy(t *testing.T) {
 	m := &mockEVM{balance: &evm.NormalizedBalance{Address: testAddr, Wei: "1000", Ether: "0.000000000000001"}}
-	handler := makeGetBalanceHandler(m)
+	handler := makeGetBalanceHandler(m, testServerConfig(false))
 
 	_, out, err := handler(ctx, nil, getBalanceInput{Address: testAddr})
 	if err != nil {
@@ -412,7 +412,7 @@ func TestHandler_GetBalance_Happy(t *testing.T) {
 
 func TestHandler_GetBalance_WithBlock(t *testing.T) {
 	m := &mockEVM{balance: &evm.NormalizedBalance{Address: testAddr, Wei: "500", Ether: "0.0000000000000005"}}
-	handler := makeGetBalanceHandler(m)
+	handler := makeGetBalanceHandler(m, testServerConfig(false))
 
 	block := int64(50)
 	_, out, err := handler(ctx, nil, getBalanceInput{Address: testAddr, BlockNum: &block})
@@ -425,7 +425,7 @@ func TestHandler_GetBalance_WithBlock(t *testing.T) {
 }
 
 func TestHandler_GetBalance_InvalidAddress(t *testing.T) {
-	handler := makeGetBalanceHandler(&mockEVM{})
+	handler := makeGetBalanceHandler(&mockEVM{}, testServerConfig(false))
 
 	_, _, err := handler(ctx, nil, getBalanceInput{Address: testBadAddr})
 	if err == nil {
@@ -438,7 +438,7 @@ func TestHandler_GetBalance_InvalidAddress(t *testing.T) {
 
 func TestHandler_GetCode_Happy(t *testing.T) {
 	m := &mockEVM{code: &evm.CodeResult{Address: testAddr, Bytecode: "0x6080", IsContract: true}}
-	handler := makeGetCodeHandler(m)
+	handler := makeGetCodeHandler(m, testServerConfig(false))
 
 	_, out, err := handler(ctx, nil, getCodeInput{Address: testAddr})
 	if err != nil {
@@ -450,7 +450,7 @@ func TestHandler_GetCode_Happy(t *testing.T) {
 }
 
 func TestHandler_GetCode_InvalidAddress(t *testing.T) {
-	handler := makeGetCodeHandler(&mockEVM{})
+	handler := makeGetCodeHandler(&mockEVM{}, testServerConfig(false))
 
 	_, _, err := handler(ctx, nil, getCodeInput{Address: testBadAddr})
 	if err == nil {

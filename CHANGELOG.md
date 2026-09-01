@@ -142,6 +142,34 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lists 10 tests (was 8, `TransactionByHash` was added without a doc update), the
   new round-trip file is listed, and the credentials note now states that the test
   wallet must be funded.
+- **On-chain role denials no longer arrive as `upstream operation failed`.**
+  `anchor_prepare_add_record` and `anchor_prepare_update_record_status`
+  collapsed the precompile's `unauthorized` revert to the generic upstream
+  message, while `grant_role`/`revoke_role` returned a curated one for the
+  same class of failure -- so whether a caller learned *why* a write was
+  refused depended on which tool refused it. The revert classifier now
+  carries a sentinel per curated reason, and `unauthorized` maps to
+  `ErrPermissionDenied` so the reason survives `SafeForClient`. The message
+  states that the check is chain-side, distinguishing it from this server's
+  own API-key authorization.
+- **Authorization denials now name the principal.** `requires role admin:
+  permission denied` was ambiguous on the anchor role tools, which grant and
+  revoke *on-chain* roles: a registry's own admin could be told it "requires
+  role admin" with no way to tell whether the chain or their API key had
+  refused. The message now reads "your API key does not hold the role this
+  tool requires".
+- **`evm_get_code` no longer steers precompile callers at a zero balance.**
+  Empty bytecode at the anchoring precompile is expected -- it is implemented
+  in the node -- but the `next_actions` hint treated it as an ordinary
+  bytecode-less account and suggested inspecting its (always zero) balance.
+  Precompiles now point at `anchor_info`; ordinary accounts keep the balance
+  hint, reworded to say why the address has no code.
+- **`evm_get_balance` reports the chain's actual gas token.** The response
+  labelled the amount `ether`, which is wrong on every deployment of this
+  chain (gas is `wmantraUSD` / `wmmUSD`), so an agent reading that field
+  reported the wrong unit to a user. `balance_human` and `token_wrapped` are
+  now returned alongside, matching `wallet_status`; `ether` is retained as a
+  legacy alias and the tool description marks it as such.
 
 ## [1.0.0-rc18] - 2026-08-13
 

@@ -41,7 +41,7 @@ func TestEvmGetReceiptNext_UnknownStatusFallsToSuccessBranch(t *testing.T) {
 }
 
 func TestEvmGetCodeNext_NotContractBranch(t *testing.T) {
-	got := evmGetCodeNext(false)
+	got := evmGetCodeNext(false, false)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}
@@ -51,7 +51,7 @@ func TestEvmGetCodeNext_NotContractBranch(t *testing.T) {
 }
 
 func TestEvmGetCodeNext_IsContractBranch(t *testing.T) {
-	got := evmGetCodeNext(true)
+	got := evmGetCodeNext(true, false)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}

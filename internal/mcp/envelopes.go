@@ -40,7 +40,14 @@ type receiptOutput struct {
 
 type balanceOutput struct {
 	evm.NormalizedBalance
-	NextActions []NextAction `json:"next_actions,omitempty"`
+	// BalanceHuman and TokenWrapped restate the amount in the chain's own gas
+	// token. The embedded NormalizedBalance.Ether field is a misnomer on this
+	// chain -- gas is paid in wmantraUSD (testnet) / wmmUSD (mainnet), never
+	// ether -- and an agent reading `ether` will report the wrong unit to a
+	// user. `ether` is retained for wire compatibility; prefer these.
+	BalanceHuman string       `json:"balance_human"`
+	TokenWrapped string       `json:"token_wrapped"`
+	NextActions  []NextAction `json:"next_actions,omitempty"`
 }
 
 type codeOutput struct {
