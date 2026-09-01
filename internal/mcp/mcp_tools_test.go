@@ -241,6 +241,12 @@ func TestMCP_Tools(t *testing.T) {
 				if out.Ether == "" {
 					t.Error("ether empty")
 				}
+				if out.BalanceHuman == "" {
+					t.Error("balance_human empty")
+				}
+				if out.TokenWrapped == "" {
+					t.Error("token_wrapped empty")
+				}
 			},
 		},
 		{
@@ -618,7 +624,7 @@ var callToolFirstHint = map[string]string{
 	"evm_get_block":                       "evm_get_transaction",
 	"evm_get_transaction":                 "evm_get_transaction_receipt",
 	"evm_get_transaction_receipt":         "anchor_get_records",
-	"evm_get_code":                        "evm_get_balance",
+	"evm_get_code":                        "anchor_info",
 	"evm_get_logs":                        "evm_get_transaction_receipt",
 	"evm_send_raw_transaction":            "evm_get_transaction_receipt",
 	"anchor_info":                         "anchor_get_registries",
