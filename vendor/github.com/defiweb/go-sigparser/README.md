@@ -12,7 +12,7 @@ Tuples are represented as a list of parameters, e.g. `(uint256,bytes32)`. The li
 The `go-sigparser` supports many different signature formats. Here are a few examples:
 
 - `getPrice(string)`
-- `getPrice(string)((uint256,unit256))`
+- `getPrice(string)((uint256,uint256))`
 - `function getPrice(string calldata symbol) external view returns (tuple(uint256 price, uint256 timestamp) result)`
 - `constructor(string symbol, string name)`
 - `receive() external payable`
@@ -25,7 +25,7 @@ The `go-sigparser` supports many different signature formats. Here are a few exa
 You can install the `go-sigparser` package with this command:
 
 ```bash
-go get github.com/ethereum/go-sigparser
+go get github.com/defiweb/go-sigparser
 ```
 
 ## Usage
@@ -48,14 +48,14 @@ func main() {
 	}
 
 	fmt.Println(sig.Kind)                     // function
-	fmt.Println(sig.Name)                     // getPrice
-	fmt.Println(sig.Inputs[0].Name)           // symbol
+	fmt.Println(sig.Name)                     // getPrices
+	fmt.Println(sig.Inputs[0].Name)           // symbols
 	fmt.Println(sig.Inputs[0].Type)           // string
 	fmt.Println(sig.Inputs[0].Arrays)         // [-1] (-1 means that the array is unbounded)
 	fmt.Println(sig.Inputs[0].DataLocation)   // calldata
-	fmt.Println(sig.Modifiers)                // [external, view]
+	fmt.Println(sig.Modifiers)                // [external view]
 	fmt.Println(sig.Outputs[0].Name)          // result
-	fmt.Println(sig.Outputs[0].Arrays)        // [-1] 
+	fmt.Println(sig.Outputs[0].Arrays)        // [-1]
 	fmt.Println(sig.Outputs[0].Tuple[0].Name) // price
 	fmt.Println(sig.Outputs[0].Tuple[0].Type) // uint256
 	fmt.Println(sig.Outputs[0].Tuple[1].Name) // timestamp
@@ -114,6 +114,40 @@ func main() {
 	fmt.Println(param.Tuple[1].Type) // uint256
 }
 ```
+
+### Detecting the Input Kind
+
+If you do not know upfront which of the three functions above should be used, the `Kind` function tells you what the
+input looks like:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/defiweb/go-sigparser"
+)
+
+func main() {
+	fmt.Println(sigparser.Kind("uint256"))                     // type
+	fmt.Println(sigparser.Kind("(uint256,uint256)"))           // tuple
+	fmt.Println(sigparser.Kind("(uint256,uint256)[]"))         // array
+	fmt.Println(sigparser.Kind("getPrice(string)"))            // function
+	fmt.Println(sigparser.Kind("event PriceUpdated(uint256)")) // event
+	fmt.Println(sigparser.Kind("struct Foo { uint256 a; }"))   // struct
+	fmt.Println(sigparser.Kind("!"))                           // invalid
+
+	k := sigparser.Kind("event PriceUpdated(uint256)")
+	fmt.Println(k.IsSignature()) // true,  use ParseSignature
+	fmt.Println(k.IsParameter()) // false, use ParseParameter
+	fmt.Println(k.IsStruct())    // false, use ParseStruct
+}
+```
+
+Some inputs are ambiguous. For example, `foo` may be a type as well as a function name, and `function foo` may be a
+function signature as well as a parameter named `foo` of the `function` type. Such inputs are reported as types. To
+avoid the ambiguity, always add an empty parameter list to signatures, e.g. `foo()`.
 
 ## Documentation
 
