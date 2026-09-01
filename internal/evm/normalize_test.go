@@ -97,6 +97,14 @@ func TestNormalizeOnChainTransaction_AllFields(t *testing.T) {
 	tx.GasPrice = big.NewInt(8_000_000_000)
 	tx.Nonce = &nonce
 	tx.Input = []byte{0xca, 0xfe}
+	blockHash := defitypes.MustHashFromHex(
+		"0x4e3a3754410177e6937ef1f84bba68ea139e8d1a2258c5f85db9f1cd715a1bdd",
+		defitypes.PadNone,
+	)
+	tx.BlockHash = &blockHash
+	tx.BlockNumber = big.NewInt(46147)
+	idx := uint64(3)
+	tx.TransactionIndex = &idx
 
 	nt := normalizeOnChainTransaction(tx, false)
 	if nt.From != "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed" {
@@ -113,6 +121,15 @@ func TestNormalizeOnChainTransaction_AllFields(t *testing.T) {
 	}
 	if nt.IsPending {
 		t.Error("IsPending = true, want false")
+	}
+	if nt.BlockNumber == nil || *nt.BlockNumber != 46147 {
+		t.Errorf("block_number = %v, want 46147", nt.BlockNumber)
+	}
+	if nt.BlockHash == nil || *nt.BlockHash != blockHash.String() {
+		t.Errorf("block_hash = %v, want %s", nt.BlockHash, blockHash)
+	}
+	if nt.Index == nil || *nt.Index != 3 {
+		t.Errorf("index = %v, want 3", nt.Index)
 	}
 }
 
@@ -136,6 +153,9 @@ func TestNormalizeOnChainTransaction_Defaults(t *testing.T) {
 	}
 	if nt.Hash != "" || nt.From != "" || nt.To != nil {
 		t.Errorf("tx = %+v, want empty hash/from/to", nt)
+	}
+	if nt.BlockNumber != nil || nt.BlockHash != nil || nt.Index != nil {
+		t.Errorf("pending tx = %+v, want omitted block placement", nt)
 	}
 }
 

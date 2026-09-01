@@ -156,14 +156,85 @@ func (c *client) PrepareUpdateRecordStatus(
 		return nil, fmt.Errorf("status is required: %w", apperrors.ErrMissingRequired)
 	}
 
+	// The tool schema documents index as optional, "default: latest", but the
+	// ABI declares a plain uint64 -- there is no "absent" to put on the wire,
+	// and the precompile rejects the 0 an omitted index would encode as
+	// (version indexes are 1-based). Resolve the caller's intent to a real
+	// index here so the transaction they sign names the version it moves.
+	index := uint64(0)
+	if req.Index != nil {
+		index = *req.Index
+	}
+	if index == 0 {
+		resolved, err := c.latestRecordIndex(ctx, req.RegistryID, req.RecordID)
+		if err != nil {
+			return nil, err
+		}
+		index = resolved
+	}
+
 	calldata, err := c.parsedABI.Methods["updateRecordStatus"].EncodeArgs(
-		req.RegistryID, req.RecordID, req.Index, req.Status,
+		req.RegistryID, req.RecordID, index, req.Status,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("pack updateRecordStatus: %w", err)
 	}
 
 	return c.buildUnsignedTx(ctx, req.From, calldata, req.PreferLegacy)
+}
+
+// latestRecordIndex resolves the 1-based version index of a record's current
+// version. The records view answers a (registryID, recordID) lookup with no
+// index by returning the latest version, so this costs one eth_call.
+//
+// It prefers the row flagged isLatest and falls back to the highest index
+// seen, which keeps the answer right if the chain ever starts returning every
+// version for a zero index. Finding no version is an error, not a default:
+// there is no index that could stand in for a record that does not exist.
+func (c *client) latestRecordIndex(
+	ctx context.Context,
+	registryID, recordID uint64,
+) (uint64, error) {
+	resp, err := c.GetRecords(ctx, GetRecordsRequest{
+		RegistryID: &registryID,
+		RecordID:   &recordID,
+	})
+	if err != nil {
+		// The precompile reverts on a key it does not hold ("collections:
+		// not found") rather than returning zero rows, so this is the
+		// branch an unknown record_id actually takes. Name it, the way
+		// GetRegistry names the same revert, instead of letting
+		// SafeForClient collapse it to a generic upstream failure -- a
+		// caller who mistyped a record ID can act on "record not found".
+		if strings.Contains(err.Error(), "not found") {
+			return 0, fmt.Errorf(
+				"registry %d record %d: %w",
+				registryID, recordID, apperrors.ErrRecordNotFound,
+			)
+		}
+		return 0, fmt.Errorf("resolve latest version index: %w", err)
+	}
+
+	var highest uint64
+	for i := range resp.Records {
+		row := &resp.Records[i]
+		if row.RecordID != recordID || row.Index == 0 {
+			continue
+		}
+		if row.IsLatest {
+			return row.Index, nil
+		}
+		if row.Index > highest {
+			highest = row.Index
+		}
+	}
+	if highest == 0 {
+		return 0, fmt.Errorf(
+			"registry %d record %d has no versions to update: %w",
+			registryID, recordID, apperrors.ErrRecordNotFound,
+		)
+	}
+	return highest, nil
 }
 
 // PrepareGrantRole constructs an unsigned grantRole transaction.

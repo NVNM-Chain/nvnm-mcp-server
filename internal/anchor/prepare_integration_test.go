@@ -42,14 +42,26 @@ const phase84ReceiptTimeout = 90 * time.Second
 // address. Skips the test if the env var is unset.
 func envCredentials(t *testing.T) (*defiwallet.PrivateKey, defitypes.Address) {
 	t.Helper()
-	raw := os.Getenv("NVNM_TEST_PRIVATE_KEY")
+	raw := strings.TrimSpace(os.Getenv("NVNM_TEST_PRIVATE_KEY"))
 	if raw == "" {
-		t.Skip("NVNM_TEST_PRIVATE_KEY not set; skipping testnet round-trip")
+		data, err := os.ReadFile("../../.chain_credentials.txt") //nolint:gosec // test fixture
+		if err != nil {
+			t.Skip("NVNM_TEST_PRIVATE_KEY unset and .chain_credentials.txt not found; skipping testnet round-trip")
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if after, ok := strings.CutPrefix(line, "PrivateKey:"); ok {
+				raw = strings.TrimSpace(after)
+			}
+		}
+		if raw == "" {
+			t.Skip("no signing key in NVNM_TEST_PRIVATE_KEY or .chain_credentials.txt")
+		}
 	}
 	raw = strings.TrimPrefix(raw, "0x")
 	keyBytes, err := hex.DecodeString(raw)
 	if err != nil {
-		t.Fatalf("decode NVNM_TEST_PRIVATE_KEY: %v", err)
+		t.Fatalf("decode signing key: %v", err)
 	}
 	priv := defiwallet.NewKeyFromBytes(keyBytes)
 	return priv, priv.Address()

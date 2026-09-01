@@ -72,9 +72,10 @@ do not re-introduce it. See
 
 ```sh
 make build               # Builds bin/nvnm-mcp-server
-make test                # Unit + MCP E2E tests; fast.
-make test-integration    # Integration tests against a live testnet.
-                         #   Requires testnet credentials in .env.
+make test                # Unit + TestMCP_Tools; fast.
+make test-integration    # TestMCP_Tools, then live client tests.
+                         #   Tagged half needs testnet credentials.
+make test-e2e            # Deployment hot path (NVNM_MCP_TEST_SERVER_URL).
 make lint                # golangci-lint (v2.11.4 expected)
 make check-all           # format + vet + lint, the same gates CI runs
 ```
@@ -86,26 +87,31 @@ retry.
 
 ## 4. Test layers
 
-Three test layers, each with its own placement and execution rule:
+Test layers, each with its own placement and execution rule:
 
 - **Unit tests** live alongside the source
   (`internal/foo/foo.go` → `internal/foo/foo_test.go`). No build tag. Run
   by `make test` / `go test ./...`. Prefer table-driven tests where cases
   share a shape.
-- **Integration tests** carry the `//go:build integration` constraint and
-  require live testnet credentials. Run via `make test-integration`. They
-  hit the real EVM JSON-RPC and verify end-to-end transaction submission;
-  do not mock the testnet inside these.
-- **MCP end-to-end tests** live in
-  [`internal/mcp/server_e2e_test.go`](internal/mcp/server_e2e_test.go).
-  They spin the server in-process, exercising it as an MCP client would.
-  Part of the default `make test` run.
+- **MCP integration tests** are hermetic: official SDK client → in-process
+  HTTP server → mock chain clients. `TestMCP_Tools`
+  in `internal/mcp/mcp_tools_test.go` must invoke every advertised
+  tool. No RPC, no wallet. This is the tool-regression net (`go test ./...`).
+  Transport/auth samples stay in `internal/mcp/server_e2e_test.go` (historical
+  `TestE2E_*` names; not the deployment suite).
+- **Client live tests** carry the `//go:build integration` constraint and
+  sit next to evm/anchor. Run via `make test-integration` (after
+  `TestMCP_Tools`). They hit real JSON-RPC; do not mock the
+  testnet inside these.
+- **E2E** (`tests/e2e`) is the deployment hot path
+  (`TestE2E_HotPath_AnchorDocument`, `NVNM_MCP_TEST_SERVER_URL`). Not a
+  PR gate and not an all-tools suite.
 
 When adding new behavior: extend the layer that owns the new surface.
-Adding a new tool means updating both the MCP E2E test (registration +
-invocation) and the unit tests for the handler. Changing a request /
-response shape always needs unit-test coverage; integration tests are
-re-run when the change crosses the boundary they exercise.
+Adding a new tool means a mocked SDK invocation in
+`TestMCP_Tools` plus unit tests for the handler.
+Changing a request / response shape always needs unit-test coverage;
+client live tests are re-run when the change crosses the chain boundary.
 
 ## 5. Commit & PR norms
 

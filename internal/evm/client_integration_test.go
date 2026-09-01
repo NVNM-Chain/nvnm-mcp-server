@@ -253,6 +253,12 @@ func TestIntegration_TransactionByHash_PopulatesFrom(t *testing.T) {
 	if !strings.EqualFold(tx.From, sender) {
 		t.Errorf("From = %q, want %q", tx.From, sender)
 	}
+	if tx.BlockNumber == nil || *tx.BlockNumber == 0 {
+		t.Error("mined tx missing block_number")
+	}
+	if tx.BlockHash == nil || *tx.BlockHash == "" {
+		t.Error("mined tx missing block_hash")
+	}
 }
 
 // TestIntegration_TransactionByHash_NotFound verifies that a well-formed but
@@ -266,5 +272,39 @@ func TestIntegration_TransactionByHash_NotFound(t *testing.T) {
 	_, err := c.TransactionByHash(ctx, mustHashFromHex(garbage))
 	if !errors.Is(err, apperrors.ErrTxNotFound) {
 		t.Fatalf("want ErrTxNotFound for a non-existent hash, got %v", err)
+	}
+}
+
+func TestIntegration_TransactionReceipt_MinedTx(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	const txHash = "0x7e0b28b30916a3dcc14c4ffe9a5ed6be06acd3d4f4c618161fbb1e6c1acf2188"
+	receipt, err := c.TransactionReceipt(ctx, mustHashFromHex(txHash))
+	if err != nil {
+		t.Fatalf("TransactionReceipt: %v", err)
+	}
+	if receipt.Status != "success" {
+		t.Errorf("status = %q, want success", receipt.Status)
+	}
+	if receipt.BlockNumber == 0 || receipt.BlockHash == "" {
+		t.Errorf("mined receipt missing placement: block=%d hash=%q", receipt.BlockNumber, receipt.BlockHash)
+	}
+}
+
+func TestIntegration_TransactionReceipt_NotFoundAborts(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	garbage := "0x" + strings.Repeat("cd", 32)
+	start := time.Now()
+	_, err := c.TransactionReceipt(ctx, mustHashFromHex(garbage))
+	elapsed := time.Since(start)
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("want ErrTxNotFound, got %v", err)
+	}
+	// Finding 13: a missing receipt must not pin the caller for the HTTP timeout.
+	if elapsed > 8*time.Second {
+		t.Errorf("not-found receipt took %s, want well under the 5s abort plus margin", elapsed)
 	}
 }

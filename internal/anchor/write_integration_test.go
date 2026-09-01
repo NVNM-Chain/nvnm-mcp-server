@@ -37,33 +37,38 @@ type testCredentials struct {
 func loadCredentials(t *testing.T) testCredentials {
 	t.Helper()
 
-	data, err := os.ReadFile(credentialsPath) //nolint:gosec // test fixture
-	if err != nil {
-		t.Skipf("credentials file not found (%s): %v", credentialsPath, err)
+	keyHex := strings.TrimSpace(os.Getenv("NVNM_TEST_PRIVATE_KEY"))
+	address := strings.TrimSpace(os.Getenv("NVNM_TEST_ADDRESS"))
+	if keyHex == "" {
+		data, err := os.ReadFile(credentialsPath) //nolint:gosec // test fixture
+		if err != nil {
+			t.Skipf("NVNM_TEST_PRIVATE_KEY unset and credentials file not found (%s): %v",
+				credentialsPath, err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if after, ok := strings.CutPrefix(line, "Address:"); ok {
+				address = strings.TrimSpace(after)
+			}
+			if after, ok := strings.CutPrefix(line, "PrivateKey:"); ok {
+				keyHex = strings.TrimSpace(after)
+			}
+		}
+	}
+	if keyHex == "" {
+		t.Fatal("signing key missing a PrivateKey value")
 	}
 
-	var address, keyHex string
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "Address:"); ok {
-			address = strings.TrimSpace(after)
-		}
-		if after, ok := strings.CutPrefix(line, "PrivateKey:"); ok {
-			keyHex = strings.TrimSpace(after)
-		}
-	}
-	if address == "" || keyHex == "" {
-		t.Fatal("credentials file missing Address or PrivateKey")
-	}
-
-	keyHex = strings.TrimPrefix(keyHex, "0x")
-	keyBytes, err := hex.DecodeString(keyHex)
+	keyBytes, err := hex.DecodeString(strings.TrimPrefix(keyHex, "0x"))
 	if err != nil {
 		t.Fatalf("invalid private key hex: %v", err)
 	}
 	privKey := defiwallet.NewKeyFromBytes(keyBytes)
-
-	return testCredentials{Address: address, PrivateKey: privKey}
+	derived := privKey.Address().String()
+	if address != "" && !strings.EqualFold(address, derived) {
+		t.Fatalf("credentials Address %s does not match key-derived %s", address, derived)
+	}
+	return testCredentials{Address: derived, PrivateKey: privKey}
 }
 
 func integrationEVMClient(t *testing.T) evm.Client {

@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -55,7 +56,9 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, _ *slog.Logger) {
 			"rejected it (e.g. permission denied, bad input) -- the write did NOT occur " +
 			"and gas was still consumed. " +
 			"If the receipt is not yet available, the transaction is still pending -- " +
-			"wait a few seconds and retry.",
+			"wait a few seconds and retry. A single lookup is aborted after a few seconds " +
+			"so a hung node cannot pin the client; poll this tool rather than waiting out " +
+			"the HTTP timeout.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetReceiptHandler(evmClient))
 
@@ -237,10 +240,17 @@ func makeGetReceiptHandler(
 			return nil, receiptOutput{},
 				fmt.Errorf("invalid tx_hash: %w", err)
 		}
+		// Abort the upstream probe so a hung node cannot pin the MCP client
+		// for the HTTP timeout (finding 13). A canceled or deadlined lookup
+		// is the same answer as a null receipt: not found, caller polls.
+		ctx, cancel := context.WithTimeout(ctx, evm.ReceiptLookupTimeout)
+		defer cancel()
 		receipt, err := c.TransactionReceipt(ctx, hash)
 		if err != nil {
-			return nil, receiptOutput{},
-				fmt.Errorf("receipt not found: %w", err)
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return nil, receiptOutput{}, apperrors.ErrTxNotFound
+			}
+			return nil, receiptOutput{}, err
 		}
 		return nil, receiptOutput{NormalizedReceipt: *receipt, NextActions: evmGetReceiptNext(receipt.Status)}, nil
 	}

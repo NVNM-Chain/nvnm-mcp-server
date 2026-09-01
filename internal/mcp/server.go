@@ -158,6 +158,16 @@ func NewServer(
 	return s
 }
 
+// Handler returns the Streamable HTTP handler this server already builds
+// for RunHTTP, without the listen loop or the outer security/auth wrappers.
+// Embedding the MCP server in a host process -- or hosting it in-process
+// for tests -- is a reasonable thing for a caller to want.
+func (s *Server) Handler() http.Handler {
+	return mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return s.mcpServer
+	}, &mcp.StreamableHTTPOptions{Stateless: true})
+}
+
 // RunStdio runs the MCP server over stdin/stdout.
 func (s *Server) RunStdio(ctx context.Context) error {
 	s.logger.Info("starting MCP server", slog.String("transport", "stdio"))
@@ -220,9 +230,7 @@ func (s *Server) RunHTTP(
 	// This is safe only because the server makes no server->client requests:
 	// the write-approval elicitation was removed (the lone such request), and
 	// nothing depends on delivering logging notifications.
-	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
-		return s.mcpServer
-	}, &mcp.StreamableHTTPOptions{Stateless: true})
+	mcpHandler := s.Handler()
 
 	// Chain (outermost first):
 	//   CORSMiddleware        → browser preflight + cross-origin permission
@@ -247,7 +255,7 @@ func (s *Server) RunHTTP(
 	//   ClientRateLimiter     → per-client bucket; requires identity from Auth,
 	//                           passes anonymous through
 	//   mcpHandler            → MCP SDK
-	var mcpChain http.Handler = mcpHandler
+	mcpChain := mcpHandler
 	if limiter != nil {
 		mcpChain = limiter.Middleware(mcpChain, s.logger)
 	}

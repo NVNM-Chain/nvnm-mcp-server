@@ -519,7 +519,9 @@ Returns the receipt for a mined transaction, including status, gas used, logs, a
 ### Error Conditions
 
 - Invalid `tx_hash` format (not 0x-prefixed, not 32 bytes).
-- Receipt not found (transaction may be pending or nonexistent).
+- Receipt not found (transaction may be pending or nonexistent). A single
+  lookup is aborted after 5 seconds so a hung node cannot pin the client;
+  poll this tool rather than waiting out the HTTP timeout.
 - RPC connection failure.
 
 ### Example
@@ -873,15 +875,18 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 
 > **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Compare `pagination.total` against the rows returned -- authoritative for a `name` filter, always `0` from this chain otherwise -- or keep paging until a page comes back short.
 
-> **Operator note (scan cost):** each name-filtered call pages the *entire* registry
-> table through the upstream RPC -- one sequential call per 200 registries plus one
-> peek -- measured at roughly 5–9 seconds per lookup at ~2.6k registries, growing
-> linearly with the table. `offset`/`limit` window the result, they do **not** reduce
-> this cost: every page of a match set re-runs the full scan. Every scan emits a
-> structured log line (`anchor_get_registries by-name scan`: duration, matches, offset,
-> limit, truncated) so operators can watch frequency and cost. The client-side scan is
-> a stopgap: if the chain gains a by-name index as expected, or if indexing is solved
-> off-chain, it can be retired. Issue #79 tracks the options.
+> **Operator note (scan cost):** each listing or name-filtered call pages the
+> *entire* registry table through the upstream RPC -- one sequential call per
+> 200 registries plus one peek -- commonly **20–30 seconds** on a populated
+> chain, growing linearly with the table. `offset`/`limit` window the result,
+> they do **not** reduce this cost: every page of a match set re-runs the full
+> scan. HTTP clients must wait at least **90s** (retrying at 30s aborts a
+> still-running scan). Every scan emits a structured log line
+> (`anchor_get_registries by-name scan` / full-table scan: duration, matches,
+> offset, limit, truncated) so operators can watch frequency and cost. The
+> client-side scan is a stopgap: if the chain gains a by-name index as
+> expected, or if indexing is solved off-chain, it can be retired. Issue #79
+> tracks the options.
 
 ### Input Parameters
 
@@ -1273,7 +1278,7 @@ Construct an unsigned `updateRecordStatus` transaction to change the status of a
 | `from`          | `string` | required | Editor EVM address (0x-prefixed)               |
 | `registry_id`   | `uint64` | required | Registry numeric ID                            |
 | `record_id`     | `uint64` | required | Record numeric ID                              |
-| `index`         | `uint64` | optional | Version index of the record (default: latest)  |
+| `index`         | `uint64` | optional | Version index, 1-based. Omit it or pass `0` to update the latest version -- the server looks the version up before building the transaction. |
 | `status`        | `string` | required | New record status, e.g. `Active`, `Superseded`, `Revoked` |
 
 ### Output Fields

@@ -120,7 +120,10 @@ type mockAnchor struct {
 	lastRegistriesReq anchor.GetRegistriesRequest
 	records           *anchor.GetRecordsResponse
 	unsignedTx        *anchor.UnsignedTransaction
-	returnErr         error
+	// unsignedTxByMethod, when set, returns a distinct unsigned tx per
+	// prepare method so a handler wired to the wrong Prepare* still fails.
+	unsignedTxByMethod map[string]*anchor.UnsignedTransaction
+	returnErr          error
 }
 
 func (m *mockAnchor) Info() anchor.PrecompileInfo { return m.info }
@@ -132,9 +135,15 @@ func (m *mockAnchor) GetRegistry(_ context.Context, _ anchor.GetRegistryRequest)
 	return m.registry, m.returnErr
 }
 func (m *mockAnchor) GetRegistries(_ context.Context, req anchor.GetRegistriesRequest) (*anchor.GetRegistriesResponse, error) {
-	idx := m.registriesCallCount
-	m.registriesCallCount++
 	m.lastRegistriesReq = req
+	m.registriesCallCount++
+	// registry_id > 0 is the deprecated single-registry lookup. Keep it on
+	// the fixed `registries` payload so listing mocks (pages / fn) can
+	// coexist with a cursor-bearing by-id response in the same server.
+	if req.RegistryID != nil && *req.RegistryID > 0 {
+		return m.registries, m.returnErr
+	}
+	idx := m.registriesCallCount - 1
 	if m.registriesFn != nil {
 		return m.registriesFn(idx)
 	}
@@ -149,22 +158,32 @@ func (m *mockAnchor) GetRegistries(_ context.Context, req anchor.GetRegistriesRe
 func (m *mockAnchor) GetRecords(_ context.Context, _ anchor.GetRecordsRequest) (*anchor.GetRecordsResponse, error) {
 	return m.records, m.returnErr
 }
-func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRegistryRequest) (*anchor.UnsignedTransaction, error) {
+
+func (m *mockAnchor) prepareTx(method string) (*anchor.UnsignedTransaction, error) {
+	if m.unsignedTxByMethod != nil {
+		if tx, ok := m.unsignedTxByMethod[method]; ok {
+			return tx, m.returnErr
+		}
+	}
 	return m.unsignedTx, m.returnErr
 }
+
+func (m *mockAnchor) PrepareAddRegistry(_ context.Context, _ anchor.PrepareAddRegistryRequest) (*anchor.UnsignedTransaction, error) {
+	return m.prepareTx("addRegistry")
+}
 func (m *mockAnchor) PrepareAddRecord(_ context.Context, _ anchor.PrepareAddRecordRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("addRecord")
 }
 func (m *mockAnchor) PrepareUpdateRecordStatus(
 	_ context.Context, _ anchor.PrepareUpdateRecordStatusRequest,
 ) (*anchor.UnsignedTransaction, error) {
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("updateRecordStatus")
 }
 func (m *mockAnchor) PrepareGrantRole(_ context.Context, _ anchor.PrepareGrantRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("grantRole")
 }
 func (m *mockAnchor) PrepareRevokeRole(_ context.Context, _ anchor.PrepareRevokeRoleRequest) (*anchor.UnsignedTransaction, error) { //nolint:gocritic // interface conformance requires value receiver
-	return m.unsignedTx, m.returnErr
+	return m.prepareTx("revokeRole")
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +358,33 @@ func TestHandler_GetReceipt_Happy(t *testing.T) {
 	}
 	if out.Status != "success" {
 		t.Errorf("Status = %q, want %q", out.Status, "success")
+	}
+}
+
+func TestHandler_GetReceipt_NotFound_MessageNotDoubled(t *testing.T) {
+	handler := makeGetReceiptHandler(&mockEVM{returnErr: apperrors.ErrTxNotFound})
+
+	_, _, err := handler(ctx, nil, txHashInput{TxHash: testTxHash})
+	if err == nil {
+		t.Fatal("expected not-found error")
+	}
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("error should wrap ErrTxNotFound; got %v", err)
+	}
+	if got, want := err.Error(), apperrors.ErrTxNotFound.Error(); got != want {
+		t.Errorf("client-visible message = %q, want %q", got, want)
+	}
+}
+
+func TestHandler_GetReceipt_DeadlineIsNotFound(t *testing.T) {
+	handler := makeGetReceiptHandler(&mockEVM{returnErr: context.DeadlineExceeded})
+
+	_, _, err := handler(ctx, nil, txHashInput{TxHash: testTxHash})
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Fatalf("deadline should surface as ErrTxNotFound; got %v", err)
+	}
+	if got, want := err.Error(), apperrors.ErrTxNotFound.Error(); got != want {
+		t.Errorf("client-visible message = %q, want %q", got, want)
 	}
 }
 
@@ -1153,7 +1199,7 @@ func TestScanRegistriesByName_PagesUntilShortPage(t *testing.T) {
 		// Full page: NextKey non-empty means the SDK saw at least one more
 		// entry past this page, so the walk must keep paging via Key, not
 		// stop just because the page happened to be full.
-		{Registries: full, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		{Registries: full, Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("cursor-1"))}},
 		{Registries: []anchor.Registry{{ID: 9999, Name: "target-registry"}}}, // short page: stop here
 	}
 	m := &mockAnchor{registriesPages: pages}
@@ -1184,8 +1230,8 @@ func TestScanRegistriesByName_StopsOnExactlyFullLastPage(t *testing.T) {
 		full[i] = anchor.Registry{ID: uint64(i), Name: "target-registry"}
 	}
 	pages := []*anchor.GetRegistriesResponse{
-		{Registries: []anchor.Registry{{ID: uint64(nameScanPageSize)}}},    // peek: reconciles with totalScanned
-		{Registries: full, Pagination: &anchor.PageResponse{NextKey: nil}}, // exactly full, but NextKey empty: done
+		{Registries: []anchor.Registry{{ID: uint64(nameScanPageSize)}}},   // peek: reconciles with totalScanned
+		{Registries: full, Pagination: &anchor.PageResponse{NextKey: ""}}, // exactly full, but NextKey empty: done
 	}
 	m := &mockAnchor{registriesPages: pages}
 
@@ -1219,7 +1265,7 @@ func TestScanRegistriesByName_ShortPageWithNextKeyContinues(t *testing.T) {
 		// Peek: 101 reconciles with the 101 rows the walk scans below.
 		{Registries: []anchor.Registry{{ID: 101}}},
 		// Short page (100 < nameScanPageSize) with NextKey set: keep going.
-		{Registries: shortPage, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		{Registries: shortPage, Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("cursor-1"))}},
 		// Final page: no NextKey, walk ends.
 		{Registries: []anchor.Registry{{ID: 101, Name: "target-registry"}}},
 	}
@@ -1259,7 +1305,7 @@ func TestScanRegistriesByName_TruncatesAtPageCap(t *testing.T) {
 			}
 			return &anchor.GetRegistriesResponse{
 				Registries: full,
-				Pagination: &anchor.PageResponse{NextKey: []byte("always-more")},
+				Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("always-more"))},
 			}, nil
 		},
 	}
@@ -1293,7 +1339,7 @@ func TestHandler_GetRegistries_ByName_TruncatedScanStillPages(t *testing.T) {
 			}
 			return &anchor.GetRegistriesResponse{
 				Registries: full,
-				Pagination: &anchor.PageResponse{NextKey: []byte("always-more")},
+				Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("always-more"))},
 			}, nil
 		},
 	}
@@ -1333,7 +1379,7 @@ func TestHandler_GetRegistries_UnfilteredTruncated(t *testing.T) {
 			}
 			return &anchor.GetRegistriesResponse{
 				Registries: page,
-				Pagination: &anchor.PageResponse{NextKey: []byte("always-more")},
+				Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("always-more"))},
 			}, nil
 		},
 	}
@@ -1391,7 +1437,7 @@ func TestScanAllRegistries_PagesUntilShortPage(t *testing.T) {
 		// will scan (200 filler + 1 last), so the peek doesn't flag truncation.
 		{Registries: []anchor.Registry{{ID: 201}}},
 		// Full page with NextKey set -- walk must advance the cursor.
-		{Registries: full, Pagination: &anchor.PageResponse{NextKey: []byte("cursor-1")}},
+		{Registries: full, Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("cursor-1"))}},
 		// Short terminal page with no NextKey -- walk ends here.
 		{Registries: []anchor.Registry{{ID: 201, Name: "last-registry"}}},
 	}
@@ -1670,6 +1716,20 @@ func TestHandler_PrepareGrantRole_Error(t *testing.T) {
 	_, _, err := handler(ctx, nil, prepareGrantRoleInput{})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestAuditIndex(t *testing.T) {
+	if got := auditIndex(nil); got != "latest" {
+		t.Errorf("nil = %q, want latest", got)
+	}
+	zero := uint64(0)
+	if got := auditIndex(&zero); got != "latest" {
+		t.Errorf("0 = %q, want latest", got)
+	}
+	three := uint64(3)
+	if got := auditIndex(&three); got != "3" {
+		t.Errorf("3 = %q, want 3", got)
 	}
 }
 

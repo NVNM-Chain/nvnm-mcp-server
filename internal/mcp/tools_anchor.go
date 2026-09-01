@@ -63,6 +63,9 @@ func registerAnchorTools(
 			"can create a registry named identically to another, so a caller resolving " +
 			"by name must consider all matches (check creator/created_at to " +
 			"disambiguate), not just take the first. " +
+			"A listing or name filter pages the whole table over RPC and paginates " +
+			"in memory, so the call commonly takes 20-30s on a populated chain; " +
+			"wait for it (HTTP client timeout of at least 90s) instead of retrying. " +
 			"registry_id is DEPRECATED: it returns that one registry and cannot be " +
 			"combined with name, match, offset, or limit -- use anchor_get_registry " +
 			"instead. " +
@@ -478,9 +481,9 @@ func scanRegistriesByName(
 				matches = append(matches, r)
 			}
 		}
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			return nil, false, err
 		}
 		// NextKey emptiness, not the row count, is the authoritative "done"
 		// signal: the SDK only sets NextKey when it can see at least one
@@ -536,9 +539,9 @@ func scanAllRegistries(
 		}
 		totalScanned += uint64(len(resp.Registries))
 		all = append(all, resp.Registries...)
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			return nil, false, err
 		}
 		if len(nextKey) == 0 {
 			if peekErr == nil && haveHighestID && totalScanned < highestID {

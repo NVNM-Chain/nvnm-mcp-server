@@ -70,19 +70,25 @@ locally by `make coverage-check`). A feature is not done until:
    (`mockEVM`/`mockAnchor` in `internal/mcp/tools_test.go`, the fake
    `defiRPCClient` pattern in `internal/evm`, `httptest` servers for
    HTTP surfaces).
-2. **API/E2E tests** exist for anything that changes the MCP surface.
-   New MCP tool → register it in the E2E expectations
-   (`internal/mcp/server_test.go`) and add invocation tests through the
-   real HTTP transport + MCP SDK client
-   (`internal/mcp/server_e2e_test.go`). New admin/HTTP endpoint → E2E
-   tests in `internal/mcp/admin_test.go` style. Auth/RBAC changes →
-   default-deny cases included.
+2. **MCP integration tests** exist for anything that changes the MCP
+   surface. New MCP tool → register it in
+   `TestE2E_ListTools_ContainsExpectedNames` (`internal/mcp/server_test.go`)
+   and add a mocked SDK invocation to
+   `TestMCP_Tools`
+   (`internal/mcp/mcp_tools_test.go`). That suite is hermetic
+   (no RPC, no wallet) and is the tool-regression net for CI. Auth/RBAC
+   and transport samples stay in `internal/mcp/server_e2e_test.go`. New
+   admin/HTTP endpoint → tests in `internal/mcp/admin_test.go` style.
+   Auth/RBAC changes → default-deny cases included. Do not add a live
+   all-tools MCP file; do not name `TestMCP_Tools` as `TestE2E_*`.
 3. **Golden tests** protect any new/changed JSON response shape
    (`testdata/*.golden.json`; delete + re-run to regenerate, review the
    diff).
-4. **Integration tests** (build tag `integration`, run via
-   `make test-integration`) when the change crosses the live-testnet
-   boundary. These must skip cleanly without credentials.
+4. **Client live tests** (build tag `integration`, run via
+   `make test-integration` after `TestMCP_Tools`) when the
+   change crosses the live-testnet boundary. These sit next to evm/anchor
+   and must skip cleanly without credentials. Deployment hot-path is
+   `tests/e2e` (`TestE2E_HotPath_AnchorDocument`), not this layer.
 5. **Coverage holds ≥ 80% total.** Run `make coverage-check` before
    pushing. Don't chase the number with vacuous assertions — cover the
    branches that matter (error paths, boundary conditions, auth
@@ -96,7 +102,7 @@ exercise that surface — CI always does.
 
 ```sh
 make setup-dev        # once: dev tools + pre-commit hooks
-make test             # fast: unit + MCP E2E, no network
+make test             # fast: unit + TestMCP_Tools, no network
 make coverage-check   # -race + coverage report + 80% gate (what CI enforces)
 make check-all        # format + vet + lint
 pre-commit run --all-files

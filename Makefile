@@ -11,7 +11,7 @@ LDFLAGS := -s -w
 
 .PHONY: all build run run-http run-local healthz readyz metrics \
         mcp-probe mcp-probe-help seed-test-data \
-        test test-unit test-integration test-coverage coverage-check test-verbose \
+        test test-unit test-integration test-e2e test-coverage coverage-check test-verbose \
         test-load format vet lint staticcheck check-all clean docker-build docker-buildx \
         docker-run docker-smoke \
         pre-commit install-hooks setup-dev install-dev ci release-check \
@@ -30,8 +30,32 @@ build:
 run: build
 	"$(BUILD_DIR)/$(BINARY_NAME)" --transport stdio
 
+# `run-http` sources `.env` like `run-local`, so chain config and every
+# feature flag reach the process instead of being silently absent (a flag
+# set only in `.env` used to have no effect here, leaving e.g. the write
+# tools unregistered with no indication why). `.env` is the single source
+# of truth for everything the server reads -- notably ENABLE_WRITE_TOOLS,
+# which is deliberately NOT forced on here: a target that quietly enabled
+# broadcast tools would override an operator's explicit `false` and, with
+# `.env` pointed at mainnet, put evm_send_raw_transaction one `make` away.
+#
+# The listen address is the sole exception, pinned so this target keeps its
+# conventional :8080 identity regardless of MCP_HTTP_ADDR in `.env`:
+#   make run-http RUN_HTTP_ADDR=:9999
+#
+# Precedence note: `set -a && . ./.env` overwrites already-exported shell
+# variables, so `FOO=bar make run-http` does NOT win over a `FOO` set in
+# `.env` -- change it in `.env`.
+RUN_HTTP_ADDR ?= :8080
+
 run-http: build
-	"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
+	@if [ ! -f .env ]; then \
+		echo "ERROR: .env not found. Copy .env.example to .env and fill in values (see CONTRIBUTING.md § 2)."; \
+		exit 1; \
+	fi
+	@set -a && . ./.env && set +a && \
+		MCP_HTTP_ADDR="$(RUN_HTTP_ADDR)" \
+		"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
 
 ## Local dev
 
@@ -68,10 +92,24 @@ metrics:
 ## doesn't survive between `make` recipe lines. jq is used for pretty-printing
 ## when available; falls back to raw stdout.
 ##
+## The tools/call response always comes back as a Streamable HTTP
+## text/event-stream body (the handler isn't configured with JSONResponse,
+## so even a single-message reply is SSE-framed), so the recipe strips any
+## "event:"/"data:" SSE framing before handing the payload to jq.
+##
 ## Usage:
 ##   make mcp-probe TOOL=evm_get_chain_id ARGS='{}'
 ##   make mcp-probe TOOL=nvnm_overview ARGS='{}'
 ##   make mcp-probe TOOL=evm_get_balance ARGS='{"address":"0x..."}'
+##   MCP_API_KEY=<raw key> make mcp-probe TOOL=evm_get_chain_id ARGS='{}'
+
+# Bearer token attached to every mcp-probe request when set (falls back to
+# an already-exported MCP_API_KEY -- the same variable the single-throwaway-
+# key setup in docs/TESTING.md § 2 uses). Empty by default: the HTTP
+# transport is fail-closed at boot, but MCP_KEYLESS_READS=true still allows
+# unauthenticated requests through, so mcp-probe must be able to omit the
+# header entirely rather than send a hollow "Bearer ".
+MCP_API_KEY ?=
 
 mcp-probe:
 ifndef TOOL
@@ -79,9 +117,11 @@ ifndef TOOL
 endif
 	@ARGS_VAL='$(if $(ARGS),$(ARGS),{})'; \
 	BASE_URL="http://localhost$(MCP_HTTP_ADDR)/"; \
+	set --; \
+	if [ -n "$(MCP_API_KEY)" ]; then set -- -H "Authorization: Bearer $(MCP_API_KEY)"; fi; \
 	echo "POST $$BASE_URL  (initialize)" >&2; \
 	INIT_HEADERS=$$(mktemp); \
-	INIT_BODY=$$(curl -sS -D "$$INIT_HEADERS" -X POST "$$BASE_URL" \
+	INIT_BODY=$$(curl -sS -D "$$INIT_HEADERS" -X POST "$$BASE_URL" "$$@" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"make-mcp-probe","version":"1.0.0"}}}'); \
@@ -90,20 +130,26 @@ endif
 	if [ -z "$$SESSION_ID" ]; then \
 		echo "ERROR: server did not return Mcp-Session-Id header. Is the server running on $(MCP_HTTP_ADDR)?" >&2; \
 		echo "initialize response: $$INIT_BODY" >&2; \
+		case "$$INIT_BODY" in \
+			*"missing Authorization"*|*"invalid"*[Tt]oken*|*[Uu]nauthorized*) \
+				echo "HINT: pass a key -- MCP_API_KEY=<raw key from make key-create> make mcp-probe ..." >&2 ;; \
+		esac; \
 		exit 1; \
 	fi; \
 	echo "  session: $$SESSION_ID" >&2; \
-	curl -sS -X POST "$$BASE_URL" \
+	curl -sS -X POST "$$BASE_URL" "$$@" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION_ID" \
 		-d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' > /dev/null; \
 	echo "tools/call $(TOOL) $$ARGS_VAL" >&2; \
-	RESP=$$(curl -sS -X POST "$$BASE_URL" \
+	RESP=$$(curl -sS -X POST "$$BASE_URL" "$$@" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION_ID" \
 		-d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":2,\"params\":{\"name\":\"$(TOOL)\",\"arguments\":$$ARGS_VAL}}"); \
+	SSE_BODY=$$(printf '%s\n' "$$RESP" | sed -n 's/^data:[[:space:]]*//p'); \
+	if [ -n "$$SSE_BODY" ]; then RESP="$$SSE_BODY"; fi; \
 	if command -v jq >/dev/null 2>&1; then \
 		echo "$$RESP" | jq .; \
 	else \
@@ -124,6 +170,12 @@ mcp-probe-help:
 	@echo ""
 	@echo "Listening address comes from MCP_HTTP_ADDR (default :8180)."
 	@echo "Override via env: MCP_HTTP_ADDR=:9999 make mcp-probe TOOL=evm_get_chain_id"
+	@echo ""
+	@echo "Auth: the HTTP transport is fail-closed by default, so most servers need a"
+	@echo "bearer token. Set MCP_API_KEY (env or inline) to the raw key from"
+	@echo "'make key-create' or the single-throwaway-key setup in docs/TESTING.md § 2:"
+	@echo "  MCP_API_KEY=<raw key> make mcp-probe TOOL=evm_get_chain_id ARGS='{}'"
+	@echo "Omit it only against a server running with MCP_KEYLESS_READS=true."
 
 seed-test-data:
 	$(GO) run ./cmd/seed-test-data
@@ -136,8 +188,30 @@ test:
 test-unit:
 	$(GO) test $(GOFLAGS) -short ./...
 
+# Live client tests (build tag integration) plus TestMCP_Tools.
+# The MCP tools half needs no RPC; the tagged half talks to testnet.
+# Future CI can run the tool net alone:
+#   go test ./internal/mcp -run TestMCP_Tools
+#
+# Live packages are invoked one at a time on purpose. `go test ./...`
+# runs packages in parallel (default -p = GOMAXPROCS), so a FAIL in
+# internal/anchor is buried under later PASS lines (telemetry, version)
+# and write tests in internal/anchor + internal/mcp share one funded
+# key — concurrent broadcasts collide on nonce. Do not switch this back
+# to ./... without -p 1.
 test-integration:
-	$(GO) test $(GOFLAGS) -tags integration ./...
+	$(GO) test -mod=vendor $(GOFLAGS) ./internal/mcp -run 'TestMCP_Tools'
+	@echo ">> live client tests (tag integration, timeout 20m, one package at a time)"
+	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/evm
+	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/anchor
+	$(GO) test -mod=vendor $(GOFLAGS) -tags integration -timeout 20m -count=1 -failfast ./internal/mcp
+
+# Deployment hot-path. Set NVNM_MCP_TEST_SERVER_URL at a running server.
+# Without a URL the suite falls back to in-process (developer convenience).
+# See tests/e2e/README.md.
+test-e2e:
+	@echo ">> test-e2e: hot path (NVNM_MCP_TEST_SERVER_URL = deployment; unset = in-process)"
+	$(GO) test -mod=vendor $(GOFLAGS) -tags e2e -v -timeout 20m -run TestE2E_HotPath_AnchorDocument ./tests/e2e
 
 test-coverage:
 	$(GO) test -race -coverprofile=coverage.out ./...
@@ -160,9 +234,24 @@ test-load:
 
 ## Quality
 
+# Format this module's packages only. Both tools are pointed at the package
+# directories `go list` reports (plus the e2e-tagged tests/e2e tree) rather
+# than at `.`, because `gofmt -w .`
+# and `goimports -w .` recurse into vendor/ and rewrite vendored dependencies
+# in place. That damage is quiet: the files reformat cleanly, then surface as
+# a pile of unrelated modifications in `git status` and get clobbered by the
+# next `go mod vendor`. `go list ./...` excludes vendored packages in module
+# mode, so this stays correct as packages come and go -- no path pattern to
+# keep in sync. Directory arguments make gofmt process the .go files in each
+# directory without recursing, so testdata/ fixtures are left alone too.
 format:
-	gofmt -w .
-	goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server .
+	@command -v goimports >/dev/null 2>&1 || \
+		{ echo "goimports is required: make install-dev"; exit 1; }
+	@dirs=$$({ $(GO) list -f '{{.Dir}}' ./...; $(GO) list -tags e2e -f '{{.Dir}}' ./tests/e2e/...; } | sort -u) || exit 1; \
+	echo "gofmt -w <$$(echo "$$dirs" | wc -l | tr -d ' ') package dirs, vendor excluded>"; \
+	gofmt -w $$dirs; \
+	echo "goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server <same>"; \
+	goimports -w -local github.com/NVNM-Chain/nvnm-mcp-server $$dirs
 
 vet:
 	$(GO) vet ./...
@@ -313,7 +402,7 @@ help:
 	@echo "  all              check-all + test + build"
 	@echo "  build            Build the server binary"
 	@echo "  run              Run with stdio transport"
-	@echo "  run-http         Run with HTTP transport"
+	@echo "  run-http         Run with HTTP transport (sources .env; pins :8080)"
 	@echo "  run-local        Source .env and run with HTTP transport (see Local Dev)"
 	@echo ""
 	@echo "API Key Management:"
@@ -336,7 +425,8 @@ help:
 	@echo "Test:"
 	@echo "  test             Run all tests"
 	@echo "  test-unit        Unit tests only (-short)"
-	@echo "  test-integration Integration tests (-tags integration)"
+	@echo "  test-integration TestMCP_Tools + live client tests"
+	@echo "  test-e2e         Deployment hot path (set NVNM_MCP_TEST_SERVER_URL)"
 	@echo "  test-coverage    Tests with -race + coverage report"
 	@echo "  coverage-check   test-coverage + enforce the $(COVERAGE_THRESHOLD)% total coverage gate"
 	@echo "  test-verbose     Verbose test output"

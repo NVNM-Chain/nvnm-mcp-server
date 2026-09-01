@@ -132,11 +132,12 @@ func TestIntegration_PrepareSignSubmit_UpdateRecordStatus(t *testing.T) {
 	}
 
 	t.Log("preparing updateRecordStatus -> Archived...")
+	idx := rec.Index
 	statusUTX, err := c.PrepareUpdateRecordStatus(ctx, anchor.PrepareUpdateRecordStatusRequest{
 		From:       creds.Address,
 		RegistryID: regID,
 		RecordID:   rec.RecordID,
-		Index:      rec.Index,
+		Index:      &idx,
 		Status:     "Archived",
 	})
 	if err != nil {

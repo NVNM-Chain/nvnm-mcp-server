@@ -217,6 +217,17 @@ export const options = {
       exec: 'mixedWorkload',
       tags: { scenario: 'mixed_workload' },
     },
+    // Same named steps as TestE2E_HotPath_AnchorDocument. One VU so a
+    // prepare does not collide with itself on nonces; broadcast is
+    // omitted on purpose -- concurrent load plus one funded wallet is
+    // how the chain-backed suite stays off the PR gate.
+    hot_path: {
+      executor: 'constant-vus',
+      vus: 1,
+      duration: '1m',
+      exec: 'hotPath',
+      tags: { scenario: 'hot_path' },
+    },
   },
   thresholds: {
     http_req_duration: ['p(95)<2000'],
@@ -293,4 +304,25 @@ export function mixedWorkload(data) {
     mcpToolCall(data, 'anchor_get_registries', { limit: 10 });
   }
   sleep(0.3);
+}
+
+/**
+ * Load form of TestE2E_HotPath_AnchorDocument:
+ * discover → (wallet_status + prepare if HOTPATH_FROM is set) → read_back.
+ * Does not sign or broadcast.
+ */
+export function hotPath(data) {
+  mcpToolCall(data, 'nvnm_overview', {});
+  const from = __ENV.HOTPATH_FROM || __ENV.NVNM_TEST_ADDRESS;
+  if (from) {
+    mcpToolCall(data, 'wallet_status', { address: from });
+    mcpToolCall(data, 'anchor_prepare_add_registry', {
+      from: from,
+      name: 'k6-hotpath-' + Date.now(),
+      description: 'k6 hot-path prepare (not broadcast)',
+      metadata: '{"suite":"k6","journey":"hot-path"}',
+    });
+  }
+  mcpToolCall(data, 'anchor_get_registries', { limit: 5 });
+  sleep(1);
 }

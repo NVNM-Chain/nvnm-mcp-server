@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,57 +74,94 @@ func integrationResilientEVMClient(t *testing.T) evm.Client {
 	}, mets, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-// findRegistryIDByNameMaxPages bounds the scan below against a live testnet
-// that keeps growing -- 100 pages * 200/page = 20,000 registries, far more
-// than this suite has ever seen. Not expected to ever trigger; if it does,
-// the registry table has grown to a size this helper needs revisiting for.
-const findRegistryIDByNameMaxPages = 100
+const (
+	// findRegistryPageSize matches the precompile's hard page cap.
+	findRegistryPageSize = 200
+	// findRegistryReversePages is enough for a registry this process just
+	// created (it is at the tip). One page of 200 is plenty; a second is
+	// margin for concurrent suites.
+	findRegistryReversePages = 2
+	// findRegistryForwardPages bounds a full-table walk for a seeded name
+	// that is no longer in the reverse window (e.g. mcp-test-data).
+	findRegistryForwardPages = 100
+	findRegistryPageTimeout  = 30 * time.Second
+)
 
-// findRegistryIDByName scans registries looking for an exact name match. The
-// anchoring precompile keys registries by ID only (names are not unique or
-// queryable on-chain), so tests that need a well-known seeded registry
-// ("mcp-test-data") have to paginate and filter client-side. Cursors via
-// NextKey (not Offset) for the same reason anchor_get_registries' by-name
-// scan does -- see the PageRequest.Key doc comment in types.go -- and pages
-// until either a match is found or a short/NextKey-empty page ends the walk;
-// it does not stop after one fixed-size page the way this helper used to
-// (which silently missed any registry seeded past the first 200 as the live
-// table grew, including mcp-test-data itself once it passed ID 200).
+// findRegistryIDByName resolves a registry by exact name. The precompile
+// has no by-name index, so this paginates client-side. Newly created
+// unique names are at the tip: reverse-first returns in one RPC instead
+// of walking ~thousands of older rows (which looked like a hang after
+// cmd/seed-test-data when make test-integration entered internal/anchor).
 func findRegistryIDByName(t *testing.T, c anchor.Client, name string) uint64 {
 	t.Helper()
-	ctx := context.Background()
+	if id, ok := scanRegistriesForName(t, c, name, true, findRegistryReversePages); ok {
+		return id
+	}
+	if id, ok := scanRegistriesForName(t, c, name, false, findRegistryForwardPages); ok {
+		return id
+	}
+	t.Fatalf("registry %q not found (reverse then forward listing)", name)
+	return 0
+}
 
+var cachedSeedRegistryID uint64
+
+func mcpTestDataRegistryID(t *testing.T, c anchor.Client) uint64 {
+	t.Helper()
+	if cachedSeedRegistryID != 0 {
+		return cachedSeedRegistryID
+	}
+	cachedSeedRegistryID = findRegistryIDByName(t, c, "mcp-test-data")
+	return cachedSeedRegistryID
+}
+
+func scanRegistriesForName(
+	t *testing.T, c anchor.Client, name string, reverse bool, maxPages int,
+) (uint64, bool) {
+	t.Helper()
+	noID := uint64(0)
 	var cursorKey []byte
+	var lastCursor string
 	scanned := 0
-	for page := 0; page < findRegistryIDByNameMaxPages; page++ {
+	for page := 0; page < maxPages; page++ {
+		ctx, cancel := context.WithTimeout(context.Background(), findRegistryPageTimeout)
 		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
-			Pagination: &anchor.PageRequest{Key: cursorKey, Limit: 200},
+			RegistryID: &noID,
+			Pagination: &anchor.PageRequest{
+				Key:     cursorKey,
+				Limit:   findRegistryPageSize,
+				Reverse: reverse,
+			},
 		})
+		cancel()
 		if err != nil {
-			t.Fatalf("GetRegistries: %v", err)
+			t.Fatalf("GetRegistries(reverse=%v page=%d): %v", reverse, page, err)
 		}
 		scanned += len(resp.Registries)
+		t.Logf("  name lookup %q reverse=%v page=%d rows=%d scanned=%d",
+			name, reverse, page, len(resp.Registries), scanned)
 		for i := range resp.Registries {
 			if resp.Registries[i].Name == name {
-				return resp.Registries[i].ID
+				return resp.Registries[i].ID, true
 			}
 		}
-		var nextKey []byte
-		if resp.Pagination != nil {
-			nextKey = resp.Pagination.NextKey
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			t.Fatalf("decode pagination cursor: %v", err)
 		}
-		// NextKey emptiness is the authoritative "done" signal (a short-page
-		// check would misfire if the chain's page cap ever dropped below the
-		// requested limit -- see the scan in internal/mcp/tools_anchor.go).
 		if len(nextKey) == 0 {
-			t.Fatalf("registry %q not found among %d registries", name, scanned)
-			return 0
+			return 0, false
 		}
+		cursor := string(nextKey)
+		if cursor == lastCursor {
+			t.Fatalf("GetRegistries cursor did not advance (reverse=%v page=%d)", reverse, page)
+		}
+		lastCursor = cursor
 		cursorKey = nextKey
 	}
-	t.Fatalf("registry %q not found after scanning %d registries (%d pages, hit findRegistryIDByNameMaxPages)",
-		name, scanned, findRegistryIDByNameMaxPages)
-	return 0
+	t.Logf("  name lookup %q reverse=%v hit %d-page cap after %d rows",
+		name, reverse, maxPages, scanned)
+	return 0, false
 }
 
 func TestIntegration_Info(t *testing.T) {
@@ -174,6 +212,12 @@ func TestIntegration_GetRegistries(t *testing.T) {
 	}
 	if first.Creator == "" {
 		t.Error("first registry creator should not be empty")
+	} else {
+		hexish := strings.HasPrefix(first.Creator, "0x") && len(first.Creator) == 42
+		bech := strings.HasPrefix(first.Creator, "nvnm1")
+		if !hexish && !bech {
+			t.Errorf("creator = %q, want 0x-hex (documented) or nvnm1 bech32 (current chain)", first.Creator)
+		}
 	}
 	if first.CreatedAt == "" {
 		t.Error("first registry created_at should not be empty")
@@ -203,7 +247,7 @@ func TestIntegration_GetRecords_ByRegistryID(t *testing.T) {
 	// mcp-test-data is the stable registry seeded by cmd/seed-test-data;
 	// it carries 3 records. Registries are no longer name-queryable
 	// on-chain, so the id is resolved client-side first.
-	regID := findRegistryIDByName(t, c, "mcp-test-data")
+	regID := mcpTestDataRegistryID(t, c)
 	resp, err := c.GetRecords(ctx, anchor.GetRecordsRequest{
 		RegistryID: &regID,
 		Pagination: &anchor.PageRequest{Limit: 10},
@@ -262,7 +306,7 @@ func TestIntegration_GetRecords_Pagination(t *testing.T) {
 
 	// mcp-test-data is the stable registry seeded by cmd/seed-test-data;
 	// it carries 3 records -- enough to exercise offset/limit paging.
-	regID := findRegistryIDByName(t, c, "mcp-test-data")
+	regID := mcpTestDataRegistryID(t, c)
 
 	// Confirm the registry has enough records to page through. The
 	// nvnm-testnet-1 precompile returns pagination.total=0 even with

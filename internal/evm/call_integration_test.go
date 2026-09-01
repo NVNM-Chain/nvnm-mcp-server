@@ -12,44 +12,22 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 )
 
-func TestIntegration_CallContract_Precompile(t *testing.T) {
+// TestIntegration_CallContract_EOAEmptyCalldata is the one eth_call whose
+// result is deterministic on any chain: an account with no code returns
+// empty data and does not revert.
+func TestIntegration_CallContract_EOAEmptyCalldata(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	precompile := defitypes.MustAddressFromHex(testPrecompileAddr)
-
-	// The precompile exposes a "registries" view function.
-	// Even with empty calldata, the precompile should return something
-	// (or error gracefully) rather than panic.
-	t.Log("calling precompile with empty calldata...")
+	to := defitypes.MustAddressFromHex("0x9f8a6425F7AD925701fE1CdF85fd883340b2A9CD")
 	result, err := c.CallContract(ctx, defitypes.Call{
-		To:    &precompile,
+		To:    &to,
 		Input: []byte{},
 	}, nil)
 	if err != nil {
-		t.Logf("  CallContract with empty data returned error (expected): %v", err)
-	} else {
-		t.Logf("  result length: %d bytes", len(result))
-		if len(result) > 0 {
-			t.Logf("  first 32 bytes (hex): %x", result[:min(32, len(result))])
-		}
+		t.Fatalf("CallContract: %v", err)
 	}
-}
-
-func TestIntegration_CallContract_NonExistentAddress(t *testing.T) {
-	c := integrationClient(t)
-	ctx := context.Background()
-
-	addr := defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000001")
-
-	result, err := c.CallContract(ctx, defitypes.Call{
-		To:    &addr,
-		Input: []byte{0x00},
-	}, nil)
-	if err != nil {
-		t.Logf("  error (may be expected): %v", err)
-		return
+	if len(result) != 0 {
+		t.Errorf("result = %x, want empty return data from an EOA", result)
 	}
-
-	t.Logf("  result from non-existent contract: %d bytes", len(result))
 }
