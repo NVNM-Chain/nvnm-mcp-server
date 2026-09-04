@@ -951,9 +951,9 @@ func TestHandler_GetRegistries_DeprecatedRegistryID(t *testing.T) {
 func TestHandler_GetRegistries_ByName_ReturnsAllMatches(t *testing.T) {
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
 		Registries: []anchor.Registry{
-			{ID: 1, Name: "fund-documents", Creator: "0xaaa"},
-			{ID: 2, Name: "audit-reports", Creator: "0xbbb"},
-			{ID: 3, Name: "fund-documents", Creator: "0xccc"},
+			{ID: 1, Name: "fund-documents", Creator: "nvnm1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5uyxmzt"},
+			{ID: 2, Name: "audit-reports", Creator: "nvnm12r28dewjcpzfnrkpshvx5rh4eve086858qcn7n"},
+			{ID: 3, Name: "fund-documents", Creator: "nvnm1zg69v7ys40x77y352eufp27daufrg4ncs5286h"}, // pragma: allowlist secret -- public on-chain address, test fixture
 		},
 	}}
 	handler := makeGetRegistriesHandler(m, testLogger())

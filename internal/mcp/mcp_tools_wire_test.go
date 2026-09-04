@@ -135,6 +135,7 @@ type wireRegistry struct {
 	ID           uint64 `json:"id"`
 	Name         string `json:"name"`
 	Creator      string `json:"creator"`
+	CreatorEVM   string `json:"creator_evm"`
 	ContentTrust string `json:"content_trust"`
 }
 
@@ -206,6 +207,16 @@ func assert0xAddress(t *testing.T, field, got string) {
 	t.Helper()
 	if !is0xHex(got, 20) {
 		t.Errorf("%s = %q, want 0x + 40 hex chars", field, got)
+	}
+}
+
+// assertBech32Creator pins the chain-native creator format (P1 / ADR 0001):
+// `creator` is the bech32 identity exactly as the chain reports it, never a
+// 0x address (the derived hex lives in creator_evm).
+func assertBech32Creator(t *testing.T, field, got string) {
+	t.Helper()
+	if !strings.HasPrefix(got, "nvnm1") || len(got) != len(callToolCreator) {
+		t.Errorf("%s = %q, want nvnm1... bech32 account address", field, got)
 	}
 }
 

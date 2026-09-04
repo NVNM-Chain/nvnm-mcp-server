@@ -129,8 +129,8 @@ func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
 		anchorClient: &mockAnchor{
 			registries: &anchor.GetRegistriesResponse{
 				Registries: []anchor.Registry{
-					{ID: 1, Name: "fund-documents", Creator: "0xaaa"},
-					{ID: 57, Name: "fund-documents", Creator: "0xccc"},
+					{ID: 1, Name: "fund-documents", Creator: "nvnm1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5uyxmzt"},
+					{ID: 57, Name: "fund-documents", Creator: "nvnm12r28dewjcpzfnrkpshvx5rh4eve086858qcn7n"},
 				},
 			},
 		},

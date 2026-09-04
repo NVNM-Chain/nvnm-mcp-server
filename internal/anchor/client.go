@@ -397,6 +397,7 @@ func toRegistries(rows []abiRegistryRow) []Registry {
 			Name:        rows[i].Name,
 			Description: rows[i].Description,
 			Creator:     rows[i].Creator,
+			CreatorEVM:  creatorEVM(rows[i].Creator),
 			CreatedAt:   rows[i].CreatedAt,
 			Metadata:    rows[i].Metadata,
 		}
