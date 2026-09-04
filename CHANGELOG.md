@@ -37,6 +37,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`anchor_get_records` checksum queries now strip a leading `0x`**, the
+  same normalization the write path has always applied. Previously a
+  record anchored through this server (stored bare-hex on chain) silently
+  matched nothing when queried with the natural 0x-prefixed digest.
 - **Health/metrics bind failure now aborts startup.** A `METRICS_ADDR`
   already in use previously logged one line and left a running instance
   with no `/healthz`, `/readyz`, or `/metrics`. Boot now fails fast

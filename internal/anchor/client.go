@@ -287,7 +287,11 @@ func (c *client) GetRecords(
 		registryID = *req.RegistryID
 	}
 	if req.Checksum != nil {
-		checksum = *req.Checksum
+		// Same normalization as the write path (PrepareAddRecord, grant/
+		// revoke): the chain stores checksums bare-hex, so a caller
+		// querying with the natural 0x-prefixed digest would otherwise
+		// silently match nothing it just anchored.
+		checksum = normalizeChecksum(*req.Checksum)
 	}
 	if req.RecordID != nil {
 		recordID = *req.RecordID
