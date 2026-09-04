@@ -195,7 +195,7 @@ Set to `/app/abi/anchoring.json` when that file is baked into the image (see bel
 | `ENABLE_WRITE_TOOLS` | `false` | Must be `true` to register prepare / submit tools (`anchor_prepare_*`, `evm_send_raw_transaction`). |
 | `MCP_TRANSPORT` | `stdio` | Use `http` in production. |
 | `MCP_HTTP_ADDR` | `:8080` | MCP HTTP listen address. |
-| `METRICS_ADDR` | `:9090` | Health + metrics listen address. |
+| `METRICS_ADDR` | `:9090` | Health + metrics listen address. A bind failure aborts startup (fail fast). |
 | `ENABLE_PROMETHEUS` | `true` | When `true`, serves `GET /metrics` on the metrics port. |
 | `ENABLE_STDOUT_TELEMETRY` | `false` | Emit OTel spans/metrics to stdout (debug only). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | OTLP gRPC endpoint (e.g. `otel-collector:4317`); enables trace and metric export to a collector. |
@@ -774,6 +774,7 @@ raw ethclient → TracingClient → ResilientClient → (used by anchor + MCP ha
 | Symptom | Likely cause | Mitigation |
 |---------|--------------|------------|
 | `/readyz` 503, `evm_rpc: unreachable` | Network, DNS, TLS, or provider outage | Check URL, certificates, firewall egress, provider dashboard; test RPC with `curl` JSON-RPC from a debug pod. |
+| Boot aborts with `health/metrics server: failed to bind` | `METRICS_ADDR` port already in use | Free the port or change `METRICS_ADDR`; the server refuses to run without `/healthz`, `/readyz`, and `/metrics` (fail fast). |
 | Anchor tools error; `anchor_info` shows ABI missing | `ANCHOR_ABI_PATH` unset, wrong path, or file not in image | Fix path; rebuild image with `abi/anchoring.json` included. |
 | Elevated latency | Slow upstream or undersized CPU | Inspect `evm.rpc.duration` and `mcp.server.tool.duration`; increase `REQUEST_TIMEOUT` only if appropriate; scale replicas. |
 | OOMKilled / memory growth | Limits too low for concurrency | Raise memory limits; see section 8. Example manifest: requests `64Mi`, limits `256Mi`. |

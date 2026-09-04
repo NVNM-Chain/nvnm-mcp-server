@@ -155,6 +155,12 @@ func run() error {
 		anchorClient.Available(),
 		logger,
 	)
+	// Bind synchronously so an unusable metrics/health port aborts boot
+	// (fail fast) instead of leaving a running instance with no /healthz,
+	// /readyz, or /metrics. Only post-bind serve errors are logged async.
+	if bindErr := healthSrv.Listen(); bindErr != nil {
+		return fmt.Errorf("health/metrics server: failed to bind %s: %w", cfg.MetricsAddr, bindErr)
+	}
 	go func() {
 		if hErr := healthSrv.Start(); hErr != nil {
 			logger.Error("health server error", slog.String("error", hErr.Error()))

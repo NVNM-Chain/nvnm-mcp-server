@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type checkResult struct {
 // dedicated port, separate from the MCP transport.
 type HealthServer struct {
 	srv       *http.Server
+	ln        net.Listener
 	logger    *slog.Logger
 	checker   ReadinessChecker
 	abiLoaded bool
@@ -74,8 +76,27 @@ func NewHealthServer(
 	return h
 }
 
-// Start runs the health server and begins background readiness probes.
+// Listen binds the server's address without serving. Call it before Start to
+// surface bind failures synchronously at boot (fail fast) instead of inside
+// Start's serving goroutine, where they could only be logged.
+func (h *HealthServer) Listen() error {
+	ln, err := net.Listen("tcp", h.srv.Addr)
+	if err != nil {
+		return err
+	}
+	h.ln = ln
+	return nil
+}
+
+// Start runs the health server and begins background readiness probes. If
+// Listen was not called first, Start binds the address itself.
 func (h *HealthServer) Start() error {
+	if h.ln == nil {
+		if err := h.Listen(); err != nil {
+			return err
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	h.stopProbe = cancel
 	go h.probeLoop(ctx)
@@ -84,7 +105,7 @@ func (h *HealthServer) Start() error {
 		slog.String("addr", h.srv.Addr),
 	)
 
-	if err := h.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := h.srv.Serve(h.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		cancel()
 		return err
 	}
