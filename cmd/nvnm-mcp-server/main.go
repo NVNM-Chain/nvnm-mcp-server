@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,6 +46,9 @@ var (
 		"invalid MCP_KEYLESS_PG_DSN: check the DSN format (value withheld from logs)")
 	errKeyStoreDSNInvalid = errors.New(
 		"invalid KEY_STORE_DSN: check the DSN format (value withheld from logs)")
+	// errBlockTimestampOverflow guards the uint64 -> int64 conversion in the
+	// readiness chain-head probe; unreachable for any sane chain timestamp.
+	errBlockTimestampOverflow = errors.New("block timestamp overflows int64")
 )
 
 func main() {
@@ -154,7 +158,7 @@ func run() error {
 		evmClient,
 		anchorClient.Available(),
 		logger,
-	)
+	).WithChainStaleness(chainHead{client: evmClient}, cfg.ReadinessMaxBlockAge)
 	// Bind synchronously so an unusable metrics/health port aborts boot
 	// (fail fast) instead of leaving a running instance with no /healthz,
 	// /readyz, or /metrics. Only post-bind serve errors are logged async.
@@ -800,6 +804,24 @@ func buildEmailSender(cfg *config.Config, logger *slog.Logger) (mcpserver.EmailS
 		slog.Bool("auth", cfg.SMTPUsername != ""),
 	)
 	return sender, nil
+}
+
+// chainHead adapts evm.Client to telemetry.BlockTimestamper for the
+// readiness chain-staleness probe (telemetry cannot import evm without a
+// dependency cycle, so it consumes this one-method view instead).
+type chainHead struct {
+	client evm.Client
+}
+
+func (c chainHead) LatestBlockTimestamp(ctx context.Context) (time.Time, error) {
+	block, err := c.client.BlockByNumber(ctx, nil, false)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if block.TimestampUnix > math.MaxInt64 {
+		return time.Time{}, fmt.Errorf("timestamp %d: %w", block.TimestampUnix, errBlockTimestampOverflow)
+	}
+	return time.Unix(int64(block.TimestampUnix), 0), nil
 }
 
 func extractHost(rawURL string) string {

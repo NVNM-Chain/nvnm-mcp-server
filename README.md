@@ -289,6 +289,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `ENABLE_PROMETHEUS` | `true` | Expose `/metrics` endpoint on metrics port |
 | `ENABLE_STDOUT_TELEMETRY` | `false` | Dump spans/metrics to stderr (dev only) |
 | `METRICS_ADDR` | `:9090` | Listen address for health + metrics endpoints |
+| `NVNM_READINESS_MAX_BLOCK_AGE` | `5m` | Maximum age of the chain's latest block before `/readyz` reports `not_ready` (catches a halted chain behind a responsive RPC). `0` disables the check |
 
 ### Resilience
 
@@ -417,7 +418,7 @@ The health and metrics server runs on a separate port (default `:9090`), indepen
 | Endpoint | Purpose |
 |---|---|
 | `GET /healthz` | Liveness probe -- returns `200 OK` if the process is running |
-| `GET /readyz` | Readiness probe -- returns `200 OK` if the EVM RPC is reachable and the ABI is loaded |
+| `GET /readyz` | Readiness probe -- returns `200 OK` when the EVM RPC is reachable **and** the chain's latest block is younger than `NVNM_READINESS_MAX_BLOCK_AGE`; `503` otherwise. ABI state is reported in `checks.abi` but does not gate readiness |
 | `GET /metrics` | Prometheus scrape endpoint (when `ENABLE_PROMETHEUS=true`) |
 
 ### What Gets Instrumented

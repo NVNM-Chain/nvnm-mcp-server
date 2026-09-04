@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +24,14 @@ type ReadinessChecker interface {
 	Ping(ctx context.Context) error
 }
 
+// BlockTimestamper reports the timestamp of the chain's latest block.
+// It is deliberately narrower than the EVM client interface (which this
+// package cannot import without a cycle) so callers adapt their client
+// down to exactly what the staleness probe needs.
+type BlockTimestamper interface {
+	LatestBlockTimestamp(ctx context.Context) (time.Time, error)
+}
+
 type checkResult struct {
 	mu     sync.RWMutex
 	status map[string]string
@@ -32,13 +41,15 @@ type checkResult struct {
 // HealthServer serves /healthz, /readyz, and optionally /metrics on a
 // dedicated port, separate from the MCP transport.
 type HealthServer struct {
-	srv       *http.Server
-	ln        net.Listener
-	logger    *slog.Logger
-	checker   ReadinessChecker
-	abiLoaded bool
-	check     checkResult
-	stopProbe context.CancelFunc
+	srv         *http.Server
+	ln          net.Listener
+	logger      *slog.Logger
+	checker     ReadinessChecker
+	head        BlockTimestamper
+	maxBlockAge time.Duration
+	abiLoaded   bool
+	check       checkResult
+	stopProbe   context.CancelFunc
 }
 
 // NewHealthServer creates a health/metrics server.
@@ -73,6 +84,15 @@ func NewHealthServer(
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	return h
+}
+
+// WithChainStaleness enables the chain-freshness readiness check: when the
+// latest block's timestamp is older than maxAge, /readyz reports not_ready.
+// A nil head or a maxAge of zero disables the check. Returns h for chaining.
+func (h *HealthServer) WithChainStaleness(head BlockTimestamper, maxAge time.Duration) *HealthServer {
+	h.head = head
+	h.maxBlockAge = maxAge
 	return h
 }
 
@@ -194,6 +214,12 @@ func (h *HealthServer) runProbe(ctx context.Context) {
 		}
 	}
 
+	if h.head != nil && h.maxBlockAge > 0 {
+		if ok := h.probeChainHead(probeCtx, checks); !ok {
+			ready = false
+		}
+	}
+
 	if h.abiLoaded {
 		checks["abi"] = "loaded"
 	} else {
@@ -204,4 +230,23 @@ func (h *HealthServer) runProbe(ctx context.Context) {
 	h.check.ready = ready
 	h.check.status = checks
 	h.check.mu.Unlock()
+}
+
+// probeChainHead records the chain-freshness check result in checks and
+// reports whether the chain counts as advancing. An RPC that answers Ping
+// but serves a latest block older than maxBlockAge is a halted chain: every
+// write would silently fail to land, so readiness must go false.
+func (h *HealthServer) probeChainHead(ctx context.Context, checks map[string]string) bool {
+	ts, err := h.head.LatestBlockTimestamp(ctx)
+	if err != nil {
+		checks["chain_head"] = "unavailable"
+		return false
+	}
+	if age := time.Since(ts); age > h.maxBlockAge {
+		checks["chain_head"] = fmt.Sprintf("stale (last block %s old, max %s)",
+			age.Round(time.Second), h.maxBlockAge)
+		return false
+	}
+	checks["chain_head"] = "ok"
+	return true
 }

@@ -570,7 +570,7 @@ Separate HTTP server on `METRICS_ADDR` (default `:9090`):
 | Endpoint | Purpose |
 |---|---|
 | `GET /healthz` | Liveness probe -- always `200 OK` if the process is running |
-| `GET /readyz` | Readiness probe -- `200 OK` if EVM RPC is reachable and ABI is loaded; `503` otherwise |
+| `GET /readyz` | Readiness probe -- `200 OK` if EVM RPC is reachable and the latest block is fresher than `NVNM_READINESS_MAX_BLOCK_AGE`; `503` otherwise (ABI state is reported but does not gate) |
 | `GET /metrics` | Prometheus scrape endpoint |
 
 Compatible with Kubernetes probes, AWS ALB health checks, and Azure health probes.
@@ -582,9 +582,9 @@ OpenTelemetry initialisation, MCP middleware, health/metrics server, and metric 
 - `New(ctx, cfg, logger)` -- creates `TracerProvider` and `MeterProvider` with configured exporters
 - `Shutdown(ctx)` -- flushes pending telemetry before exit
 - `NewMCPMiddleware(metrics, logger)` -- returns `mcp.Middleware` that auto-instruments all tool calls
-- `NewHealthServer(addr, promHandler, checker, abiLoaded, logger)` -- serves `/healthz`, `/readyz`, `/metrics`
+- `NewHealthServer(addr, promHandler, checker, abiLoaded, logger)` -- serves `/healthz`, `/readyz`, `/metrics`; `WithChainStaleness(head, maxAge)` enables the chain-freshness readiness check; `Listen()` binds synchronously so boot can fail fast on an unusable port
 - `NewMetrics(provider)` -- creates all metric instruments
-- Readiness check polls EVM RPC every 30s (cached result)
+- Readiness check polls EVM RPC (and latest-block freshness) every 30s (cached result)
 
 ## 8. Deployment Topology
 
