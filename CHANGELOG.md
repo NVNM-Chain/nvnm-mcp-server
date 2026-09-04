@@ -7,6 +7,54 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`creator_evm` on registry responses** (`anchor_get_registry`,
+  `anchor_get_registries`). The chain reports `creator` as a bech32
+  identity (`nvnm1…`) that no EVM tool accepts; the server now derives
+  the 0x-hex form from the bech32 payload (the same 20-byte account)
+  and returns both. `creator` stays exactly what the chain says;
+  `creator_evm` feeds `wallet_status` / `evm_get_balance` /
+  `evm_get_code`. Decision and rationale in
+  `docs/adr/0001-creator-address-format.md`. Golden fixtures and MCP
+  mocks now carry the real `nvnm1` format (the stale pre-rename
+  `inveniam1` fixtures are gone), and integration tests assert the
+  creator's *format*, not just non-emptiness.
+- **Standard block tags on every block-number input.** `block_number`,
+  `from_block`, and `to_block` (5 tools) now accept `"latest"` /
+  `"earliest"` alongside an integer — previously the string every EVM
+  caller reaches for first was schema-rejected before a handler ran.
+  Omit-for-latest still works; unknown tags are still rejected by
+  schema with the accepted forms listed.
+- **Chain-freshness readiness check.** `/readyz` now compares the
+  latest block's timestamp against wall clock and reports `not_ready`
+  (with a `chain_head` check entry) when the chain is older than
+  `NVNM_READINESS_MAX_BLOCK_AGE` (default `5m`, `0` disables). During
+  the 2026-08-21 testnet halt, readiness stayed green for ~3 days while
+  every write silently failed; this catches that class of outage.
+
+### Fixed
+
+- **Health/metrics bind failure now aborts startup.** A `METRICS_ADDR`
+  already in use previously logged one line and left a running instance
+  with no `/healthz`, `/readyz`, or `/metrics`. Boot now fails fast
+  with an actionable error.
+- **Doc drift swept** (post-rc19 finding P4): README tool count (21 →
+  23); `docs/TOOL_REFERENCE.md` no longer documents the rejected
+  `local` chain environment or the pre-rename `INVE`/`WINVE` token
+  symbols; the `evm_get_logs` example now shows the real
+  `{logs, count, next_actions}` envelope; the previously undocumented
+  `content_trust` and `wallet_generator_url` response fields are
+  documented; `docs/METAMASK_GUIDE.md` record lookup matches the rc17
+  surface (`registry_id`, not name); the k8s image pin moves rc14 →
+  rc19; the README/RUNBOOK `/readyz` description matches what the probe
+  actually checks (ABI state is reported but does not gate readiness);
+  an RBAC e2e test no longer passes a pre-rc17 `registry` parameter.
+
+---
+
 ## [1.0.0-rc19] - 2026-09-01
 
 ### Added
