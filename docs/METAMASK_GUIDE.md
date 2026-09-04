@@ -190,7 +190,7 @@ Make sure:
 - You are connected to the MCP server's HTTP transport (not stdio)
 
 **Transaction confirmed but record not visible**
-Call `anchor_get_records` with the registry name or checksum. The chain may take a few seconds to index the event.
+Call `anchor_get_records` with the registry numeric ID (`registry_id`) or the document checksum. The chain may take a few seconds to index the event.
 
 ---
 

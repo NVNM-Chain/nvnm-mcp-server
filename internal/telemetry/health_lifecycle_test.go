@@ -152,6 +152,67 @@ func TestHealthServer_StartListenError(t *testing.T) {
 	}
 }
 
+// TestHealthServer_ListenFailsOnOccupiedPort proves the fail-fast contract
+// main relies on: Listen must return the bind error synchronously when the
+// address is already in use, so boot can abort instead of running an
+// instance with no /healthz, /readyz, or /metrics.
+func TestHealthServer_ListenFailsOnOccupiedPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy port: %v", err)
+	}
+	defer func() {
+		if cErr := ln.Close(); cErr != nil {
+			t.Errorf("release port: %v", cErr)
+		}
+	}()
+
+	srv := NewHealthServer(ln.Addr().String(), nil, nil, false, testLogger())
+	if err := srv.Listen(); err == nil {
+		t.Fatal("Listen on occupied port returned nil, want bind error")
+	}
+}
+
+// TestHealthServer_ListenThenStart covers the production sequence: a
+// successful synchronous Listen followed by Start serving on the bound
+// listener, then a graceful shutdown returning nil from Start.
+func TestHealthServer_ListenThenStart(t *testing.T) {
+	addr := freeLoopbackAddr(t)
+	srv := NewHealthServer(addr, nil, &mockChecker{}, true, testLogger())
+
+	if err := srv.Listen(); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start() }()
+
+	resp := waitForServer(t, "http://"+addr+"/healthz")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("/healthz status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close body: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("Start returned %v after graceful shutdown, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return after Shutdown")
+	}
+	if err := srv.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 // TestHealthServer_CloseWithoutStart covers Close's nil-stopProbe branch.
 func TestHealthServer_CloseWithoutStart(t *testing.T) {
 	srv := NewHealthServer(freeLoopbackAddr(t), nil, nil, false, testLogger())

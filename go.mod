@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0
+	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/defiweb/go-eth v0.7.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -33,7 +34,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/btcsuite/btcd v0.24.2 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.2 // indirect
-	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect

@@ -210,9 +210,7 @@ func TestIntegration_PrepareSignSubmit_AddRegistry(t *testing.T) {
 	if reg.Description != "End-to-end integration test registry" {
 		t.Errorf("Description = %q", reg.Description)
 	}
-	if reg.Creator == "" {
-		t.Error("Creator should not be empty")
-	}
+	assertIntegrationCreatorFormat(t, reg.Creator, reg.CreatorEVM)
 	if reg.ID == 0 {
 		t.Error("ID should be > 0")
 	}

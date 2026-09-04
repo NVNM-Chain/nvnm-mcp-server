@@ -54,7 +54,7 @@ This README is the technical entry point. For deeper context, follow the links b
 |---|---|
 | [`docs/ONBOARDING.md`](docs/ONBOARDING.md) | New-contributor orientation — reading order, intentional design decisions, local quality gate (start here) |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture decisions; multi-chain deployment model; target-chain reference |
-| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
+| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 23 MCP tools |
 | [`docs/METAMASK_GUIDE.md`](docs/METAMASK_GUIDE.md) | Signing and submitting anchor writes with MetaMask (step-by-step) |
 | [`docs/standards/CODING_STANDARDS.md`](docs/standards/CODING_STANDARDS.md) | Go coding standards and conventions for contributors |
 | [`docs/TESTING.md`](docs/TESTING.md) | Layered testing strategy — unit, golden, integration, HTTP E2E, load, and Docker smoke |
@@ -289,6 +289,7 @@ When set (with HTTP transport), a separate server exposes `POST/GET/PATCH/DELETE
 | `ENABLE_PROMETHEUS` | `true` | Expose `/metrics` endpoint on metrics port |
 | `ENABLE_STDOUT_TELEMETRY` | `false` | Dump spans/metrics to stderr (dev only) |
 | `METRICS_ADDR` | `:9090` | Listen address for health + metrics endpoints |
+| `NVNM_READINESS_MAX_BLOCK_AGE` | `5m` | Maximum age of the chain's latest block before `/readyz` reports `not_ready` (catches a halted chain behind a responsive RPC). `0` disables the check |
 
 ### Resilience
 
@@ -417,7 +418,7 @@ The health and metrics server runs on a separate port (default `:9090`), indepen
 | Endpoint | Purpose |
 |---|---|
 | `GET /healthz` | Liveness probe -- returns `200 OK` if the process is running |
-| `GET /readyz` | Readiness probe -- returns `200 OK` if the EVM RPC is reachable and the ABI is loaded |
+| `GET /readyz` | Readiness probe -- returns `200 OK` when the EVM RPC is reachable **and** the chain's latest block is younger than `NVNM_READINESS_MAX_BLOCK_AGE`; `503` otherwise. ABI state is reported in `checks.abi` but does not gate readiness |
 | `GET /metrics` | Prometheus scrape endpoint (when `ENABLE_PROMETHEUS=true`) |
 
 ### What Gets Instrumented

@@ -101,8 +101,9 @@ func registerAnchorWriteTools(
 // --- Input types ---
 
 type prepareAddRegistryInput struct {
-	From        string `json:"from" jsonschema:"Sender EVM address (0x...)"`
-	Name        string `json:"name" jsonschema:"Registry name (unique)"`
+	From string `json:"from" jsonschema:"Sender EVM address (0x...)"`
+	//nolint:lll // descriptive prose for agents
+	Name        string `json:"name" jsonschema:"Registry name. NOT guaranteed unique -- anyone can create a registry with the same name. Check anchor_get_registries(name=...) first if you need a distinguishable name."`
 	Description string `json:"description" jsonschema:"Registry description"`
 	Metadata    string `json:"metadata,omitempty" jsonschema:"Optional JSON metadata"`
 	//nolint:lll // descriptive prose for agents

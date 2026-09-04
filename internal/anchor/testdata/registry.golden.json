@@ -2,7 +2,8 @@
   "id": 42,
   "name": "test-registry-uuid",
   "description": "A test registry for golden file validation",
-  "creator": "inveniam1abc123def456",
+  "creator": "nvnm139t3cwka9ps4sm5dtnuv2kf28t83n065s57gcm",
+  "creator_evm": "0x89571c3add2861586e8d5cf8c5592a3acf19bf54",
   "created_at": "2026-03-01 12:00:00.000000000 +0000 UTC",
   "metadata": "{\"env\":\"test\"}"
 }

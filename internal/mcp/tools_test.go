@@ -19,6 +19,12 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
+// blockNumArg builds a numeric block-number input the way JSON decoding
+// would, so handler tests stay terse.
+func blockNumArg(n int64) blockNumberArg {
+	return blockNumberArg{num: &n}
+}
+
 // ---------------------------------------------------------------------------
 // Mock EVM client
 // ---------------------------------------------------------------------------
@@ -230,8 +236,7 @@ func TestHandler_GetBlock_ByNumber(t *testing.T) {
 	m := &mockEVM{block: &evm.NormalizedBlock{Number: 42, Hash: "0xabc"}}
 	handler := makeGetBlockHandler(m)
 
-	num := int64(42)
-	_, out, err := handler(ctx, nil, getBlockInput{BlockNumber: &num})
+	_, out, err := handler(ctx, nil, getBlockInput{BlockNumber: blockNumArg(42)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,6 +269,25 @@ func TestHandler_GetBlock_Latest(t *testing.T) {
 	}
 	if out.Number != 200 {
 		t.Errorf("Number = %d, want 200", out.Number)
+	}
+}
+
+// TestHandler_GetBlock_BothNumberAndHashRejected pins the fail-fast contract
+// for the two lookup modes: supplying both used to silently prefer the hash
+// and discard the number (tool-description audit, D3).
+func TestHandler_GetBlock_BothNumberAndHashRejected(t *testing.T) {
+	handler := makeGetBlockHandler(&mockEVM{})
+
+	hash := testTxHash
+	_, _, err := handler(ctx, nil, getBlockInput{
+		BlockNumber: blockNumArg(42),
+		BlockHash:   &hash,
+	})
+	if err == nil {
+		t.Fatal("expected error when both block_number and block_hash are set")
+	}
+	if !errors.Is(err, apperrors.ErrInvalidBlockRef) {
+		t.Errorf("error = %v, want ErrInvalidBlockRef", err)
 	}
 }
 
@@ -414,8 +438,7 @@ func TestHandler_GetBalance_WithBlock(t *testing.T) {
 	m := &mockEVM{balance: &evm.NormalizedBalance{Address: testAddr, Wei: "500", Ether: "0.0000000000000005"}}
 	handler := makeGetBalanceHandler(m, testServerConfig(false))
 
-	block := int64(50)
-	_, out, err := handler(ctx, nil, getBalanceInput{Address: testAddr, BlockNum: &block})
+	_, out, err := handler(ctx, nil, getBalanceInput{Address: testAddr, BlockNum: blockNumArg(50)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -478,12 +501,10 @@ func TestHandler_GetLogs_WithAddressAndTopics(t *testing.T) {
 	handler := makeGetLogsHandler(m)
 
 	addr := testAddr
-	from := int64(1)
-	to := int64(100)
 	_, out, err := handler(ctx, nil, getLogsInput{
 		Address:   &addr,
-		FromBlock: &from,
-		ToBlock:   &to,
+		FromBlock: blockNumArg(1),
+		ToBlock:   blockNumArg(100),
 		Topics:    []string{testTxHash},
 	})
 	if err != nil {
@@ -548,8 +569,7 @@ func TestHandler_CallContract_WithBlock(t *testing.T) {
 	m := &mockEVM{callResult: []byte{0xab}}
 	handler := makeCallContractHandler(m)
 
-	block := int64(42)
-	_, out, err := handler(ctx, nil, callContractInput{To: testAddr, Data: "0xab", BlockNum: &block})
+	_, out, err := handler(ctx, nil, callContractInput{To: testAddr, Data: "0xab", BlockNum: blockNumArg(42)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -950,9 +970,9 @@ func TestHandler_GetRegistries_DeprecatedRegistryID(t *testing.T) {
 func TestHandler_GetRegistries_ByName_ReturnsAllMatches(t *testing.T) {
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
 		Registries: []anchor.Registry{
-			{ID: 1, Name: "fund-documents", Creator: "0xaaa"},
-			{ID: 2, Name: "audit-reports", Creator: "0xbbb"},
-			{ID: 3, Name: "fund-documents", Creator: "0xccc"},
+			{ID: 1, Name: "fund-documents", Creator: "nvnm1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5uyxmzt"},
+			{ID: 2, Name: "audit-reports", Creator: "nvnm12r28dewjcpzfnrkpshvx5rh4eve086858qcn7n"},
+			{ID: 3, Name: "fund-documents", Creator: "nvnm1zg69v7ys40x77y352eufp27daufrg4ncs5286h"}, // pragma: allowlist secret -- public on-chain address, test fixture
 		},
 	}}
 	handler := makeGetRegistriesHandler(m, testLogger())

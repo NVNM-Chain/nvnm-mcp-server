@@ -71,7 +71,7 @@ func sampleRegistryRows() []abiRegistryRow {
 			ID:          1,
 			Name:        "registry-one",
 			Description: "first registry",
-			Creator:     "inveniam1abc",
+			Creator:     "nvnm1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5uyxmzt",
 			CreatedAt:   "2026-03-01 12:00:00.000000000 +0000 UTC",
 			Metadata:    "{\"env\":\"test\"}",
 		},
@@ -79,7 +79,7 @@ func sampleRegistryRows() []abiRegistryRow {
 			ID:          2,
 			Name:        "registry-two",
 			Description: "second registry",
-			Creator:     "inveniam1def",
+			Creator:     "nvnm12r28dewjcpzfnrkpshvx5rh4eve086858qcn7n",
 			CreatedAt:   "2026-03-02 12:00:00.000000000 +0000 UTC",
 			Metadata:    "",
 		},
@@ -180,7 +180,8 @@ func TestGetRegistry_Success(t *testing.T) {
 		ID:          1,
 		Name:        "registry-one",
 		Description: "first registry",
-		Creator:     "inveniam1abc",
+		Creator:     "nvnm1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5uyxmzt",
+		CreatorEVM:  "0x0102030405060708090a0b0c0d0e0f1011121314",
 		CreatedAt:   "2026-03-01 12:00:00.000000000 +0000 UTC",
 		Metadata:    "{\"env\":\"test\"}",
 	}
@@ -528,7 +529,10 @@ func TestGetRecords_FiltersAndPaginationForwarded(t *testing.T) {
 	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
 
 	regID := uint64(9)
-	checksum := "abc123"
+	// 0x-prefixed on purpose: the chain stores checksums bare-hex, so the
+	// query path must strip the prefix exactly like the write path does
+	// (normalizeChecksum) -- asserted on the wire below.
+	checksum := "0xabc123"
 	recordID := uint64(9)
 	index := uint64(3)
 	resp, err := c.GetRecords(context.Background(), GetRecordsRequest{
@@ -553,7 +557,8 @@ func TestGetRecords_FiltersAndPaginationForwarded(t *testing.T) {
 		t.Fatalf("decode call input: %v", decErr)
 	}
 	if reqRegistryID != 9 || reqChecksum != "abc123" || reqRecordID != 9 || reqIndex != 3 {
-		t.Errorf("filters = (%d, %q, %d, %d)", reqRegistryID, reqChecksum, reqRecordID, reqIndex)
+		t.Errorf("filters = (%d, %q, %d, %d), want (9, \"abc123\" [0x stripped], 9, 3)",
+			reqRegistryID, reqChecksum, reqRecordID, reqIndex)
 	}
 	if reqPage.Offset != 11 || reqPage.Limit != 13 {
 		t.Errorf("pagination = %+v, want offset=11 limit=13", reqPage)

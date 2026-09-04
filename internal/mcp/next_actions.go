@@ -119,6 +119,11 @@ func anchorGetRegistryNext() []NextAction {
 			Tool: "anchor_prepare_add_record",
 			Hint: "Anchor a new record into this registry (caller must hold editor role).",
 		},
+		{
+			Tool: "wallet_status",
+			Hint: "Inspect the creator's wallet via the creator_evm field " +
+				"(creator itself is a bech32 chain identity, not an EVM address).",
+		},
 	}
 }
 

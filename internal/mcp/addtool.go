@@ -5,7 +5,10 @@ package mcp
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
@@ -23,11 +26,26 @@ import (
 // errors, internal type paths) would leak verbatim to the client. SafeForClient
 // passes known sentinels (not-found, auth, permission, input) through unchanged
 // and collapses everything else to a generic upstream-failure message.
+// It is also where input schemas are generated: the SDK's own inference
+// cannot express union-typed inputs (blockNumberArg accepts an integer or a
+// block tag string), so the schema is derived here with customTypeSchemas
+// injected and set on the tool before registration. A schema failure is a
+// programming error in a tool's input struct and panics at boot (fail fast).
 func addTool[In, Out any](
 	s *mcp.Server,
 	t *mcp.Tool,
 	h mcp.ToolHandlerFor[In, Out],
 ) {
+	if t.InputSchema == nil {
+		schema, err := jsonschema.ForType(
+			reflect.TypeFor[In](),
+			&jsonschema.ForOptions{TypeSchemas: customTypeSchemas},
+		)
+		if err != nil {
+			panic(fmt.Sprintf("addTool %s: derive input schema: %v", t.Name, err))
+		}
+		t.InputSchema = schema
+	}
 	mcp.AddTool(s, t, sanitizeToolErr(h))
 }
 
