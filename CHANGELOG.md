@@ -37,6 +37,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Tool descriptions brought in line with implementation** (pre-submission
+  audit): `evm_send_raw_transaction` now advertises its anchor-precompile
+  relay scope, decode-or-reject behavior, and keyless per-signer gates;
+  `anchor_prepare_add_registry` no longer calls the registry name
+  "unique"; `evm_get_logs` states the omitted-range default (latest block
+  only) and the range-cap error; `anchor_get_registries` documents
+  `name_match_truncated`, and TOOL_REFERENCE §11 now describes the
+  full-scan listing (exact totals, client-side limit) instead of the
+  retired single-page behavior. Two behavior fixes from the same audit:
+  `evm_get_block` now rejects `block_number` + `block_hash` together
+  instead of silently preferring the hash, and `nvnm_overview` enforces
+  the same default-deny role check as every other tool (a roleless
+  authenticated key is now denied there too).
 - **`anchor_get_records` checksum queries now strip a leading `0x`**, the
   same normalization the write path has always applied. Previously a
   record anchored through this server (stored bare-hex on chain) silently

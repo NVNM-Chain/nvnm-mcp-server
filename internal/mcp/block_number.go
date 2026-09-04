@@ -82,6 +82,12 @@ func (b blockNumberArg) MarshalJSON() ([]byte, error) {
 	}
 }
 
+// isSet reports whether the caller provided any value (a tag or a number).
+// The zero value -- field omitted or JSON null -- is not set.
+func (b blockNumberArg) isSet() bool {
+	return b.tag != "" || b.num != nil
+}
+
 // bigInt resolves the argument for clients whose API is *big.Int with
 // nil-means-latest (BlockByNumber, BalanceAt, CodeAt, CallContract).
 // "earliest" is block zero by EVM convention.

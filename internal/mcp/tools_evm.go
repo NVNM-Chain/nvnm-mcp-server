@@ -33,7 +33,8 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 		Title: "Get Block",
 		Description: "Returns a block by number or hash. " +
 			"Use block_number (an integer or the tag \"latest\"/\"earliest\") for " +
-			"number lookup, block_hash for hash lookup. " +
+			"number lookup, block_hash for hash lookup. Provide one or the " +
+			"other -- supplying both is rejected. Omit both for the latest block. " +
 			"Set full_transactions to true to include transaction details.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBlockHandler(evmClient))
@@ -70,7 +71,8 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 			"amount in this chain's gas token (see token_wrapped); wei is the raw " +
 			"integer. The `ether` field is a legacy alias for the same decimal " +
 			"amount and is NOT denominated in ether -- prefer balance_human when " +
-			"reporting a balance. Optionally specify a block number.",
+			"reporting a balance. Optionally specify a block number or the tag " +
+			"\"latest\"/\"earliest\".",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBalanceHandler(evmClient, cfg))
 
@@ -89,7 +91,11 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 			"Specify address to filter by contract, from_block/to_block for a block range, " +
 			"and topics as keccak256 hashes of event signatures " +
 			"(e.g. keccak256('Transfer(address,address,uint256)') = 0xddf252...). " +
-			"All filters are optional -- omitting all returns all logs in the block range. " +
+			"All filters are optional. When from_block/to_block are omitted the " +
+			"node default applies (the latest block only) -- set an explicit " +
+			"range to search history. Ranges wider than the node's cap are " +
+			"rejected with a 'block range too wide' error; narrow the range " +
+			"and retry. " +
 			"Useful for watching for on-chain events or auditing contract activity.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetLogsHandler(evmClient))
@@ -184,6 +190,15 @@ func makeGetBlockHandler(
 			return nil, blockOutput{}, err
 		}
 		if input.BlockHash != nil {
+			// The two lookups are different queries; accepting both and
+			// silently preferring the hash would discard the caller's
+			// number with no signal. Fail fast instead (finding D3 of the
+			// tool-description audit).
+			if input.BlockNumber.isSet() {
+				return nil, blockOutput{}, fmt.Errorf(
+					"provide block_number or block_hash, not both: %w",
+					apperrors.ErrInvalidBlockRef)
+			}
 			hash, err := parseHash(*input.BlockHash)
 			if err != nil {
 				return nil, blockOutput{},

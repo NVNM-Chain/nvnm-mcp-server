@@ -45,6 +45,10 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 		name string
 		call func() error
 	}{
+		{"overview", func() error {
+			_, _, err := makeOverviewHandler(cfg)(denied, nil, overviewInput{})
+			return err
+		}},
 		{"get_block", func() error {
 			_, _, err := makeGetBlockHandler(m)(denied, nil, getBlockInput{BlockNumber: blockNumArg(1)})
 			return err

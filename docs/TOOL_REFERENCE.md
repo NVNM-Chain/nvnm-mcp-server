@@ -345,7 +345,7 @@ Returns a block by number or hash. Use `block_number` (an integer or the tag `"l
 | `block_hash`       | `string` | optional | Block hash (0x-prefixed, 32 bytes)         |
 | `full_transactions`| `bool`   | optional | Include full transaction details (default false)|
 
-Provide either `block_number` or `block_hash`, not both. Omit both to fetch the latest block.
+Provide either `block_number` or `block_hash`, not both -- supplying both is rejected with an input error. Omit both to fetch the latest block.
 
 ### Output Fields
 
@@ -659,7 +659,7 @@ Returns event logs matching a filter. Specify address(es), block range, and/or t
 | `to_block`   | `int64` \| `"latest"` \| `"earliest"` | optional | End block number or standard block tag |
 | `topics`     | `string[]` | optional | Event topics (0x-prefixed hashes) to match |
 
-At least one filter parameter should be provided to avoid unbounded queries.
+When `from_block`/`to_block` are omitted the node default applies (the latest block only); set an explicit range to search history.
 
 ### Output Fields
 
@@ -890,14 +890,14 @@ Fetch a single anchoring registry by its numeric ID. A registry is a logical con
 
 Fetch a page of anchoring registries, optionally filtered by name. The mode is selected by `registry_id`:
 
-1. **Listing (`registry_id` omitted or `0`)** -- `offset` and `limit` are optional, defaulting to offset `0` and 100 rows per page.
-   - Without `name`: a single chain-side page of the registry table.
-   - With `name` (+ optional `match`): the server scans the entire registry table client-side (the precompile has no by-name index), collects **every** match, and returns the `offset`/`limit` window of those matches. `pagination.total` is the full match count, so no match is ever hidden and a caller can page through all of them.
+1. **Listing (`registry_id` omitted or `0`)** -- `offset` and `limit` are optional, defaulting to offset `0` and 100 rows per page. Every listing path -- filtered and unfiltered alike -- scans the entire registry table client-side (the precompile requires fixed internal cursor pages), then applies the caller's `offset`/`limit` window to the complete result.
+   - Without `name`: the full table, windowed by `offset`/`limit`; `pagination.total` is the exact row count found by the scan.
+   - With `name` (+ optional `match`): the scan collects **every** match before windowing. `pagination.total` is the full match count, so no match is ever hidden and a caller can page through all of them.
 2. **`registry_id` > 0 -- DEPRECATED** -- returns that single registry. It cannot be combined with `name`, `match`, `offset`, or `limit`. Use [anchor\_get\_registry](#10-anchor_get_registry) instead.
 
 > Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all matches (check `creator` / `created_at` to disambiguate), not just take the first.
 
-> **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Compare `pagination.total` against the rows returned -- authoritative for a `name` filter, always `0` from this chain otherwise -- or keep paging until a page comes back short.
+> **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Compare `pagination.total` -- the exact count found by the scan unless `total_is_lower_bound` is `true` -- against `offset` + rows returned to decide whether to keep paging.
 
 > **Operator note (scan cost):** each listing or name-filtered call pages the
 > *entire* registry table through the upstream RPC -- one sequential call per
@@ -917,7 +917,7 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 | Name          | Type     | Required | Description                   |
 |---------------|----------|----------|-------------------------------|
 | `offset`      | `uint64` | optional | Pagination offset for a listing, `0` or greater (default `0`). Must be omitted or `0` alongside `registry_id`. |
-| `limit`       | `uint64` | optional | Page size for a listing (default `100`; `0` also means the default). Must be omitted or `0` alongside `registry_id`. Note: the precompile caps a chain-side page at 200 rows regardless of the `limit` requested. |
+| `limit`       | `uint64` | optional | Page size for a listing (default `100`; `0` also means the default). Must be omitted or `0` alongside `registry_id`. Applied client-side after the full scan, so values above the precompile's internal 200-row page size work as expected. |
 | `name`        | `string` | optional | Filter the listing by registry name (client-side scan over the whole table, then paged by `offset`/`limit`). Omit for an unfiltered listing. Mutually exclusive with `registry_id`. |
 | `match`       | `string` | optional | Match mode for `name`: `exact` (default), `prefix`, `suffix`, or `contains`. All case-insensitive. Requires `name`. |
 | `registry_id` | `uint64` | optional, **DEPRECATED** | Returns the single registry with this ID. Mutually exclusive with `name`, `match`, `offset`, and `limit`. Use [anchor\_get\_registry](#10-anchor_get_registry) instead. |
@@ -928,8 +928,9 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 |-------------------------|--------------|------------------------------------------|
 | `registries`            | `Registry[]` | Array of registry objects (the requested page) |
 | `pagination`            | `object`     | Pagination metadata               |
-| `pagination.total`      | `uint64`     | With `name`: the **exact** number of matching registries, counted client-side across the whole table -- use it to tell whether more matches remain past this page. Without `name`: the chain-reported total. **Note:** the nvnm-testnet-1 anchoring precompile returns `0` here even when registries are present (it does not honor `countTotal`); do not treat the chain-reported `total` as authoritative. |
-| `name_match_truncated`  | `bool`       | `name` filter only, omitted otherwise. `true` if the client-side scan hit its internal safety cap before confirming it reached the end of the registry table -- treat the match set (and therefore `pagination.total`) as possibly incomplete when this is `true`. |
+| `pagination.total`      | `uint64`     | With `name`: the **exact** number of matching registries, counted client-side across the whole table -- use it to tell whether more matches remain past this page. Without `name`: the exact number of registries found by the full client-side scan. (The chain's own `countTotal` is not used: this precompile reports `0` even when registries are present.) |
+| `total_is_lower_bound`  | `bool`       | Omitted (false) when the scan completed normally and `total` is exact. `true` when the scan was cut short by its internal page cap or an ID-gap heuristic -- `total` is then a floor, not an exact count, and registries beyond the scanned range are unreachable through this listing. |
+| `name_match_truncated`  | `bool`       | `name` filter only, omitted otherwise. Mirrors `total_is_lower_bound`: `true` if the client-side scan hit its internal safety cap before confirming it reached the end of the registry table -- treat the match set (and therefore `pagination.total`) as possibly incomplete when this is `true`. |
 
 Each element in `registries` has the same fields as [anchor\_get\_registry](#10-anchor_get_registry) output.
 
@@ -1089,7 +1090,7 @@ Flexibly query anchored records. Supports multiple lookup modes:
 | `registry_id` | `uint64` | optional | Registry numeric ID                         |
 | `record_id`  | `uint64` | optional | Record ID within the registry               |
 | `index`      | `uint64` | optional | Version index (starts at 1)                 |
-| `checksum`   | `string` | optional | Content hash to search for                  |
+| `checksum`   | `string` | optional | Content hash to search for, as a hex digest. A leading `0x` is accepted and stripped (the chain stores checksums bare-hex, same normalization as `anchor_prepare_add_record`). |
 | `offset`     | `uint64` | optional | Pagination offset                           |
 | `limit`      | `uint64` | optional | Pagination limit                            |
 
@@ -1543,6 +1544,7 @@ Broadcast a signed transaction to the network. Input is the signed transaction a
 - Invalid hex encoding.
 - RLP decoding failure (malformed transaction).
 - Relay scope rejection: the transaction's destination is not the anchor precompile (see the **Relay scope** note above). Not raised when `MCP_RELAY_ALLOW_ANY=true` on the authenticated path.
+- Keyless writes only: the recovered signer is blacklisted, or has exceeded the per-signer volume quota for the current window.
 - Nonce too low or too high.
 - Insufficient funds for gas.
 - Transaction rejected by the node (e.g., invalid signature, chain ID mismatch).

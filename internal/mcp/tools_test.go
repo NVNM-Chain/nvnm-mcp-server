@@ -272,6 +272,25 @@ func TestHandler_GetBlock_Latest(t *testing.T) {
 	}
 }
 
+// TestHandler_GetBlock_BothNumberAndHashRejected pins the fail-fast contract
+// for the two lookup modes: supplying both used to silently prefer the hash
+// and discard the number (tool-description audit, D3).
+func TestHandler_GetBlock_BothNumberAndHashRejected(t *testing.T) {
+	handler := makeGetBlockHandler(&mockEVM{})
+
+	hash := testTxHash
+	_, _, err := handler(ctx, nil, getBlockInput{
+		BlockNumber: blockNumArg(42),
+		BlockHash:   &hash,
+	})
+	if err == nil {
+		t.Fatal("expected error when both block_number and block_hash are set")
+	}
+	if !errors.Is(err, apperrors.ErrInvalidBlockRef) {
+		t.Errorf("error = %v, want ErrInvalidBlockRef", err)
+	}
+}
+
 func TestHandler_GetBlock_InvalidHash(t *testing.T) {
 	m := &mockEVM{}
 	handler := makeGetBlockHandler(m)
