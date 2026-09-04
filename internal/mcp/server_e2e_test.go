@@ -609,13 +609,17 @@ func TestE2E_RBAC_ReaderCannotCallWriteTool(t *testing.T) {
 		t.Fatalf("reader should be able to call read tools, got error: %v", readResult.Content)
 	}
 
-	// Write tool should be denied
+	// Write tool should be denied. The arguments match the current tool
+	// schema (registry_id, uri, checksum_algo) so this test proves the
+	// RBAC denial, not an incidental schema rejection of stale params.
 	writeResult, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "anchor_prepare_add_record",
 		Arguments: map[string]any{
-			"from":     "0x1234567890abcdef1234567890abcdef12345678",
-			"registry": "test",
-			"checksum": "abc",
+			"from":          "0x1234567890abcdef1234567890abcdef12345678",
+			"registry_id":   float64(1),
+			"uri":           "ipfs://doc",
+			"checksum":      "e4d5f79f1cfaf0cecd5f0e323a25fd08c1f64d0e1f8de349d75c77f29e51407d", // pragma: allowlist secret -- sha256 test fixture
+			"checksum_algo": "sha256",
 		},
 	})
 	if err != nil {

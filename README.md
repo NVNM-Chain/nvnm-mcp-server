@@ -54,7 +54,7 @@ This README is the technical entry point. For deeper context, follow the links b
 |---|---|
 | [`docs/ONBOARDING.md`](docs/ONBOARDING.md) | New-contributor orientation — reading order, intentional design decisions, local quality gate (start here) |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture decisions; multi-chain deployment model; target-chain reference |
-| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 21 MCP tools |
+| [`docs/TOOL_REFERENCE.md`](docs/TOOL_REFERENCE.md) | Per-tool schema reference for all 23 MCP tools |
 | [`docs/METAMASK_GUIDE.md`](docs/METAMASK_GUIDE.md) | Signing and submitting anchor writes with MetaMask (step-by-step) |
 | [`docs/standards/CODING_STANDARDS.md`](docs/standards/CODING_STANDARDS.md) | Go coding standards and conventions for contributors |
 | [`docs/TESTING.md`](docs/TESTING.md) | Layered testing strategy — unit, golden, integration, HTTP E2E, load, and Docker smoke |

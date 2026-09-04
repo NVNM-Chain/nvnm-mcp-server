@@ -26,4 +26,4 @@ resources:
 # is rejected cluster-side, not merely pinned in this manifest.
 images:
   - name: ghcr.io/nvnm-chain/nvnm-mcp-server
-    newTag: "1.0.0-rc14"
+    newTag: "1.0.0-rc19"
