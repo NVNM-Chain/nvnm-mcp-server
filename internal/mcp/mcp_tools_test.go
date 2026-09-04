@@ -454,6 +454,55 @@ func TestMCP_Tools(t *testing.T) {
 	})
 }
 
+// TestMCP_BlockTagInputs proves the published block-number contract through
+// the real SDK schema validation (finding 19): integers and the standard
+// tags "latest"/"earliest" are accepted on every block-number field, while
+// other strings are rejected before a handler runs.
+func TestMCP_BlockTagInputs(t *testing.T) {
+	session := startCallToolServer(t)
+
+	t.Run("accepted forms", func(t *testing.T) {
+		for _, args := range []map[string]any{
+			{"block_number": float64(42)},
+			{"block_number": "latest"},
+			{"block_number": "earliest"},
+			{"block_number": nil},
+		} {
+			raw := callToolOK(t, session, "evm_get_block", args)
+			out := decodeWire[wireBlock](t, raw)
+			if out.Number != 42 {
+				t.Errorf("args %v: number = %d, want 42", args, out.Number)
+			}
+		}
+	})
+
+	t.Run("accepted on log ranges", func(t *testing.T) {
+		raw := callToolOK(t, session, "evm_get_logs", map[string]any{
+			"from_block": "earliest",
+			"to_block":   "latest",
+		})
+		var out struct {
+			Count int `json:"count"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("decode logs: %v", err)
+		}
+		if out.Count != 1 {
+			t.Errorf("count = %d, want 1", out.Count)
+		}
+	})
+
+	t.Run("unknown tag rejected by schema", func(t *testing.T) {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "evm_get_block",
+			Arguments: map[string]any{"block_number": "pending"},
+		})
+		if err == nil && (result == nil || !result.IsError) {
+			t.Fatal("block_number=\"pending\" was accepted, want schema rejection")
+		}
+	})
+}
+
 func startCallToolServer(t *testing.T) *mcp.ClientSession {
 	t.Helper()
 	blockNum := uint64(42)

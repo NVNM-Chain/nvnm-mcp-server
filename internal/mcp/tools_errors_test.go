@@ -40,14 +40,13 @@ func TestHandlers_DefaultDenyWithoutRoles(t *testing.T) {
 	cfg := testServerConfig(true)
 	denied := deniedCtx()
 
-	num := int64(1)
 	addr := testAddr
 	cases := []struct {
 		name string
 		call func() error
 	}{
 		{"get_block", func() error {
-			_, _, err := makeGetBlockHandler(m)(denied, nil, getBlockInput{BlockNumber: &num})
+			_, _, err := makeGetBlockHandler(m)(denied, nil, getBlockInput{BlockNumber: blockNumArg(1)})
 			return err
 		}},
 		{"get_transaction", func() error {
@@ -135,8 +134,6 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 	cfg := testServerConfig(true)
 
 	hash := testTxHash
-	num := int64(1)
-	blockNum := int64(2)
 	regID := uint64(1)
 	cases := []struct {
 		name string
@@ -147,7 +144,7 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_block by number", func() error {
-			_, _, err := makeGetBlockHandler(m)(ctx, nil, getBlockInput{BlockNumber: &num})
+			_, _, err := makeGetBlockHandler(m)(ctx, nil, getBlockInput{BlockNumber: blockNumArg(1)})
 			return err
 		}},
 		{"get_transaction", func() error {
@@ -163,7 +160,8 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_code with block", func() error {
-			_, _, err := makeGetCodeHandler(m, testServerConfig(false))(ctx, nil, getCodeInput{Address: testAddr, BlockNum: &blockNum})
+			_, _, err := makeGetCodeHandler(m, testServerConfig(false))(ctx, nil,
+				getCodeInput{Address: testAddr, BlockNum: blockNumArg(2)})
 			return err
 		}},
 		{"get_logs", func() error {
