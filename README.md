@@ -146,6 +146,8 @@ make run
 # Run (HTTP transport -- for remote/production deployment).
 # `run-http` sources `.env` rather than the exported environment, so
 # configure it there; values in `.env` win over anything exported above.
+# Exception: MCP_KEYLESS_WRITES=true without MCP_KEYLESS_PG_DSN is turned
+# off for that process (writes stay authenticated) so boot can succeed.
 cp .env.example .env      # then fill in values
 make run-http
 ```

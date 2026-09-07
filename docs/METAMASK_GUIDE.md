@@ -13,7 +13,9 @@ Before you can anchor documents on the NVNM chain:
 3. **wmantraUSD balance** -- the gas token on NVNM testnet
 4. **MCP server running** with write tools enabled. Set this in `.env` --
    `run-http` sources that file, so an inline `ENABLE_WRITE_TOOLS=` prefix
-   would be overwritten and have no effect:
+   would be overwritten and have no effect. If `.env` also turns on
+   `MCP_KEYLESS_WRITES` without `MCP_KEYLESS_PG_DSN`, the target disables
+   keyless writes for that process (broadcasts stay authenticated):
 
    ```bash
    # in .env

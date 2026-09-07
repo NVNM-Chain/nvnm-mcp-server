@@ -35,6 +35,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the 2026-08-21 testnet halt, readiness stayed green for ~3 days while
   every write silently failed; this catches that class of outage.
 
+### Changed
+
+- **`make run-http` / `make run-local`** no longer fail boot when `.env`
+  has `MCP_KEYLESS_WRITES=true` without `MCP_KEYLESS_PG_DSN`. Those
+  targets disable keyless writes for the process (writes stay
+  authenticated) and print a note. Set the DSN to keep anonymous writes
+  on. The binary's fail-fast guard is unchanged.
+
 ### Fixed
 
 - **Tool descriptions brought in line with implementation** (pre-submission

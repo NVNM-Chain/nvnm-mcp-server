@@ -39,13 +39,36 @@ run: build
 # broadcast tools would override an operator's explicit `false` and, with
 # `.env` pointed at mainnet, put evm_send_raw_transaction one `make` away.
 #
-# The listen address is the sole exception, pinned so this target keeps its
-# conventional :8080 identity regardless of MCP_HTTP_ADDR in `.env`:
-#   make run-http RUN_HTTP_ADDR=:9999
+# Two process-only exceptions (`.env` is not rewritten):
+#   1. The listen address is pinned so this target keeps its conventional
+#      :8080 identity regardless of MCP_HTTP_ADDR in `.env`:
+#        make run-http RUN_HTTP_ADDR=:9999
+#   2. MCP_KEYLESS_WRITES without MCP_KEYLESS_PG_DSN is turned off so boot
+#      can succeed (see maybe_disable_keyless_writes_without_dsn).
 #
 # Precedence note: `set -a && . ./.env` overwrites already-exported shell
 # variables, so `FOO=bar make run-http` does NOT win over a `FOO` set in
 # `.env` -- change it in `.env`.
+#
+# Hosted `.env` files often set MCP_KEYLESS_WRITES=true. That mode requires
+# MCP_KEYLESS_PG_DSN (the persisted write-audit is a security control, not
+# optional) and the binary refuses to boot without it. Local `make run-*`
+# without a DSN would otherwise die here. Fall back to authed writes for
+# this process only -- `.env` is left untouched. Set the DSN to keep
+# anonymous writes on.
+define maybe_disable_keyless_writes_without_dsn
+	case "$${MCP_KEYLESS_WRITES}" in \
+		1|t|T|true|True|TRUE) \
+			if [ -z "$${MCP_KEYLESS_PG_DSN}" ]; then \
+				echo "NOTE: MCP_KEYLESS_WRITES is on but MCP_KEYLESS_PG_DSN is unset." >&2; \
+				echo "      Disabling keyless writes for this process (writes stay authenticated)." >&2; \
+				echo "      Set MCP_KEYLESS_PG_DSN in .env to keep anonymous writes on." >&2; \
+				MCP_KEYLESS_WRITES=false; \
+				export MCP_KEYLESS_WRITES; \
+			fi ;; \
+	esac
+endef
+
 RUN_HTTP_ADDR ?= :8080
 
 run-http: build
@@ -54,6 +77,7 @@ run-http: build
 		exit 1; \
 	fi
 	@set -a && . ./.env && set +a && \
+		$(maybe_disable_keyless_writes_without_dsn) && \
 		MCP_HTTP_ADDR="$(RUN_HTTP_ADDR)" \
 		"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
 
@@ -72,6 +96,7 @@ run-local: build
 		exit 1; \
 	fi
 	@set -a && . ./.env && set +a && \
+		$(maybe_disable_keyless_writes_without_dsn) && \
 		"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
 
 healthz:
