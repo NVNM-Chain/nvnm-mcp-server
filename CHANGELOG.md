@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0-rc20] - 2026-09-08
+
 ### Added
 
 - **`creator_evm` on registry responses** (`anchor_get_registry`,
@@ -74,7 +76,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `content_trust` and `wallet_generator_url` response fields are
   documented; `docs/METAMASK_GUIDE.md` record lookup matches the rc17
   surface (`registry_id`, not name); the k8s image pin moves rc14 →
-  rc19; the README/RUNBOOK `/readyz` description matches what the probe
+  rc20; the README/RUNBOOK `/readyz` description matches what the probe
   actually checks (ABI state is reported but does not gate readiness);
   an RBAC e2e test no longer passes a pre-rc17 `registry` parameter.
 
