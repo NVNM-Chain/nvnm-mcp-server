@@ -39,11 +39,15 @@ var (
 	ErrInvalidRateBurst       = errors.New("RPC_RATE_BURST must be positive")
 	ErrInvalidBreakerSettings = errors.New("CIRCUIT_BREAKER_THRESHOLD and CIRCUIT_BREAKER_TIMEOUT must be positive")
 	ErrInvalidSampleRatio     = errors.New("OTEL_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0 inclusive")
-	ErrInvalidMCPRateLimit    = errors.New("MCP_RATE_LIMIT must be positive")
-	ErrInvalidMCPRateBurst    = errors.New("MCP_RATE_BURST must be positive")
-	ErrInvalidAnonRateLimit   = errors.New("MCP_ANON_RATE_LIMIT must be positive")
-	ErrInvalidAnonRateBurst   = errors.New("MCP_ANON_RATE_BURST must be positive")
-	ErrMissingKeyPendingFile  = errors.New(
+	// ErrInvalidReadinessMaxBlockAge rejects a negative staleness threshold:
+	// zero disables the chain-freshness readiness check, negative is a typo.
+	ErrInvalidReadinessMaxBlockAge = errors.New(
+		"NVNM_READINESS_MAX_BLOCK_AGE must be a non-negative duration (0 disables the check)")
+	ErrInvalidMCPRateLimit   = errors.New("MCP_RATE_LIMIT must be positive")
+	ErrInvalidMCPRateBurst   = errors.New("MCP_RATE_BURST must be positive")
+	ErrInvalidAnonRateLimit  = errors.New("MCP_ANON_RATE_LIMIT must be positive")
+	ErrInvalidAnonRateBurst  = errors.New("MCP_ANON_RATE_BURST must be positive")
+	ErrMissingKeyPendingFile = errors.New(
 		"NVNM_KEY_PENDING_FILE is required when NVNM_KEY_REQUEST_ENABLED is true",
 	)
 	ErrInvalidKeyRequestRateLimit = errors.New("NVNM_KEY_REQUEST_RATE_LIMIT must be positive")
@@ -200,6 +204,11 @@ type Config struct {
 	EnableStdoutTel  bool
 	OTLPInsecure     bool
 	MetricsAddr      string
+	// ReadinessMaxBlockAge (NVNM_READINESS_MAX_BLOCK_AGE, default 5m) is the
+	// maximum age of the chain's latest block before /readyz reports
+	// not_ready. An RPC endpoint can answer while the chain behind it is
+	// halted; this bound catches that. Zero disables the check.
+	ReadinessMaxBlockAge time.Duration
 
 	// Resilience
 	RPCMaxRetries           int
@@ -575,6 +584,12 @@ func (c *Config) loadTelemetryConfig() error {
 		return fmt.Errorf("invalid OTEL_TRACE_SAMPLE_RATIO %q: %w", sampleRatioStr, err)
 	}
 	c.OTELTraceSampleRatio = sampleRatio
+	maxBlockAgeStr := envOrDefault("NVNM_READINESS_MAX_BLOCK_AGE", "5m")
+	maxBlockAge, err := time.ParseDuration(maxBlockAgeStr)
+	if err != nil {
+		return fmt.Errorf("invalid NVNM_READINESS_MAX_BLOCK_AGE %q: %w", maxBlockAgeStr, err)
+	}
+	c.ReadinessMaxBlockAge = maxBlockAge
 	return nil
 }
 
@@ -846,6 +861,9 @@ func (c *Config) validateResilience() error {
 	}
 	if c.OTELTraceSampleRatio < 0 || c.OTELTraceSampleRatio > 1 {
 		return ErrInvalidSampleRatio
+	}
+	if c.ReadinessMaxBlockAge < 0 {
+		return ErrInvalidReadinessMaxBlockAge
 	}
 	if c.MCPRateLimit <= 0 {
 		return ErrInvalidMCPRateLimit

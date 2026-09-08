@@ -22,6 +22,7 @@ type Registry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Creator     string `json:"creator"`
+	CreatorEVM  string `json:"creator_evm"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -209,7 +210,7 @@ func AssertRegistryContract(t *testing.T, reg Registry, signerHex string) {
 	if reg.Name == "" {
 		t.Error("registry name empty")
 	}
-	assertCreatorFormat(t, reg.Creator, signerHex)
+	assertCreatorFormat(t, reg.Creator, reg.CreatorEVM, signerHex)
 }
 
 func AssertRecordContract(t *testing.T, rec Record, wantChecksum string) {
@@ -273,23 +274,27 @@ func AssertReceiptContract(t *testing.T, r *Receipt) {
 	}
 }
 
-func assertCreatorFormat(t *testing.T, creator, signerHex string) {
+// assertCreatorFormat pins the two-representation creator contract (P1 /
+// ADR 0001): `creator` is the chain-native bech32 identity, `creator_evm`
+// its derived 0x form, which must match the signing wallet when known.
+func assertCreatorFormat(t *testing.T, creator, creatorEVM, signerHex string) {
 	t.Helper()
 	if creator == "" {
 		t.Error("creator is empty")
 		return
 	}
-	if strings.HasPrefix(strings.ToLower(creator), "0x") {
-		if len(creator) != 42 {
-			t.Errorf("creator = %q, want 0x + 40 hex chars", creator)
-		}
-		if signerHex != "" && !strings.EqualFold(creator, signerHex) {
-			t.Errorf("creator = %s, want signing wallet %s", creator, signerHex)
-		}
+	if !looksLikeBech32(creator) {
+		t.Errorf("creator = %q, want chain-native bech32 (nvnm1...)", creator)
+	}
+	if creatorEVM == "" {
+		t.Errorf("creator_evm missing for creator %q, want derived 0x address", creator)
 		return
 	}
-	if !looksLikeBech32(creator) {
-		t.Errorf("creator = %q, want 0x-hex or bech32", creator)
+	if !strings.HasPrefix(strings.ToLower(creatorEVM), "0x") || len(creatorEVM) != 42 {
+		t.Errorf("creator_evm = %q, want 0x + 40 hex chars", creatorEVM)
+	}
+	if signerHex != "" && !strings.EqualFold(creatorEVM, signerHex) {
+		t.Errorf("creator_evm = %s, want signing wallet %s", creatorEVM, signerHex)
 	}
 }
 

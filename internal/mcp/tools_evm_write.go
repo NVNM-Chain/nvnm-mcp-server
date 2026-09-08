@@ -69,6 +69,13 @@ func registerEVMWriteTools(
 		Name:  "evm_send_raw_transaction",
 		Title: "Send Raw Transaction",
 		Description: "Broadcast a signed transaction to the network. " +
+			"Relay scope: this is a scoped anchoring relay, not a general-purpose " +
+			"broadcaster -- the server decodes the signed transaction and rejects " +
+			"it before broadcast unless its destination is the anchor precompile " +
+			"(operators of authenticated deployments can lift this with " +
+			"MCP_RELAY_ALLOW_ANY). An undecodable transaction is rejected; " +
+			"keyless deployments additionally enforce a per-signer volume quota " +
+			"and blacklist. " +
 			"Use this for the local/headless signer path only: " +
 			"sign the raw_tx bytes from anchor_prepare_* externally, " +
 			"then pass the signed hex here. " +

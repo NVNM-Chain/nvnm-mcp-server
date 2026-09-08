@@ -45,6 +45,7 @@ func clearEnv(t *testing.T) {
 		"CIRCUIT_BREAKER_THRESHOLD",
 		"CIRCUIT_BREAKER_TIMEOUT",
 		"OTEL_TRACE_SAMPLE_RATIO",
+		"NVNM_READINESS_MAX_BLOCK_AGE",
 		"WRITE_APPROVAL_DEFAULT",
 		"AUTH_PROVIDER",
 		"FUSIONAUTH_URL",
@@ -285,6 +286,15 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			},
 			wantErr: ErrInvalidBreakerSettings,
 		},
+		{
+			name: "negative readiness max block age",
+			setup: func(t *testing.T) {
+				t.Helper()
+				setMinimalEnv(t)
+				t.Setenv("NVNM_READINESS_MAX_BLOCK_AGE", "-5m")
+			},
+			wantErr: ErrInvalidReadinessMaxBlockAge,
+		},
 	}
 
 	for _, tc := range tests {
@@ -298,6 +308,50 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			}
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("error = %q, want %v", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestLoad_ReadinessMaxBlockAge covers the staleness-threshold knob: the
+// 5m default, an explicit override, the documented 0-disables value, and
+// an unparsable duration failing loud.
+func TestLoad_ReadinessMaxBlockAge(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string // "" = leave unset
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "default is 5m", value: "", want: 5 * time.Minute},
+		{name: "explicit override", value: "90s", want: 90 * time.Second},
+		{name: "zero disables", value: "0s", want: 0},
+		{name: "unparsable fails loud", value: "banana", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t)
+			setMinimalEnv(t)
+			if tc.value != "" {
+				t.Setenv("NVNM_READINESS_MAX_BLOCK_AGE", tc.value)
+			}
+
+			cfg, err := Load()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), "NVNM_READINESS_MAX_BLOCK_AGE") {
+					t.Errorf("error = %q, want mention of NVNM_READINESS_MAX_BLOCK_AGE", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.ReadinessMaxBlockAge != tc.want {
+				t.Errorf("ReadinessMaxBlockAge = %v, want %v", cfg.ReadinessMaxBlockAge, tc.want)
 			}
 		})
 	}

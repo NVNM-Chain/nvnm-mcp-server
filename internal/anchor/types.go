@@ -14,9 +14,16 @@ type Registry struct {
 	ID          uint64 `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Creator     string `json:"creator"`
-	CreatedAt   string `json:"created_at"`
-	Metadata    string `json:"metadata,omitempty"`
+	// Creator is the chain-native bech32 identity (nvnm1...) exactly as the
+	// precompile reports it. It is NOT an EVM address; use CreatorEVM with
+	// EVM tools (wallet_status, evm_get_balance, evm_get_code).
+	Creator string `json:"creator"`
+	// CreatorEVM is the 0x-hex EVM form of Creator, derived from the bech32
+	// payload (the same 20 bytes on this chain). Omitted when the chain
+	// value cannot be derived. See creatorEVM and ADR 0001.
+	CreatorEVM string `json:"creator_evm,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	Metadata   string `json:"metadata,omitempty"`
 }
 
 // abiPaginationInput matches the ABI pagination request tuple for Pack calls.

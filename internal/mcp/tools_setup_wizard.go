@@ -81,7 +81,9 @@ func registerSetupWizardTool(srv *mcp.Server, evmClient evm.Client, cfg *config.
 		Description: "Walks through the four onboarding states " +
 			"(`needs_wallet` / `unfunded` / `funded_unused` / " +
 			"`funded_active`) for the supplied (optional) address. " +
-			"Returns prose guidance + a wallet snapshot. Important: " +
+			"Returns prose guidance, plus a wallet snapshot when an address " +
+			"was provided (the needs_wallet state has no wallet to snapshot " +
+			"and returns wallet-generation guidance instead). Important: " +
 			"`funded_active` means \"has sent any transaction,\" not " +
 			"\"has anchored\" -- the wizard reads only balance and nonce, " +
 			"never transaction contents.",

@@ -210,15 +210,7 @@ func TestIntegration_GetRegistries(t *testing.T) {
 	if first.Name == "" {
 		t.Error("first registry name should not be empty")
 	}
-	if first.Creator == "" {
-		t.Error("first registry creator should not be empty")
-	} else {
-		hexish := strings.HasPrefix(first.Creator, "0x") && len(first.Creator) == 42
-		bech := strings.HasPrefix(first.Creator, "nvnm1")
-		if !hexish && !bech {
-			t.Errorf("creator = %q, want 0x-hex (documented) or nvnm1 bech32 (current chain)", first.Creator)
-		}
-	}
+	assertIntegrationCreatorFormat(t, first.Creator, first.CreatorEVM)
 	if first.CreatedAt == "" {
 		t.Error("first registry created_at should not be empty")
 	}
@@ -351,5 +343,22 @@ func TestIntegration_GetRecords_Pagination(t *testing.T) {
 	if resp2.Records[0].RecordID == resp.Records[0].RecordID &&
 		resp2.Records[0].Index == resp.Records[0].Index {
 		t.Error("page 2 returned the same record as page 1")
+	}
+}
+
+// assertIntegrationCreatorFormat pins the two-representation creator
+// contract (P1 / ADR 0001) against the live chain: `creator` is the
+// chain-native bech32 identity and `creator_evm` its derived 0x form.
+func assertIntegrationCreatorFormat(t *testing.T, creator, creatorEVM string) {
+	t.Helper()
+	if !strings.HasPrefix(creator, "nvnm1") {
+		t.Errorf("creator = %q, want chain-native nvnm1 bech32", creator)
+	}
+	if creatorEVM == "" {
+		t.Errorf("creator_evm missing for creator %q, want derived 0x address", creator)
+		return
+	}
+	if !strings.HasPrefix(creatorEVM, "0x") || len(creatorEVM) != 42 {
+		t.Errorf("creator_evm = %q, want 0x + 40 hex chars", creatorEVM)
 	}
 }

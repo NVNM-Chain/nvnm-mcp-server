@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"strings"
 
 	defitypes "github.com/defiweb/go-eth/types"
@@ -33,7 +32,9 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 		Name:  "evm_get_block",
 		Title: "Get Block",
 		Description: "Returns a block by number or hash. " +
-			"Use block_number for numeric lookup, block_hash for hash lookup. " +
+			"Use block_number (an integer or the tag \"latest\"/\"earliest\") for " +
+			"number lookup, block_hash for hash lookup. Provide one or the " +
+			"other -- supplying both is rejected. Omit both for the latest block. " +
 			"Set full_transactions to true to include transaction details.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBlockHandler(evmClient))
@@ -70,7 +71,8 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 			"amount in this chain's gas token (see token_wrapped); wei is the raw " +
 			"integer. The `ether` field is a legacy alias for the same decimal " +
 			"amount and is NOT denominated in ether -- prefer balance_human when " +
-			"reporting a balance. Optionally specify a block number.",
+			"reporting a balance. Optionally specify a block number or the tag " +
+			"\"latest\"/\"earliest\".",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBalanceHandler(evmClient, cfg))
 
@@ -89,7 +91,11 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 			"Specify address to filter by contract, from_block/to_block for a block range, " +
 			"and topics as keccak256 hashes of event signatures " +
 			"(e.g. keccak256('Transfer(address,address,uint256)') = 0xddf252...). " +
-			"All filters are optional -- omitting all returns all logs in the block range. " +
+			"All filters are optional. When from_block/to_block are omitted the " +
+			"node default applies (the latest block only) -- set an explicit " +
+			"range to search history. Ranges wider than the node's cap are " +
+			"rejected with a 'block range too wide' error; narrow the range " +
+			"and retry. " +
 			"Useful for watching for on-chain events or auditing contract activity.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetLogsHandler(evmClient))
@@ -112,9 +118,10 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 type chainIDInput struct{}
 
 type getBlockInput struct {
-	BlockNumber *int64  `json:"block_number,omitempty" jsonschema:"Block number (omit for latest)"`
-	BlockHash   *string `json:"block_hash,omitempty" jsonschema:"Block hash (0x-prefixed, 32 bytes)"`
-	FullTx      bool    `json:"full_transactions,omitempty" jsonschema:"Include full transaction details"`
+	//nolint:lll // schema docstring
+	BlockNumber blockNumberArg `json:"block_number,omitempty" jsonschema:"Block number (integer) or block tag \"latest\"/\"earliest\" (omit for latest)"`
+	BlockHash   *string        `json:"block_hash,omitempty" jsonschema:"Block hash (0x-prefixed, 32 bytes)"`
+	FullTx      bool           `json:"full_transactions,omitempty" jsonschema:"Include full transaction details"`
 }
 
 type txHashInput struct {
@@ -122,28 +129,33 @@ type txHashInput struct {
 }
 
 type getBalanceInput struct {
-	Address  string `json:"address" jsonschema:"Ethereum address (0x-prefixed, 20 bytes),required"`
-	BlockNum *int64 `json:"block_number,omitempty" jsonschema:"Block number (omit for latest)"`
+	Address string `json:"address" jsonschema:"Ethereum address (0x-prefixed, 20 bytes),required"`
+	//nolint:lll // schema docstring
+	BlockNum blockNumberArg `json:"block_number,omitempty" jsonschema:"Block number (integer) or block tag \"latest\"/\"earliest\" (omit for latest)"`
 }
 
 type getCodeInput struct {
-	Address  string `json:"address" jsonschema:"Ethereum address (0x-prefixed, 20 bytes),required"`
-	BlockNum *int64 `json:"block_number,omitempty" jsonschema:"Block number (omit for latest)"`
+	Address string `json:"address" jsonschema:"Ethereum address (0x-prefixed, 20 bytes),required"`
+	//nolint:lll // schema docstring
+	BlockNum blockNumberArg `json:"block_number,omitempty" jsonschema:"Block number (integer) or block tag \"latest\"/\"earliest\" (omit for latest)"`
 }
 
 type getLogsInput struct {
-	Address   *string  `json:"address,omitempty" jsonschema:"Contract address to filter"`
-	FromBlock *int64   `json:"from_block,omitempty" jsonschema:"Start block number"`
-	ToBlock   *int64   `json:"to_block,omitempty" jsonschema:"End block number"`
-	Topics    []string `json:"topics,omitempty" jsonschema:"Event topics (0x-prefixed hashes)"`
+	Address *string `json:"address,omitempty" jsonschema:"Contract address to filter"`
+	//nolint:lll // schema docstring
+	FromBlock blockNumberArg `json:"from_block,omitempty" jsonschema:"Start block number (integer) or block tag \"latest\"/\"earliest\""`
+	//nolint:lll // schema docstring
+	ToBlock blockNumberArg `json:"to_block,omitempty" jsonschema:"End block number (integer) or block tag \"latest\"/\"earliest\""`
+	Topics  []string       `json:"topics,omitempty" jsonschema:"Event topics (0x-prefixed hashes)"`
 }
 
 type callContractInput struct {
 	To   string `json:"to" jsonschema:"Contract address (0x-prefixed),required"`
 	Data string `json:"data" jsonschema:"Hex-encoded calldata (0x-prefixed),required"`
 	//nolint:lll // schema docstring
-	From     string `json:"from,omitempty" jsonschema:"Optional caller address (0x-prefixed) to run the call as. Omit to call as the zero address; supply it to simulate permissioned functions that check msg.sender."`
-	BlockNum *int64 `json:"block_number,omitempty" jsonschema:"Block number (omit for latest)"`
+	From string `json:"from,omitempty" jsonschema:"Optional caller address (0x-prefixed) to run the call as. Omit to call as the zero address; supply it to simulate permissioned functions that check msg.sender."`
+	//nolint:lll // schema docstring
+	BlockNum blockNumberArg `json:"block_number,omitempty" jsonschema:"Block number (integer) or block tag \"latest\"/\"earliest\" (omit for latest)"`
 }
 
 // --- Handlers ---
@@ -178,6 +190,15 @@ func makeGetBlockHandler(
 			return nil, blockOutput{}, err
 		}
 		if input.BlockHash != nil {
+			// The two lookups are different queries; accepting both and
+			// silently preferring the hash would discard the caller's
+			// number with no signal. Fail fast instead (finding D3 of the
+			// tool-description audit).
+			if input.BlockNumber.isSet() {
+				return nil, blockOutput{}, fmt.Errorf(
+					"provide block_number or block_hash, not both: %w",
+					apperrors.ErrInvalidBlockRef)
+			}
 			hash, err := parseHash(*input.BlockHash)
 			if err != nil {
 				return nil, blockOutput{},
@@ -191,11 +212,7 @@ func makeGetBlockHandler(
 			return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 		}
 
-		var num *big.Int
-		if input.BlockNumber != nil {
-			num = big.NewInt(*input.BlockNumber)
-		}
-		block, err := c.BlockByNumber(ctx, num, input.FullTx)
+		block, err := c.BlockByNumber(ctx, input.BlockNumber.bigInt(), input.FullTx)
 		if err != nil {
 			return nil, blockOutput{},
 				fmt.Errorf("block not found: %w", err)
@@ -273,11 +290,7 @@ func makeGetBalanceHandler(
 		if err != nil {
 			return nil, balanceOutput{}, err
 		}
-		var blockNum *big.Int
-		if input.BlockNum != nil {
-			blockNum = big.NewInt(*input.BlockNum)
-		}
-		balance, err := c.BalanceAt(ctx, addr, blockNum)
+		balance, err := c.BalanceAt(ctx, addr, input.BlockNum.bigInt())
 		if err != nil {
 			return nil, balanceOutput{},
 				fmt.Errorf("failed to get balance: %w", err)
@@ -305,11 +318,7 @@ func makeGetCodeHandler(
 		if err != nil {
 			return nil, codeOutput{}, err
 		}
-		var blockNum *big.Int
-		if input.BlockNum != nil {
-			blockNum = big.NewInt(*input.BlockNum)
-		}
-		code, err := c.CodeAt(ctx, addr, blockNum)
+		code, err := c.CodeAt(ctx, addr, input.BlockNum.bigInt())
 		if err != nil {
 			return nil, codeOutput{},
 				fmt.Errorf("failed to get code: %w", err)
@@ -339,12 +348,10 @@ func makeGetLogsHandler(
 			}
 			q.Address = []defitypes.Address{addr}
 		}
-		if input.FromBlock != nil {
-			fb := defitypes.BlockNumberFromBigInt(big.NewInt(*input.FromBlock))
+		if fb, ok := input.FromBlock.blockNumber(); ok {
 			q.FromBlock = &fb
 		}
-		if input.ToBlock != nil {
-			tb := defitypes.BlockNumberFromBigInt(big.NewInt(*input.ToBlock))
+		if tb, ok := input.ToBlock.blockNumber(); ok {
 			q.ToBlock = &tb
 		}
 		if len(input.Topics) > 0 {
@@ -416,11 +423,7 @@ func makeCallContractHandler(
 			}
 			msg.From = &fromAddr
 		}
-		var blockNum *big.Int
-		if input.BlockNum != nil {
-			blockNum = big.NewInt(*input.BlockNum)
-		}
-		result, err := c.CallContract(ctx, msg, blockNum)
+		result, err := c.CallContract(ctx, msg, input.BlockNum.bigInt())
 		if err != nil {
 			return nil, callContractOutput{},
 				fmt.Errorf("contract call failed: %w", err)

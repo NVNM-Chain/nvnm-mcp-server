@@ -162,8 +162,16 @@ func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, overviewOutput] {
 	naming := config.NamingFor(cfg.ChainEnvironment)
 	return func(
-		_ context.Context, _ *mcp.CallToolRequest, _ overviewInput,
+		ctx context.Context, _ *mcp.CallToolRequest, _ overviewInput,
 	) (*mcp.CallToolResult, overviewOutput, error) {
+		// Static text only, but the default-deny RBAC invariant (rbac.go: a
+		// roleless authenticated key authorizes nothing) applies to every
+		// tool uniformly -- this was the one handler missing the check
+		// (finding O1 of the tool-description audit). Anonymous callers on
+		// auth-exempt paths are unaffected (nil claims pass).
+		if err := requireRole(ctx, readRoleSet...); err != nil {
+			return nil, overviewOutput{}, err
+		}
 		out := overviewOutput{
 			ChainName:        "NVNM Chain",
 			ChainEnvironment: string(cfg.ChainEnvironment),

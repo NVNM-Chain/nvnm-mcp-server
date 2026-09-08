@@ -23,7 +23,11 @@ import (
 // Fixture values for mocked CallTool invocations. They exist so the MCP
 // layer can return a structured envelope; they are not chain facts.
 const (
-	callToolSender    = "0x1234567890abcdef1234567890abcdef12345678"
+	callToolSender = "0x1234567890abcdef1234567890abcdef12345678"
+	// callToolCreator is the chain-native bech32 form of callToolSender
+	// (same 20-byte payload). Registry mocks return it as `creator` with
+	// callToolSender as the derived `creator_evm` (P1 / ADR 0001).
+	callToolCreator   = "nvnm1zg69v7ys40x77y352eufp27daufrg4ncs5286h" // pragma: allowlist secret -- public on-chain address, test fixture
 	callToolAccount   = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
 	callToolChecksum  = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	callToolSendHash  = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -324,7 +328,8 @@ func TestMCP_Tools(t *testing.T) {
 				if out.ContentTrust == "" {
 					t.Fatal("content_trust empty")
 				}
-				assert0xAddress(t, "creator", out.Creator)
+				assertBech32Creator(t, "creator", out.Creator)
+				assert0xAddress(t, "creator_evm", out.CreatorEVM)
 			},
 		},
 		{
@@ -338,7 +343,8 @@ func TestMCP_Tools(t *testing.T) {
 				if out.ContentTrust == "" {
 					t.Fatal("content_trust empty")
 				}
-				assert0xAddress(t, "registries[0].creator", out.Registries[0].Creator)
+				assertBech32Creator(t, "registries[0].creator", out.Registries[0].Creator)
+				assert0xAddress(t, "registries[0].creator_evm", out.Registries[0].CreatorEVM)
 				if out.Pagination == nil || out.Pagination.NextKey == "" {
 					t.Fatal("pagination.next_key empty; cursor must be on the wire so schema " +
 						"validation actually runs (a missing cursor hid the []byte/string bug)")
@@ -431,7 +437,8 @@ func TestMCP_Tools(t *testing.T) {
 			t.Errorf("registries[0] = id=%d name=%q, want id=1 name=docs",
 				out.Registries[0].ID, out.Registries[0].Name)
 		}
-		assert0xAddress(t, "registries[0].creator", out.Registries[0].Creator)
+		assertBech32Creator(t, "registries[0].creator", out.Registries[0].Creator)
+		assert0xAddress(t, "registries[0].creator_evm", out.Registries[0].CreatorEVM)
 		if out.ContentTrust == "" {
 			t.Fatal("content_trust empty")
 		}
@@ -451,6 +458,55 @@ func TestMCP_Tools(t *testing.T) {
 			t.Errorf("advertised tools with no mocked CallTool invocation: %v", missed)
 		}
 		t.Logf("covered %d/%d advertised tools", len(called), len(advertised))
+	})
+}
+
+// TestMCP_BlockTagInputs proves the published block-number contract through
+// the real SDK schema validation (finding 19): integers and the standard
+// tags "latest"/"earliest" are accepted on every block-number field, while
+// other strings are rejected before a handler runs.
+func TestMCP_BlockTagInputs(t *testing.T) {
+	session := startCallToolServer(t)
+
+	t.Run("accepted forms", func(t *testing.T) {
+		for _, args := range []map[string]any{
+			{"block_number": float64(42)},
+			{"block_number": "latest"},
+			{"block_number": "earliest"},
+			{"block_number": nil},
+		} {
+			raw := callToolOK(t, session, "evm_get_block", args)
+			out := decodeWire[wireBlock](t, raw)
+			if out.Number != 42 {
+				t.Errorf("args %v: number = %d, want 42", args, out.Number)
+			}
+		}
+	})
+
+	t.Run("accepted on log ranges", func(t *testing.T) {
+		raw := callToolOK(t, session, "evm_get_logs", map[string]any{
+			"from_block": "earliest",
+			"to_block":   "latest",
+		})
+		var out struct {
+			Count int `json:"count"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("decode logs: %v", err)
+		}
+		if out.Count != 1 {
+			t.Errorf("count = %d, want 1", out.Count)
+		}
+	})
+
+	t.Run("unknown tag rejected by schema", func(t *testing.T) {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "evm_get_block",
+			Arguments: map[string]any{"block_number": "pending"},
+		})
+		if err == nil && (result == nil || !result.IsError) {
+			t.Fatal("block_number=\"pending\" was accepted, want schema rejection")
+		}
 	})
 }
 
@@ -487,14 +543,20 @@ func startCallToolServer(t *testing.T) *mcp.ClientSession {
 			info: anchor.PrecompileInfo{
 				Address: testAddr, ChainID: callToolChainID, ABILoaded: true, MethodCount: 5,
 			},
-			registry: &anchor.Registry{ID: 1, Name: "docs", Creator: callToolSender},
+			registry: &anchor.Registry{
+				ID: 1, Name: "docs", Creator: callToolCreator, CreatorEVM: callToolSender,
+			},
 			registries: &anchor.GetRegistriesResponse{
-				Registries: []anchor.Registry{{ID: 1, Name: "docs", Creator: callToolSender}},
+				Registries: []anchor.Registry{
+					{ID: 1, Name: "docs", Creator: callToolCreator, CreatorEVM: callToolSender},
+				},
 				Pagination: &anchor.PageResponse{Total: 1, NextKey: cursor},
 			},
 			registriesFn: func(int) (*anchor.GetRegistriesResponse, error) {
 				return &anchor.GetRegistriesResponse{
-					Registries: []anchor.Registry{{ID: 1, Name: "docs", Creator: callToolSender}},
+					Registries: []anchor.Registry{
+						{ID: 1, Name: "docs", Creator: callToolCreator, CreatorEVM: callToolSender},
+					},
 					Pagination: &anchor.PageResponse{Total: 1},
 				}, nil
 			},

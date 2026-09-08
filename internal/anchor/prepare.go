@@ -72,9 +72,10 @@ func (c *client) PrepareAddRecord(
 	if checksum == "" {
 		return nil, fmt.Errorf("checksum is required: %w", apperrors.ErrMissingRequired)
 	}
-	// checksum_algo and metadata are marked optional in the tool schema but
-	// the precompile rejects them empty during gas estimation; fail loud
-	// here with a precise message instead of surfacing the opaque on-chain
+	// checksum_algo and metadata are schema-required at the MCP layer, but
+	// this client is also called directly (tests, future callers), and the
+	// precompile rejects them empty during gas estimation; fail loud here
+	// with a precise message instead of surfacing the opaque on-chain
 	// error (E2E rc8 findings #3 and the checksum_algo follow-on).
 	if req.ChecksumAlgo == "" {
 		return nil, fmt.Errorf("checksum_algo is required: %w", apperrors.ErrMissingRequired)
