@@ -60,6 +60,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that tells the caller to use `to_block="latest"` or a block at or below
   the head, since narrowing alone would not fix it. (Ticket 20)
 
+### Security
+
+- **F1–F5 posture recorded, item by item.** `docs/SECURITY_AUDIT.md` gains a
+  dated entry replacing the stale "F1–F5 are all open" claim: F1, F4, F5
+  closed with code and test evidence; F2 closed in code with the hosted
+  deployment's `MCP_KEYLESS_PG_DSN` wiring still to be confirmed (the exact
+  operator questions are written down); F3 (public key-request endpoint
+  checks email syntax only) **accepted** -- the endpoint is off by default,
+  rate limited, only creates a pending request, and the key is emailed to
+  the requested address on approval, so a forged request yields queue spam,
+  not a credential. The F1 residual under `MCP_RELAY_ALLOW_ANY=true` is
+  likewise accepted. No code change. (P5)
+
 ## [1.0.0-rc20] - 2026-09-08
 
 ### Added

@@ -62,6 +62,7 @@ This README is the technical entry point. For deeper context, follow the links b
 | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) | Per-alert investigation playbook; what to do when each Prometheus rule fires |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
 | [`docs/OWASP_AUDIT.md`](docs/OWASP_AUDIT.md) | OWASP Top 10:2021 audit — per-category findings and remediation status |
+| [`docs/OPEN_QUESTIONS_OPERATOR.md`](docs/OPEN_QUESTIONS_OPERATOR.md) | Questions only the hosted operator / listing owner can answer (F2 deployment wiring, Anthropic directory submission) |
 | [`docs/SECURITY_CONSUMER_GUIDANCE.md`](docs/SECURITY_CONSUMER_GUIDANCE.md) | Threats that fall on the consuming LLM agent / application, not the server |
 | [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
 | [`docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf`](docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf) | Counsel-finalized Privacy Policy for the hosted Service (published legal artifact) |
