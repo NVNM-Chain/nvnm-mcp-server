@@ -28,16 +28,22 @@ const (
 	defaultCredentialsPath = "../../.chain_credentials.txt" //nolint:gosec
 
 	HTTPTimeout = 30 * time.Second
-	// RegistriesTimeout covers anchor_get_registries listing: the server
+	// RegistriesTimeout covers anchor_get_registries by name: the server
 	// pages the full registry table over RPC and paginates in memory, which
-	// commonly takes 20-30s on a populated chain.
+	// commonly takes 20-30s on a populated chain. (The unfiltered listing
+	// is a direct chain page fetch and does not need this budget.)
 	RegistriesTimeout = 90 * time.Second
 	// RegistriesLatencyBudget is how long a successful by-name listing may
 	// take before the hot path treats the scan as degraded. The HTTP wait
 	// stays RegistriesTimeout so a slow-but-healthy scan still completes.
 	RegistriesLatencyBudget = 60 * time.Second
-	receiptTimeout          = 90 * time.Second
-	receiptPollInterval     = 2 * time.Second
+	// ListingLatencyBudget bounds the unfiltered anchor_get_registries page
+	// (rc21 P2): one or two chain round-trips, no table walk. Live it is
+	// ~0.5s; 10s leaves room for a slow RPC while still failing loudly if
+	// the listing ever regresses to a full scan (20-30s).
+	ListingLatencyBudget = 10 * time.Second
+	receiptTimeout       = 90 * time.Second
+	receiptPollInterval  = 2 * time.Second
 )
 
 // Flow is the shared state for TestE2E_HotPath_AnchorDocument.

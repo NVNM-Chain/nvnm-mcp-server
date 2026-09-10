@@ -211,7 +211,7 @@ three packages.
 | `internal/evm` | `client_integration_test.go` | 12 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt`, `TransactionByHash` (placement fields + not-found), `TransactionReceipt` (mined + not-found abort) |
 | `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
 | `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
-| `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID), `GetRecords` |
+| `internal/anchor` | `client_integration_test.go` | 7 | `Info`, `GetRegistries`, `GetRegistries` offset/limit window (the precompile contract the unfiltered MCP listing relies on: Offset honored, small Limit served exactly, no cursor past the end), `GetRegistry` (by ID), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
 | `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
 | `internal/anchor` | `prepare_rolestatus_integration_test.go` | 3 | Prepare-sign-submit for the methods: `UpdateRecordStatus` (record read back to confirm the status change landed) and `RevokeRole` (grant-then-revoke, plus the checksum-scoped pair) |
@@ -236,9 +236,10 @@ Hot-path check against a **running MCP server** — typically a deployment.
 Set `NVNM_MCP_TEST_SERVER_URL`. `make test-e2e` runs
 `TestE2E_HotPath_AnchorDocument` only: onboard → create registry →
 anchor a record → supersede it → observe the write through EVM tools.
-Registry read-back uses `anchor_get_registries` by name (full-table
-scan; HTTP wait 90s, fail if slower than 60s) then
-`anchor_get_registry` by id. Record read-back asserts `uri`,
+Registry read-back first lists unfiltered (`limit=2`; must answer
+within `ListingLatencyBudget`, 10s, and flag `total_is_lower_bound`),
+then uses `anchor_get_registries` by name (full-table scan; HTTP wait
+90s, fail if slower than 60s) then `anchor_get_registry` by id. Record read-back asserts `uri`,
 `is_latest`, and `registry_id`. Grant/revoke are not in this journey
 (admin-only MCP role, no role-read tool). Decode uses published JSON
 field names so a read/prepare contract change fails. It is not the

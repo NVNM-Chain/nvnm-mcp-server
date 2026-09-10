@@ -12,9 +12,10 @@ what each can catch, and the 23-tool coverage matrix are in
 `make test-e2e` runs only
 `TestE2E_HotPath_AnchorDocument`: onboard → create a registry →
 anchor a document → supersede it → observe that write through EVM
-tools. After confirm the new registry is listed with
-`anchor_get_registries` by name (full-table scan; HTTP wait 90s,
-latency budget 60s) then confirmed with `anchor_get_registry`.
+tools. After confirm, an unfiltered `anchor_get_registries` page
+(`limit=2`, budget 10s -- fails if the fast path regresses to a scan)
+then the new registry is listed by name (full-table scan; HTTP wait
+90s, latency budget 60s) then confirmed with `anchor_get_registry`.
 Record read-back asserts `uri`, `is_latest`, and `registry_id`.
 Grant/revoke stay out of this path. Decode uses published JSON field
 names. Set `NVNM_MCP_TEST_SERVER_URL` at the deployment. Without a URL

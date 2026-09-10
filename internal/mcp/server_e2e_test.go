@@ -168,28 +168,20 @@ func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
 }
 
 // TestE2E_CallTool_AnchorGetRegistries_Unfiltered covers the unfiltered
-// listing path (no name filter, no registry_id) end-to-end.  The handler
-// walks the registry table cursor-based (scanAllRegistries) and applies
-// offset/limit client-side; this path was previously broken because it
-// passed small limit values directly to a precompile that requires
-// Limit=nameScanPageSize for registryId=0 unfiltered queries.
+// listing path (no name filter, no registry_id) end-to-end. The handler
+// asks the chain for exactly the caller's offset/limit window -- no table
+// walk, no client-side trimming.
 func TestE2E_CallTool_AnchorGetRegistries_Unfiltered(t *testing.T) {
-	regs := []anchor.Registry{
+	m := newChainMock([]anchor.Registry{
 		{ID: 1, Name: "alpha"},
 		{ID: 2, Name: "beta"},
 		{ID: 3, Name: "gamma"},
 		{ID: 4, Name: "delta"},
 		{ID: 5, Name: "epsilon"},
-	}
-	session := startTestServerWithConfig(t, e2eServerConfig{
-		anchorClient: &mockAnchor{
-			registries: &anchor.GetRegistriesResponse{Registries: regs},
-		},
 	})
+	session := startTestServerWithConfig(t, e2eServerConfig{anchorClient: m})
 
-	// limit=3 is well below nameScanPageSize -- previously this was forwarded
-	// directly to the precompile and rejected.  After the fix it is applied
-	// client-side so the call must succeed.
+	// limit=3: forwarded to the chain as-is; the chain reports more rows.
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "anchor_get_registries",
 		Arguments: map[string]any{"limit": 3},
@@ -218,12 +210,17 @@ func TestE2E_CallTool_AnchorGetRegistries_Unfiltered(t *testing.T) {
 		t.Errorf("Registries IDs = [%d..%d], want [1..3]",
 			out.Registries[0].ID, out.Registries[2].ID)
 	}
-	// Total = full scan count (5), not the page size.
-	if out.Pagination == nil || out.Pagination.Total != 5 {
-		t.Errorf("Pagination = %+v, want Total = 5", out.Pagination)
+	// Total = offset + rows returned, flagged as a floor: the chain has rows
+	// past this page.
+	if out.Pagination == nil || out.Pagination.Total != 3 || !out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v, TotalIsLowerBound = %v; want Total = 3 as a lower bound",
+			out.Pagination, out.TotalIsLowerBound)
+	}
+	if p := m.lastRegistriesReq.Pagination; p.Offset != 0 || p.Limit != 3 {
+		t.Errorf("precompile page = %+v, want Offset=0 Limit=3 (caller's window, unmodified)", p)
 	}
 
-	// Also verify offset paging works end-to-end.
+	// Offset is forwarded to the chain; the last page yields an exact total.
 	result2, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "anchor_get_registries",
 		Arguments: map[string]any{"offset": 3, "limit": 2},
@@ -248,6 +245,10 @@ func TestE2E_CallTool_AnchorGetRegistries_Unfiltered(t *testing.T) {
 	if out2.Registries[0].ID != 4 || out2.Registries[1].ID != 5 {
 		t.Errorf("Registries IDs (offset=3) = [%d %d], want [4 5]",
 			out2.Registries[0].ID, out2.Registries[1].ID)
+	}
+	if out2.Pagination == nil || out2.Pagination.Total != 5 || out2.TotalIsLowerBound {
+		t.Errorf("Pagination (offset=3) = %+v, TotalIsLowerBound = %v; want exact Total = 5",
+			out2.Pagination, out2.TotalIsLowerBound)
 	}
 }
 

@@ -47,27 +47,26 @@ func registerAnchorTools(
 		Description: "Fetch a page of anchoring registries, optionally filtered by name. " +
 			"Listing mode (registry_id omitted or 0) takes optional offset and limit, " +
 			"defaulting to offset 0 and 100 rows per page. " +
-			"The precompile requires internal cursor pages of up to 200 rows, so every " +
-			"listing path -- filtered and unfiltered alike -- performs a full client-side " +
-			"scan of the registry table; the caller's offset/limit window is then applied " +
-			"to the complete result client-side. " +
-			"pagination.total is the number of rows (or name-filtered matches) found " +
-			"during the scan. When total_is_lower_bound is absent or false the scan " +
-			"completed normally and total is exact; when total_is_lower_bound=true the " +
-			"scan hit its internal page cap before reaching the end of the table, so " +
-			"total is a lower bound -- the true count may be higher and registries " +
-			"beyond the scanned range are unreachable through this listing. " +
-			"Add name (+ optional match) to filter: the scan collects every match before " +
-			"applying the offset/limit window. On a name filter, name_match_truncated " +
-			"is returned alongside and mirrors total_is_lower_bound. " +
+			"Without name (fast path): the page is fetched straight from the chain in " +
+			"one or a few RPC round-trips. The chain does not report a row count, so " +
+			"pagination.total is offset + rows returned; total_is_lower_bound=true means " +
+			"more registries exist past this page -- keep paging with a larger offset. " +
+			"When it is absent or false this page reached the end of the table and " +
+			"total is exact. " +
+			"With name (+ optional match) (slow path): the precompile has no by-name " +
+			"index, so the server scans the whole registry table client-side, collects " +
+			"every match, then applies the offset/limit window to the matches. " +
+			"pagination.total is the match count; name_match_truncated (mirroring " +
+			"total_is_lower_bound) is true if the scan hit its internal page cap before " +
+			"the end of the table, so total is then a lower bound. " +
 			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
 			"by name must consider all matches (check creator/created_at to " +
 			"disambiguate), not just take the first. " +
-			"A listing or name filter pages the whole table over RPC and paginates " +
-			"in memory, so the call commonly takes 20-30s on a populated chain; " +
-			"wait for it (HTTP client timeout of at least 90s) instead of retrying. " +
+			"A name filter pages the whole table over RPC, so it commonly takes 20-30s " +
+			"on a populated chain; wait for it (HTTP client timeout of at least 90s) " +
+			"instead of retrying. " +
 			"registry_id is DEPRECATED: it returns that one registry and cannot be " +
 			"combined with name, match, offset, or limit -- use anchor_get_registry " +
 			"instead. " +
@@ -113,7 +112,7 @@ type getRegistriesInput struct {
 	//nolint:lll // descriptive prose for agents
 	Offset *uint64 `json:"offset,omitempty" jsonschema:"Pagination offset for a listing, 0 or greater (default 0). Must be omitted or 0 alongside registry_id."`
 	//nolint:lll // descriptive prose for agents
-	Limit *uint64 `json:"limit,omitempty" jsonschema:"Page size for a listing (default 100; 0 also means the default). Must be omitted or 0 alongside registry_id. Pagination is applied client-side after a full scan; the caller's limit is never sent to the chain."`
+	Limit *uint64 `json:"limit,omitempty" jsonschema:"Page size for a listing (default 100; 0 also means the default). Must be omitted or 0 alongside registry_id. Any value works: the server asks the chain for exactly this many rows (in 200-row fetches when larger)."`
 }
 
 type getRecordsInput struct {
@@ -192,6 +191,11 @@ func makeGetRegistriesHandler(
 
 		offset, limit := resolveRegistriesPage(input.Offset, input.Limit)
 
+		// Two listing paths behind one tool surface. A name filter has no
+		// chain-side index yet, so it must walk the whole table client-side
+		// (handleRegistriesNameLookup); when the chain ships a by-name query
+		// only that branch changes. An unfiltered listing needs no walk: the
+		// precompile pages the table itself (handleRegistriesListing).
 		if input.Name != nil && *input.Name != "" {
 			out, err := handleRegistriesNameLookup(
 				ctx, c, logger, *input.Name, input.Match, offset, limit,
@@ -206,28 +210,65 @@ func makeGetRegistriesHandler(
 			return nil, registriesOutput{}, apperrors.ErrMatchWithoutName
 		}
 
-		// The precompile requires Limit=nameScanPageSize (200) for registryId=0
-		// unfiltered queries; smaller limits return an opaque upstream error.
-		// Walk the table cursor-based (same approach as the by-name scan) and
-		// apply offset/limit client-side.
-		all, truncated, err := scanAllRegistries(ctx, c, logger)
-		if err != nil {
-			return nil, registriesOutput{}, err
-		}
-		page := pageRegistries(all, offset, limit)
-		for i := range page {
-			capRegistryFields(&page[i])
-		}
-		return nil, registriesOutput{
-			GetRegistriesResponse: anchor.GetRegistriesResponse{
-				Registries: page,
-				Pagination: &anchor.PageResponse{Total: uint64(len(all))},
-			},
-			ContentTrust:      contentTrustNotice,
-			TotalIsLowerBound: truncated,
-			NextActions:       anchorGetRegistriesNext(len(all) == 0),
-		}, nil
+		out, err := handleRegistriesListing(ctx, c, offset, limit)
+		return nil, out, err
 	}
+}
+
+// handleRegistriesListing services the unfiltered branch of
+// anchor_get_registries: it asks the precompile for the caller's window
+// directly -- Offset from the caller, Limit = whatever is still missing,
+// capped at nameScanPageSize (the most rows the precompile returns per
+// call). One round-trip for any limit up to that cap; a larger limit
+// chains pages until it is filled or the table ends. Verified live
+// (2026-09-10, testnet, 4400 registries): Offset is honored, Limit below
+// the cap is served exactly, each call is ~0.5s, an offset past the end
+// yields zero rows and no cursor. No full-table walk, so the chain's true
+// row count is not known here (its countTotal is always 0):
+// pagination.total is offset + rows returned, and TotalIsLowerBound flags
+// when the chain reported more rows past this page.
+func handleRegistriesListing(
+	ctx context.Context, c anchor.Client, offset, limit uint64,
+) (registriesOutput, error) {
+	noIDFilter := uint64(0)
+	var rows []anchor.Registry
+	hasMore := true
+	for page := 0; page < maxNameScanPages && hasMore && uint64(len(rows)) < limit; page++ {
+		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+			RegistryID: &noIDFilter,
+			Pagination: &anchor.PageRequest{
+				Offset: offset + uint64(len(rows)),
+				Limit:  min(limit-uint64(len(rows)), nameScanPageSize),
+			},
+		})
+		if err != nil {
+			return registriesOutput{}, err
+		}
+		rows = append(rows, resp.Registries...)
+		nextKey, err := resp.Pagination.CursorBytes()
+		if err != nil {
+			return registriesOutput{}, err
+		}
+		hasMore = len(nextKey) > 0
+	}
+	for i := range rows {
+		capRegistryFields(&rows[i])
+	}
+	total := offset + uint64(len(rows))
+	if len(rows) == 0 && offset > 0 {
+		// An offset past the end says nothing about the table's size beyond
+		// "fewer than offset rows": report the only bound actually known.
+		total, hasMore = 0, true
+	}
+	return registriesOutput{
+		GetRegistriesResponse: anchor.GetRegistriesResponse{
+			Registries: rows,
+			Pagination: &anchor.PageResponse{Total: total},
+		},
+		ContentTrust:      contentTrustNotice,
+		TotalIsLowerBound: hasMore,
+		NextActions:       anchorGetRegistriesNext(len(rows) == 0),
+	}, nil
 }
 
 // handleRegistriesByID services the deprecated registry_id branch of
@@ -368,7 +409,8 @@ func pageRegistries(matches []anchor.Registry, offset, limit uint64) []anchor.Re
 // against evm.testnet.nvnmchain.io, the precompile itself hard-caps the
 // actual page size at 200 regardless of the limit requested (limit=500
 // returned exactly 200 rows, silently, no error). Requesting more than 200
-// buys nothing; 200 is the real ceiling.
+// buys nothing; 200 is the real ceiling. handleRegistriesListing requests
+// the same size for its direct page fetch.
 //
 // maxNameScanPages is a safety backstop against an unbounded or misbehaving
 // chain, not an expected limit: at nameScanPageSize per page that is up to
@@ -505,64 +547,6 @@ func scanRegistriesByName(
 		cursorKey = nextKey
 	}
 	return matches, true, nil
-}
-
-// scanAllRegistries pages through the entire registry table via cursor-based
-// pagination (Key, Limit=nameScanPageSize) and returns every registry in
-// insertion order. It is the unfiltered counterpart of scanRegistriesByName:
-// same walk, no client-side name match.
-//
-// The precompile requires Limit=nameScanPageSize (200) for registryId=0
-// unfiltered queries; smaller limits are rejected with an opaque upstream
-// error. Cursor-based iteration (Key) is used instead of Offset for the same
-// reason as scanRegistriesByName -- see its doc comment.
-//
-// truncated is true if maxNameScanPages was hit before the walk terminated
-// naturally (empty NextKey). Callers should propagate this to the API
-// response rather than silently returning a partial result.
-func scanAllRegistries(
-	ctx context.Context, c anchor.Client, logger *slog.Logger,
-) (all []anchor.Registry, truncated bool, err error) {
-	highestID, haveHighestID, peekErr := latestRegistryID(ctx, c)
-	if peekErr == nil && !haveHighestID {
-		// Definitive empty table -- skip the walk.
-		return nil, false, nil
-	}
-
-	noIDFilter := uint64(0)
-	var cursorKey []byte
-	var totalScanned uint64
-	for page := 0; page < maxNameScanPages; page++ {
-		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
-			RegistryID: &noIDFilter,
-			Pagination: &anchor.PageRequest{Key: cursorKey, Limit: nameScanPageSize},
-		})
-		if err != nil {
-			return nil, false, err
-		}
-		totalScanned += uint64(len(resp.Registries))
-		all = append(all, resp.Registries...)
-		nextKey, err := resp.Pagination.CursorBytes()
-		if err != nil {
-			return nil, false, err
-		}
-		if len(nextKey) == 0 {
-			if peekErr == nil && haveHighestID && totalScanned < highestID {
-				logger.InfoContext(ctx, "anchor_get_registries full-table scan truncated by ID gap",
-					slog.Uint64("scanned", totalScanned),
-					slog.Uint64("highest_known_id", highestID),
-				)
-				return all, true, nil
-			}
-			return all, false, nil
-		}
-		cursorKey = nextKey
-	}
-	logger.InfoContext(ctx, "anchor_get_registries full-table scan hit page cap",
-		slog.Uint64("scanned", totalScanned),
-		slog.Int("max_pages", maxNameScanPages),
-	)
-	return all, true, nil
 }
 
 func makeGetRecordsHandler(

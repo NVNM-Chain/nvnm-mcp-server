@@ -182,6 +182,55 @@ func TestIntegration_Info(t *testing.T) {
 	}
 }
 
+// TestIntegration_GetRegistries_OffsetWindow pins the live precompile
+// behavior the unfiltered anchor_get_registries fast path depends on
+// (internal/mcp handleRegistriesListing): for registryId=0 the node honors
+// Offset, serves a Limit below its 200-row cap exactly, and reports a cursor
+// only while rows remain. If any of these regress on the chain, the MCP
+// listing silently returns wrong pages, so fail here first.
+func TestIntegration_GetRegistries_OffsetWindow(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), findRegistryPageTimeout)
+	defer cancel()
+	noID := uint64(0)
+
+	first, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		RegistryID: &noID, Pagination: &anchor.PageRequest{Offset: 0, Limit: 3},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistries(offset=0, limit=3): %v", err)
+	}
+	if len(first.Registries) != 3 {
+		t.Fatalf("limit=3 returned %d rows; the fast path assumes Limit below the cap is served exactly",
+			len(first.Registries))
+	}
+	if first.Pagination == nil || first.Pagination.NextKey == "" {
+		t.Fatal("expected a cursor after 3 of a populated table; NextKey is the fast path's has-more signal")
+	}
+
+	second, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		RegistryID: &noID, Pagination: &anchor.PageRequest{Offset: 2, Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistries(offset=2, limit=2): %v", err)
+	}
+	if len(second.Registries) != 2 || second.Registries[0].ID != first.Registries[2].ID {
+		t.Fatalf("offset=2 must start at the third row (id %d); got %+v",
+			first.Registries[2].ID, second.Registries)
+	}
+
+	past, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		RegistryID: &noID, Pagination: &anchor.PageRequest{Offset: 1 << 40, Limit: 3},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistries(offset past end): %v", err)
+	}
+	if len(past.Registries) != 0 || (past.Pagination != nil && past.Pagination.NextKey != "") {
+		t.Fatalf("offset past the end must yield no rows and no cursor; got %d rows, cursor %q",
+			len(past.Registries), past.Pagination.NextKey)
+	}
+}
+
 func TestIntegration_GetRegistries(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()

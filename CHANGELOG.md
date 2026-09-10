@@ -9,6 +9,23 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Unfiltered `anchor_get_registries` no longer walks the whole table.**
+  "Show me the registries" used to page every registry over RPC so the
+  server could return an exact total -- commonly 20–30s on a populated
+  testnet, and again for every next page. The listing without `name` now
+  fetches the caller's page straight from the chain (offset and limit
+  forwarded as-is, in 200-row fetches when the limit exceeds the
+  precompile's page cap): one round-trip for a default page. Because the chain reports
+  no row count, `pagination.total` on this path is `offset` + rows
+  returned and `total_is_lower_bound: true` says more rows exist -- keep
+  paging. The client-side full scan is kept **only** for the `name`
+  filter (the precompile has no by-name index yet), isolated in its own
+  branch so a chain-side by-name query can replace it without touching
+  the listing. Tool description, `TOOL_REFERENCE.md` §11, and tests
+  updated; `scanAllRegistries` removed. (P2, #79)
+
 ## [1.0.0-rc20] - 2026-09-08
 
 ### Added
