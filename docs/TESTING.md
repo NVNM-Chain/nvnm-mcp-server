@@ -210,7 +210,7 @@ three packages.
 |---------|----------|-------|-----------------|
 | `internal/evm` | `client_integration_test.go` | 12 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt`, `TransactionByHash` (placement fields + not-found), `TransactionReceipt` (mined + not-found abort) |
 | `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
-| `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
+| `internal/evm` | `logs_integration_test.go` | 3 | `FilterLogs` on precompile address (finds real logs), empty-range query, and the two node range rejections mapped to `ErrLogRangeTooWide` (1..head) / `ErrLogRangeInvalid` (past head) |
 | `internal/anchor` | `client_integration_test.go` | 7 | `Info`, `GetRegistries`, `GetRegistries` offset/limit window (the precompile contract the unfiltered MCP listing relies on: Offset honored, small Limit served exactly, no cursor past the end), `GetRegistry` (by ID), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
 | `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |

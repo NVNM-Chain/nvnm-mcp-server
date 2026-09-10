@@ -26,6 +26,7 @@ func TestIsInputError(t *testing.T) {
 		{"ErrInvalidChecksum", ErrInvalidChecksum, true},
 		{"ErrPrecompileValidation", ErrPrecompileValidation, true},
 		{"ErrLogRangeTooWide", ErrLogRangeTooWide, true},
+		{"ErrLogRangeInvalid", ErrLogRangeInvalid, true},
 		{"ErrEmptyMetadataObject", ErrEmptyMetadataObject, true},
 		{"ErrInvalidMatchMode", ErrInvalidMatchMode, true},
 		{"ErrInvalidFilterCombination", ErrInvalidFilterCombination, true},
@@ -109,7 +110,7 @@ func TestSentinelErrors_AreDistinct(t *testing.T) {
 		ErrRecordNotFound, ErrAnchorABIMissing, ErrWriteDisabled,
 		ErrUpstreamRPC, ErrContractCallFailed, ErrPrecompileCall,
 		ErrCircuitOpen, ErrRateLimited,
-		ErrLogRangeTooWide, ErrEmptyMetadataObject,
+		ErrLogRangeTooWide, ErrLogRangeInvalid, ErrEmptyMetadataObject,
 	}
 
 	for i, a := range allErrors {
@@ -129,7 +130,7 @@ func TestSentinelErrors_HaveMessages(t *testing.T) {
 		ErrRecordNotFound, ErrAnchorABIMissing, ErrWriteDisabled,
 		ErrUpstreamRPC, ErrContractCallFailed, ErrPrecompileCall,
 		ErrCircuitOpen, ErrRateLimited,
-		ErrLogRangeTooWide, ErrEmptyMetadataObject,
+		ErrLogRangeTooWide, ErrLogRangeInvalid, ErrEmptyMetadataObject,
 	}
 
 	for _, err := range allErrors {

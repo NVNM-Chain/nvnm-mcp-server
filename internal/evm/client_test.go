@@ -117,6 +117,32 @@ func TestClient_FilterLogs_RangeCapErrorCurated(t *testing.T) {
 	}
 }
 
+// TestClient_FilterLogs_InvalidRangeErrorCurated verifies that the node's
+// rejection of a block range past the chain head (observed live 2026-09-10
+// as "RPC error: -32000 invalid block range params" for to_block=9999999)
+// is converted to its own curated input-class sentinel -- previously it fell
+// through to "upstream operation failed" and read like a node outage.
+func TestClient_FilterLogs_InvalidRangeErrorCurated(t *testing.T) {
+	c := &client{
+		rpc: &stubRPCClient{
+			getLogsErr: errors.New("RPC error: -32000 invalid block range params"),
+		},
+		timeout: time.Second,
+	}
+
+	_, err := c.FilterLogs(context.Background(), defitypes.FilterLogsQuery{})
+
+	if !errors.Is(err, apperrors.ErrLogRangeInvalid) {
+		t.Fatalf("expected ErrLogRangeInvalid, got %v", err)
+	}
+	if errors.Is(err, apperrors.ErrLogRangeTooWide) {
+		t.Fatal("past-head rejection must not be reported as a width problem")
+	}
+	if !apperrors.IsInputError(err) {
+		t.Fatalf("invalid-range error must classify as input error, got %v", err)
+	}
+}
+
 // TestClient_FilterLogs_UnrecognizedErrorNotCurated verifies that an upstream
 // GetLogs failure that matches no curated pattern keeps its generic wrap (and
 // so still collapses at SafeForClient) rather than being surfaced.

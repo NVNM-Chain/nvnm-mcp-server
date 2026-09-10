@@ -32,6 +32,11 @@ var safeNodeRPCErrors = []struct {
 	// Observed from the testnet node for an over-wide eth_getLogs query:
 	// "maximum [from, to] blocks distance: 10000".
 	{"maximum [from, to] blocks distance", apperrors.ErrLogRangeTooWide},
+	// Observed from the testnet node (2026-09-10) for eth_getLogs with
+	// to_block beyond the chain head (from=1, to=9999999, head=3876423):
+	// "RPC error: -32000 invalid block range params". A different rejection
+	// from the width cap -- "narrow the range" would not fix it.
+	{"invalid block range params", apperrors.ErrLogRangeInvalid},
 }
 
 // classifyNodeRPCError returns the curated sentinel for a known, safe

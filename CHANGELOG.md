@@ -35,6 +35,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the listing. Tool description, `TOOL_REFERENCE.md` §11, and tests
   updated; `scanAllRegistries` removed. (P2, #79)
 
+### Fixed
+
+- **`evm_get_logs` past the chain head no longer looks like an outage.**
+  Live probe (2026-09-10, testnet head 3,876,423): `from_block=1,
+  to_block=9999999` is rejected by the node as `invalid block range
+  params` -- a different string from the width cap (`maximum [from, to]
+  blocks distance`, which was and still is curated as "block range too
+  wide"). The new string fell through to the generic "upstream operation
+  failed". It is now mapped to a curated "invalid block range" input error
+  that tells the caller to use `to_block="latest"` or a block at or below
+  the head, since narrowing alone would not fix it. (Ticket 20)
+
 ## [1.0.0-rc20] - 2026-09-08
 
 ### Added

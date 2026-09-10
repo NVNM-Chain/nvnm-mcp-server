@@ -691,6 +691,11 @@ Each entry in `logs` contains:
 - Block range wider than the node's configured from/to distance cap — surfaced
   as an actionable "block range too wide" message telling the caller to narrow
   `from_block`/`to_block` and retry (the node's raw error is never echoed).
+  The testnet cap is 10,000 blocks.
+- `to_block` beyond the current chain head (or `from_block` > `to_block`) —
+  surfaced as an "invalid block range" message telling the caller to use
+  `to_block="latest"` or a block at or below the head. This is a different
+  rejection from the width cap; narrowing alone does not fix it.
 - Other RPC query failures (collapsed to the generic upstream-failure message).
 
 ### Example

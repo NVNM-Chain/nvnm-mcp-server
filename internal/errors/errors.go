@@ -44,6 +44,13 @@ var (
 	ErrLogRangeTooWide = errors.New(
 		"block range too wide: the upstream node caps the from_block-to_block " +
 			"distance for log queries; narrow the range and retry")
+	// ErrLogRangeInvalid marks an eth_getLogs query the node rejects outright
+	// (observed live for to_block beyond the chain head): not a width problem,
+	// so it gets its own instruction rather than "narrow the range".
+	ErrLogRangeInvalid = errors.New(
+		"invalid block range: to_block must not exceed the current chain head " +
+			"and from_block must not exceed to_block; use to_block=\"latest\" " +
+			"or a block number at or below the head")
 	// ErrEmptyMetadataObject marks the literal empty JSON object "{}" passed
 	// as record metadata, which the anchoring precompile rejects on-chain.
 	// The message is the client-facing text, surfaced verbatim (input class);
@@ -147,6 +154,7 @@ var inputErrors = []error{
 	ErrRelayScopeRejected,
 	ErrPrecompileValidation,
 	ErrLogRangeTooWide,
+	ErrLogRangeInvalid,
 	ErrEmptyMetadataObject,
 	ErrInvalidMatchMode,
 	ErrInvalidFilterCombination,
