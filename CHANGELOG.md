@@ -34,6 +34,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   branch so a chain-side by-name query can replace it without touching
   the listing. Tool description, `TOOL_REFERENCE.md` §11, and tests
   updated; `scanAllRegistries` removed. (P2, #79)
+- **README Quick Start HTTP path now boots from a fresh clone.** Walked
+  literally (empty tree, no `.env`, no key): `cp .env.example .env &&
+  make run-http` died with `file ".mcp-keys.json" has no enabled keys`,
+  because `.env.example` points at a keys file nothing told the reader to
+  create. Quick Start and `.env.example` now say to run `make key-create
+  NAME=… ROLES=…` first, with the four roles described; the README and
+  Makefile examples that showed `ROLES` as optional are corrected
+  (`key-mgmt` requires it). Re-walked: `initialize` and `tools/list`
+  answer with the minted key, keyless requests still get 401. The stdio
+  path needed no change. Separately, `make run-http` used to pin `:8080`
+  regardless of `MCP_HTTP_ADDR` in `.env`, while `.env.example`,
+  `mcp-probe`, and `healthz` all assume `:8180`; it now listens where
+  `.env` says (`RUN_HTTP_ADDR=…` still overrides for one run). (Ticket 23)
 
 ### Fixed
 

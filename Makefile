@@ -40,8 +40,9 @@ run: build
 # `.env` pointed at mainnet, put evm_send_raw_transaction one `make` away.
 #
 # Two process-only exceptions (`.env` is not rewritten):
-#   1. The listen address is pinned so this target keeps its conventional
-#      :8080 identity regardless of MCP_HTTP_ADDR in `.env`:
+#   1. The listen address can be overridden for one run; otherwise
+#      MCP_HTTP_ADDR from `.env` applies (`.env.example` sets :8180, which
+#      is also what mcp-probe / healthz below default to):
 #        make run-http RUN_HTTP_ADDR=:9999
 #   2. MCP_KEYLESS_WRITES without MCP_KEYLESS_PG_DSN is turned off so boot
 #      can succeed (see maybe_disable_keyless_writes_without_dsn).
@@ -69,7 +70,7 @@ define maybe_disable_keyless_writes_without_dsn
 	esac
 endef
 
-RUN_HTTP_ADDR ?= :8080
+RUN_HTTP_ADDR ?=
 
 run-http: build
 	@if [ ! -f .env ]; then \
@@ -78,7 +79,7 @@ run-http: build
 	fi
 	@set -a && . ./.env && set +a && \
 		$(maybe_disable_keyless_writes_without_dsn) && \
-		MCP_HTTP_ADDR="$(RUN_HTTP_ADDR)" \
+		MCP_HTTP_ADDR="$(or $(RUN_HTTP_ADDR),$${MCP_HTTP_ADDR})" \
 		"$(BUILD_DIR)/$(BINARY_NAME)" --transport http
 
 ## Local dev
@@ -381,7 +382,7 @@ export MCP_API_KEYS_FILE
 
 key-create:
 ifndef NAME
-	$(error NAME is required. Usage: make key-create NAME=my-client [ROLES=reader,writer])
+	$(error NAME is required. Usage: make key-create NAME=my-client ROLES=reader,writer)
 endif
 ifdef ROLES
 	$(GO) run ./cmd/key-mgmt create $(NAME) --roles $(ROLES)
@@ -427,11 +428,11 @@ help:
 	@echo "  all              check-all + test + build"
 	@echo "  build            Build the server binary"
 	@echo "  run              Run with stdio transport"
-	@echo "  run-http         Run with HTTP transport (sources .env; pins :8080)"
+	@echo "  run-http         Run with HTTP transport (sources .env; MCP_HTTP_ADDR from .env, or RUN_HTTP_ADDR=)"
 	@echo "  run-local        Source .env and run with HTTP transport (see Local Dev)"
 	@echo ""
 	@echo "API Key Management:"
-	@echo "  key-create NAME=x [ROLES=reader,writer]"
+	@echo "  key-create NAME=x ROLES=reader,writer   (roles: reader, writer, admin, automation)"
 	@echo "                     Generate a new API key for client x"
 	@echo "  key-disable NAME=x Disable the key for client x"
 	@echo "  key-enable NAME=x  Re-enable a disabled key for client x"
