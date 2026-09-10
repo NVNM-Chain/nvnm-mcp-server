@@ -180,6 +180,11 @@ type WalletTransactionRequest struct {
 	Value   string `json:"value"`   // Always "0x0" for precompile calls
 	ChainID string `json:"chainId"` // EIP-155 chain ID as 0x-prefixed hex
 	Gas     string `json:"gas"`     // Estimated gas limit as 0x-prefixed hex
+	// Nonce is the sender's pending nonce as a 0x-prefixed hex quantity --
+	// the same value as UnsignedTransaction.Nonce. MetaMask looks the nonce
+	// up itself and ignores it; a headless signer feeding this object to
+	// sign_transaction needs it present or the call fails.
+	Nonce string `json:"nonce"`
 	// Type-0 (legacy) gas pricing. Omitted when the prepared transaction
 	// is EIP-1559 (type 2). EIP-1193 wallets fall back to the
 	// maxFeePerGas / maxPriorityFeePerGas fields below.

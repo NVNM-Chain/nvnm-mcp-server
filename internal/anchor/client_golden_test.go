@@ -185,6 +185,7 @@ func TestGolden_UnsignedTransactionEIP1559(t *testing.T) {
 			Value:                "0x0",
 			ChainID:              "0xe607",
 			Gas:                  "0x1d4c0",
+			Nonce:                "0x64",
 			MaxFeePerGas:         "0xba43b7400",
 			MaxPriorityFeePerGas: "0x77359400",
 		},

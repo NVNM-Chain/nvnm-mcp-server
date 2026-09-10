@@ -414,6 +414,7 @@ func (c *client) buildLegacyUnsignedTx(
 			Value:    "0x0",
 			ChainID:  "0x" + big.NewInt(c.chainID).Text(16),
 			Gas:      "0x" + new(big.Int).SetUint64(gasLimit).Text(16),
+			Nonce:    "0x" + new(big.Int).SetUint64(nonce).Text(16),
 			GasPrice: "0x" + gasPrice.Text(16),
 		},
 	}, nil
@@ -486,6 +487,7 @@ func (c *client) buildDynamicFeeUnsignedTx(
 			Value:                "0x0",
 			ChainID:              "0x" + big.NewInt(c.chainID).Text(16),
 			Gas:                  "0x" + new(big.Int).SetUint64(gasLimit).Text(16),
+			Nonce:                "0x" + new(big.Int).SetUint64(nonce).Text(16),
 			MaxFeePerGas:         "0x" + maxFee.Text(16),
 			MaxPriorityFeePerGas: "0x" + tipCap.Text(16),
 		},

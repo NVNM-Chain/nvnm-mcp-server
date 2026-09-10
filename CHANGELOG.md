@@ -9,6 +9,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`nonce` inside `wallet_tx_request`** on every `anchor_prepare_*`
+  response (0x-hex quantity, same value as the parent `nonce`). MetaMask
+  looks the nonce up itself, so the browser path never noticed it was
+  missing; a headless signer passing `wallet_tx_request` straight into
+  `sign_transaction` failed until someone copied the nonce by hand.
+  Additive -- wallets ignore the field. (Ticket 15)
+
 ### Changed
 
 - **Unfiltered `anchor_get_registries` no longer walks the whole table.**

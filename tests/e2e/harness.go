@@ -230,6 +230,10 @@ func AssertUnsignedTxShape(t *testing.T, f *Flow, utx *UnsignedTx) {
 	if w.ChainID != hexQuantityInt64(utx.ChainID) {
 		t.Errorf("wallet_tx_request.chainId = %q, want hex of chain_id %d", w.ChainID, utx.ChainID)
 	}
+	if w.Nonce != hexQuantityUint(utx.Nonce) {
+		t.Errorf("wallet_tx_request.nonce = %q, want %s (hex of nonce %d); a headless signer "+
+			"passing this object to sign_transaction needs it", w.Nonce, hexQuantityUint(utx.Nonce), utx.Nonce)
+	}
 	if w.MaxFeePerGas != hexQuantityDecimal(t, utx.MaxFeePerGas) {
 		t.Errorf("wallet_tx_request.maxFeePerGas = %q, want hex of %s", w.MaxFeePerGas, utx.MaxFeePerGas)
 	}

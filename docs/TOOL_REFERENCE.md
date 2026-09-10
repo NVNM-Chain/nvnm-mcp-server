@@ -1215,6 +1215,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
     "value": "0x0",
     "chainId": "0xc02a7",
     "gas": "0x30d40",
+    "nonce": "0x5",
     "gasPrice": "0x3b9aca00"
   }
 }
@@ -1289,6 +1290,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
     "value": "0x0",
     "chainId": "0xc02a7",
     "gas": "0x3d090",
+    "nonce": "0x6",
     "gasPrice": "0x3b9aca00"
   }
 }
@@ -1359,6 +1361,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
     "value": "0x0",
     "chainId": "0xc02a7",
     "gas": "0xd5a6",
+    "nonce": "0x8",
     "maxFeePerGas": "0x14f46b0400",
     "maxPriorityFeePerGas": "0x12a05f200"
   }
@@ -1434,6 +1437,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
     "value": "0x0",
     "chainId": "0xc02a7",
     "gas": "0x249f0",
+    "nonce": "0x7",
     "gasPrice": "0x3b9aca00"
   }
 }
@@ -1504,6 +1508,7 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
     "value": "0x0",
     "chainId": "0xc02a7",
     "gas": "0xab9f",
+    "nonce": "0x9",
     "maxFeePerGas": "0x14f46b0400",
     "maxPriorityFeePerGas": "0x12a05f200"
   }
@@ -1600,7 +1605,8 @@ quantities suitable for EIP-1193 wallets):
 | `value`    | `string` | `"0x0"` for precompile calls.                |
 | `chainId`  | `string` | 0x-prefixed hex chain ID (e.g. `"0xc02a7"`).  |
 | `gas`      | `string` | 0x-prefixed hex gas limit.                   |
-| `gasPrice` | `string` | 0x-prefixed hex gas price (wei).             |
+| `nonce`    | `string` | 0x-prefixed hex sender nonce -- the same value as the parent `nonce`. MetaMask ignores it (it looks the nonce up itself); a headless signer passing this object to `sign_transaction` needs it. |
+| `gasPrice` | `string` | 0x-prefixed hex gas price (wei). Type-0 only; type-2 requests carry `maxFeePerGas` / `maxPriorityFeePerGas` instead. |
 
 Workflow for write operations -- choose one path:
 

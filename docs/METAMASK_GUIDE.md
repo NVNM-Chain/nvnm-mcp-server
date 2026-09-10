@@ -91,6 +91,7 @@ The response includes two signing paths. You want `wallet_tx_request`:
     "value": "0x0",
     "chainId": "0xc02a7",
     "gas": "0x1d4c0",
+    "nonce": "0x5",
     "gasPrice": "0x12a05f200"
   }
 }

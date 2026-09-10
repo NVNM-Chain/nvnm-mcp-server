@@ -545,6 +545,12 @@ func TestPrepareAddRegistry_WalletTxRequest(t *testing.T) {
 		t.Errorf("WalletTxRequest.GasPrice = %q, want 0x3b9aca00", w.GasPrice)
 	}
 
+	// nonce rides inside the wallet object too, so a headless signer can
+	// pass it to sign_transaction without copying from the parent.
+	if w.Nonce != "0x7" || tx.Nonce != 7 {
+		t.Errorf("WalletTxRequest.Nonce = %q (tx.Nonce = %d), want 0x7 / 7", w.Nonce, tx.Nonce)
+	}
+
 	// data must be 0x-prefixed non-empty calldata
 	if len(w.Data) < 3 || w.Data[:2] != "0x" {
 		t.Errorf("WalletTxRequest.Data must be 0x-prefixed hex, got %q", w.Data)
@@ -623,6 +629,9 @@ func TestPrepareAddRegistry_BuildsEIP1559Tx_ByDefault(t *testing.T) {
 	}
 	if w.GasPrice != "" {
 		t.Errorf("WalletTxRequest.GasPrice = %q, want empty (omitted for type-2)", w.GasPrice)
+	}
+	if w.Nonce != "0xd" {
+		t.Errorf("WalletTxRequest.Nonce = %q, want 0xd (pending nonce 13)", w.Nonce)
 	}
 }
 
