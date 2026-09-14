@@ -210,14 +210,44 @@ func TestE2E_CallTool_AnchorGetRegistries_Unfiltered(t *testing.T) {
 		t.Errorf("Registries IDs = [%d..%d], want [1..3]",
 			out.Registries[0].ID, out.Registries[2].ID)
 	}
-	// Total = offset + rows returned, flagged as a floor: the chain has rows
-	// past this page.
-	if out.Pagination == nil || out.Pagination.Total != 3 || !out.TotalIsLowerBound {
-		t.Errorf("Pagination = %+v, TotalIsLowerBound = %v; want Total = 3 as a lower bound",
+	// Total is the table size (5, via the reverse peek since this chain
+	// counts nothing), and the chain's cursor for row 4 rides along so a
+	// cursor client can continue without offset.
+	if out.Pagination == nil || out.Pagination.Total != 5 || out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v, TotalIsLowerBound = %v; want exact Total = 5",
 			out.Pagination, out.TotalIsLowerBound)
 	}
-	if p := m.lastRegistriesReq.Pagination; p.Offset != 0 || p.Limit != 3 {
+	if out.Pagination.NextKey != chainCursor(3) {
+		t.Errorf("next_key = %q, want %q (chain cursor passed through)", out.Pagination.NextKey, chainCursor(3))
+	}
+	if p := m.registriesReqs[0].Pagination; p.Offset != 0 || p.Limit != 3 {
 		t.Errorf("precompile page = %+v, want Offset=0 Limit=3 (caller's window, unmodified)", p)
+	}
+
+	// Cursor mode through the real schema: key alone continues the walk.
+	result3, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "anchor_get_registries",
+		Arguments: map[string]any{"key": out.Pagination.NextKey, "limit": 1},
+	})
+	if err != nil {
+		t.Fatalf("CallTool (key): %v", err)
+	}
+	if result3.IsError {
+		t.Fatalf("tool returned unexpected error (key): %v", result3.Content)
+	}
+	raw3, err := json.Marshal(result3.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content (key): %v", err)
+	}
+	var out3 registriesOutput
+	if unmarshalErr := json.Unmarshal(raw3, &out3); unmarshalErr != nil {
+		t.Fatalf("decode structured content (key): %v", unmarshalErr)
+	}
+	if len(out3.Registries) != 1 || out3.Registries[0].ID != 4 {
+		t.Errorf("Registries (key) = %+v, want [4]", out3.Registries)
+	}
+	if out3.Pagination == nil || out3.Pagination.Total != 5 || out3.Pagination.NextKey != chainCursor(4) {
+		t.Errorf("Pagination (key) = %+v, want Total=5 next_key=%q", out3.Pagination, chainCursor(4))
 	}
 
 	// Offset is forwarded to the chain; the last page yields an exact total.
@@ -246,8 +276,8 @@ func TestE2E_CallTool_AnchorGetRegistries_Unfiltered(t *testing.T) {
 		t.Errorf("Registries IDs (offset=3) = [%d %d], want [4 5]",
 			out2.Registries[0].ID, out2.Registries[1].ID)
 	}
-	if out2.Pagination == nil || out2.Pagination.Total != 5 || out2.TotalIsLowerBound {
-		t.Errorf("Pagination (offset=3) = %+v, TotalIsLowerBound = %v; want exact Total = 5",
+	if out2.Pagination == nil || out2.Pagination.Total != 5 || out2.TotalIsLowerBound || out2.Pagination.NextKey != "" {
+		t.Errorf("Pagination (offset=3) = %+v, TotalIsLowerBound = %v; want exact Total = 5, no next_key",
 			out2.Pagination, out2.TotalIsLowerBound)
 	}
 }
@@ -267,7 +297,11 @@ func TestE2E_CallTool_AnchorGetRegistries_ModeViolationsRejected(t *testing.T) {
 		{"registry_id with match", map[string]any{"registry_id": 1, "match": "prefix"}},
 		{"registry_id with offset", map[string]any{"registry_id": 1, "offset": 10}},
 		{"registry_id with limit", map[string]any{"registry_id": 1, "limit": 10}},
+		{"registry_id with key", map[string]any{"registry_id": 1, "key": chainCursor(2)}},
 		{"match without name", map[string]any{"match": "prefix"}},
+		{"key with non-zero offset", map[string]any{"key": chainCursor(2), "offset": 10}},
+		{"key with name", map[string]any{"key": chainCursor(2), "name": "anything"}},
+		{"key not base64", map[string]any{"key": "not!base64"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

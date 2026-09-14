@@ -71,7 +71,7 @@ var (
 	// shape that cannot be honored at the same time. The message is the
 	// client-facing text, surfaced verbatim (input class).
 	ErrInvalidFilterCombination = errors.New(
-		"registry_id cannot be combined with name, match, offset, or limit: " +
+		"registry_id cannot be combined with name, match, offset, limit, or key: " +
 			"registry_id fetches a single registry by ID, which is a " +
 			"different query shape from a registry listing; drop the other " +
 			"parameters, or omit registry_id to list registries")
@@ -83,6 +83,16 @@ var (
 	ErrMatchWithoutName = errors.New(
 		"match requires name: the match mode only applies to a name lookup; " +
 			"supply name, or omit match for a paged listing")
+	// ErrInvalidCursor marks an anchor_get_registries call whose key
+	// (pagination cursor) cannot be used: it is not valid base64, or it was
+	// combined with a non-zero offset, a name filter, or registry_id. The
+	// cursor names a position in the unfiltered registry table, so it
+	// cannot be mixed with the other ways of naming one. The message is the
+	// client-facing text, surfaced verbatim (input class).
+	ErrInvalidCursor = errors.New(
+		"key must be the next_key from a previous unfiltered listing and " +
+			"cannot be combined with a non-zero offset, name, match, or " +
+			"registry_id: page with either key or offset, not both")
 )
 
 // Not-found errors.
@@ -159,6 +169,7 @@ var inputErrors = []error{
 	ErrInvalidMatchMode,
 	ErrInvalidFilterCombination,
 	ErrMatchWithoutName,
+	ErrInvalidCursor,
 }
 
 // IsInputError returns true if the error is an input validation error.

@@ -31,6 +31,7 @@ func TestIsInputError(t *testing.T) {
 		{"ErrInvalidMatchMode", ErrInvalidMatchMode, true},
 		{"ErrInvalidFilterCombination", ErrInvalidFilterCombination, true},
 		{"ErrMatchWithoutName", ErrMatchWithoutName, true},
+		{"ErrInvalidCursor", ErrInvalidCursor, true},
 		{"wrapped input error", fmt.Errorf("context: %w", ErrInvalidAddress), true},
 		{"ErrBlockNotFound is not input error", ErrBlockNotFound, false},
 		{"ErrUpstreamRPC is not input error", ErrUpstreamRPC, false},

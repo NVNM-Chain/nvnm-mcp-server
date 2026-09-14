@@ -66,8 +66,9 @@ func TestE2E_HotPath_AnchorDocument(t *testing.T) {
 
 		t.Run("read_back", func(t *testing.T) {
 			// Unfiltered listing first: the fast path must answer in a couple
-			// of chain round-trips and flag that the table continues past the
-			// requested page (this registry alone proves the table is > 2 rows).
+			// of chain round-trips and report the table size, not the page
+			// size (this registry alone proves the table is > 2 rows), plus
+			// the chain cursor for the next page.
 			var page e2e.RegistriesResponse
 			pageStart := time.Now()
 			f.CallOK(t, "anchor_get_registries", map[string]any{"limit": 2}, &page)
@@ -80,9 +81,12 @@ func TestE2E_HotPath_AnchorDocument(t *testing.T) {
 			if len(page.Registries) != 2 {
 				t.Errorf("unfiltered limit=2 returned %d registries, want 2", len(page.Registries))
 			}
-			if page.Pagination == nil || page.Pagination.Total != 2 || !page.TotalIsLowerBound {
-				t.Errorf("unfiltered page pagination = %+v lower_bound=%v; want total=2 flagged as a lower bound",
+			if page.Pagination == nil || page.Pagination.Total <= 2 || page.TotalIsLowerBound {
+				t.Errorf("unfiltered page pagination = %+v lower_bound=%v; want total > 2 (table size) and exact",
 					page.Pagination, page.TotalIsLowerBound)
+			}
+			if page.Pagination != nil && page.Pagination.NextKey == "" {
+				t.Error("unfiltered page has no next_key; the chain cursor must be passed through")
 			}
 
 			var listing e2e.RegistriesResponse

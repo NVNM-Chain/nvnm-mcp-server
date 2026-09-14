@@ -18,7 +18,29 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `sign_transaction` failed until someone copied the nonce by hand.
   Additive -- wallets ignore the field. (Ticket 15)
 
+### Added
+
+- **Cursor paging on `anchor_get_registries`.** The unfiltered listing now
+  exposes both of the precompile's paging styles: `pagination.next_key`
+  (the chain's cursor for the row after this page, absent when the table
+  ended) is passed through, and a new optional `key` input accepts it back
+  to continue -- an O(1) seek on the chain instead of the O(offset) walk
+  an `offset` costs. `key` cannot be combined with a non-zero `offset`,
+  `name`, `match`, or `registry_id` (`ErrInvalidCursor`). Chained fetches
+  for a `limit` above the 200-row chain page also continue by cursor now.
+
 ### Changed
+
+- **Unfiltered `anchor_get_registries` `pagination.total` is the table
+  size again.** The rc21 fast path reported `offset` + rows on the page,
+  so a default call on a 4400-row table said `"total": 100`. The listing
+  now uses the chain's own count whenever it is non-zero; this precompile
+  returns `0` with `countTotal=true` (verified on the raw return words,
+  2026-09-14), so it falls back to one `reverse=true, limit=1` call for
+  the highest assigned registry ID -- the same peek the name scan already
+  used. A page that ends the table needs no peek. `total_is_lower_bound`
+  is now set only when that peek fails. No full-table walk. Clients page
+  with `offset + limit < total` or by `next_key`.
 
 - **Unfiltered `anchor_get_registries` no longer walks the whole table.**
   "Show me the registries" used to page every registry over RPC so the
@@ -26,10 +48,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   testnet, and again for every next page. The listing without `name` now
   fetches the caller's page straight from the chain (offset and limit
   forwarded as-is, in 200-row fetches when the limit exceeds the
-  precompile's page cap): one round-trip for a default page. Because the chain reports
-  no row count, `pagination.total` on this path is `offset` + rows
-  returned and `total_is_lower_bound: true` says more rows exist -- keep
-  paging. The client-side full scan is kept **only** for the `name`
+  precompile's page cap): one round-trip for a default page (plus the
+  table-size peek described above). The client-side full scan is kept
+  **only** for the `name`
   filter (the precompile has no by-name index yet), isolated in its own
   branch so a chain-side by-name query can replace it without touching
   the listing. Tool description, `TOOL_REFERENCE.md` §11, and tests

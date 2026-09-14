@@ -896,13 +896,13 @@ Fetch a single anchoring registry by its numeric ID. A registry is a logical con
 Fetch a page of anchoring registries, optionally filtered by name. The mode is selected by `registry_id`:
 
 1. **Listing (`registry_id` omitted or `0`)** -- `offset` and `limit` are optional, defaulting to offset `0` and 100 rows per page. The two listing paths differ in cost:
-   - Without `name` (**fast path**): the page is fetched straight from the chain -- one RPC round-trip for any `limit` up to the precompile's 200-row page (a larger `limit` chains pages). The chain does not report a row count, so `pagination.total` is `offset` + rows returned; `total_is_lower_bound: true` means more registries exist past this page.
+   - Without `name` (**fast path**): the page is fetched straight from the chain -- one RPC round-trip for any `limit` up to the precompile's 200-row page (a larger `limit` chains pages), plus one cheap reverse peek for the table size. Both of the chain's paging styles are exposed: position the page with `offset`, or with `key` (the previous page's `pagination.next_key`). `pagination.total` is the table size, so a next page exists while `offset + limit < total`, or equivalently while `next_key` is present.
    - With `name` (+ optional `match`) (**slow path**): the precompile has no by-name index, so the server scans the entire registry table client-side, collects **every** match, then applies the `offset`/`limit` window to the matches. `pagination.total` is the full match count, so no match is ever hidden and a caller can page through all of them.
 2. **`registry_id` > 0 -- DEPRECATED** -- returns that single registry. It cannot be combined with `name`, `match`, `offset`, or `limit`. Use [anchor\_get\_registry](#10-anchor_get_registry) instead.
 
 > Registry names are caller-supplied, unverified, and not unique -- anyone can create a registry with the same name as another. A caller resolving by name must consider all matches (check `creator` / `created_at` to disambiguate), not just take the first.
 
-> **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Keep paging while `total_is_lower_bound` is `true`; when it is absent the page reached the end and `pagination.total` is exact.
+> **Note on the default page size:** a call that omits `limit` returns at most 100 rows (or 100 matches), which may be fewer than exist. Unfiltered: keep paging while `offset + limit < pagination.total` (offset clients) or while `pagination.next_key` is present (cursor clients: pass it back as `key`). With `name`: keep paging while `offset + limit < pagination.total`; `total_is_lower_bound: true` additionally means the match count itself may be incomplete.
 
 > **Operator note (name-filter scan cost):** each name-filtered call pages
 > the *entire* registry table through the upstream RPC -- one sequential
@@ -921,8 +921,9 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 
 | Name          | Type     | Required | Description                   |
 |---------------|----------|----------|-------------------------------|
-| `offset`      | `uint64` | optional | Pagination offset for a listing, `0` or greater (default `0`). Must be omitted or `0` alongside `registry_id`. |
+| `offset`      | `uint64` | optional | Pagination offset for a listing, `0` or greater (default `0`). Must be omitted or `0` alongside `registry_id` or `key`. |
 | `limit`       | `uint64` | optional | Page size for a listing (default `100`; `0` also means the default). Must be omitted or `0` alongside `registry_id`. Any value works: the server asks the chain for exactly this many rows (in 200-row fetches when larger). |
+| `key`         | `string` | optional | Cursor for an unfiltered listing: the `pagination.next_key` of the previous page. Continues exactly where that page ended and is cheaper on the chain than `offset` (an O(1) seek instead of an O(offset) walk). Cannot be combined with a non-zero `offset`, `name`, `match`, or `registry_id`. |
 | `name`        | `string` | optional | Filter the listing by registry name (client-side scan over the whole table, then paged by `offset`/`limit`). Omit for an unfiltered listing. Mutually exclusive with `registry_id`. |
 | `match`       | `string` | optional | Match mode for `name`: `exact` (default), `prefix`, `suffix`, or `contains`. All case-insensitive. Requires `name`. |
 | `registry_id` | `uint64` | optional, **DEPRECATED** | Returns the single registry with this ID. Mutually exclusive with `name`, `match`, `offset`, and `limit`. Use [anchor\_get\_registry](#10-anchor_get_registry) instead. |
@@ -933,16 +934,18 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 |-------------------------|--------------|------------------------------------------|
 | `registries`            | `Registry[]` | Array of registry objects (the requested page) |
 | `pagination`            | `object`     | Pagination metadata               |
-| `pagination.total`      | `uint64`     | Without `name`: `offset` + rows returned -- the rows confirmed so far, exact only when `total_is_lower_bound` is absent. With `name`: the number of matching registries counted client-side across the whole table, exact unless `total_is_lower_bound` is `true`. (The chain's own `countTotal` is not used: this precompile reports `0` even when registries are present.) |
-| `total_is_lower_bound`  | `bool`       | Omitted (false) when `total` is exact. Without `name`: `true` when the chain reported more rows past this page -- keep paging with a larger `offset`. With `name`: `true` when the scan was cut short by its internal page cap or an ID-gap heuristic -- `total` is then a floor and registries beyond the scanned range are unreachable through this listing. |
+| `pagination.total`      | `uint64`     | Without `name`: the table size. The chain's own count is used when it reports one; the testnet precompile returns `total = 0` even with `countTotal = true` (verified on the raw ABI return, 2026-09-14), so the server then spends one `reverse=true, limit=1` call to read the highest assigned registry ID -- equal to the row count while IDs are dense from 1, a ceiling otherwise. A page that already ended the table needs no peek. With `name`: the number of matching registries counted client-side across the whole table, exact unless `total_is_lower_bound` is `true`. |
+| `pagination.next_key`   | `string`     | Unfiltered listing only. The chain's cursor for the row after this page, base64. Pass it back as `key` to continue. Omitted when the table ended. |
+| `total_is_lower_bound`  | `bool`       | Omitted (false) when `total` is exact. Without `name`: `true` only when the chain reported no count and the reverse peek failed -- `total` is then just the rows confirmed so far (`offset` + rows). With `name`: `true` when the scan was cut short by its internal page cap or an ID-gap heuristic -- `total` is then a floor and registries beyond the scanned range are unreachable through this listing. |
 | `name_match_truncated`  | `bool`       | `name` filter only, omitted otherwise. Mirrors `total_is_lower_bound`: `true` if the client-side scan hit its internal safety cap before confirming it reached the end of the registry table -- treat the match set (and therefore `pagination.total`) as possibly incomplete when this is `true`. |
 
 Each element in `registries` has the same fields as [anchor\_get\_registry](#10-anchor_get_registry) output.
 
 ### Error Conditions
 
-- `registry_id` > 0 combined with `name`, `match`, a non-zero `offset`, or a non-zero `limit` (the two modes cannot be mixed).
+- `registry_id` > 0 combined with `name`, `match`, `key`, a non-zero `offset`, or a non-zero `limit` (the two modes cannot be mixed).
 - `match` supplied without `name` (the match mode has nothing to apply to).
+- `key` combined with a non-zero `offset` or with `name` (two different ways of naming a position), or `key` that is not base64.
 - Invalid `match` value (must be `exact`, `prefix`, `suffix`, or `contains`).
 - ABI encoding/decoding failure.
 - RPC connection failure.
@@ -958,7 +961,7 @@ Each element in `registries` has the same fields as [anchor\_get\_registry](#10-
 }
 ```
 
-**Response:** (the chain page ended after two rows, so `total_is_lower_bound` is absent and `total` is exact; on a populated chain a `limit: 10` page comes back with `"total": 10, "total_is_lower_bound": true` and the caller continues at `offset: 10`)
+**Response:** (the chain page ended after two rows, so `total` is 2 and `next_key` is absent; on a populated chain a `limit: 10` page comes back as `"pagination": { "total": 4435, "next_key": "AAAAAAAAAAs=" }` and the caller continues either at `offset: 10` or with `key: "AAAAAAAAAAs="`)
 
 ```json
 {
@@ -1658,6 +1661,7 @@ Used by `anchor_get_registries` and `anchor_get_records` for pagination:
 
 **PageResponse** (output):
 
-| Field   | Type     | Description                     |
-|---------|----------|---------------------------------|
-| `total` | `uint64` | Total count of matching results |
+| Field      | Type     | Description |
+|------------|----------|-------------|
+| `total`    | `uint64` | Total count of matching results. For the unfiltered `anchor_get_registries` listing this is the table size (see §11); for `anchor_get_records` it is whatever the chain reports, which on the testnet precompile is `0`. |
+| `next_key` | `string` | Cursor for the row after this page (base64), present only when more rows exist. `anchor_get_registries` accepts it back as `key`. |
