@@ -30,6 +30,18 @@ func TestSafeForClient_PassThrough(t *testing.T) {
 		{"wrapped permission denied", fmt.Errorf("check: %w", ErrPermissionDenied)},
 		{"auth required", ErrAuthRequired},
 		{"wrapped auth required", fmt.Errorf("gate: %w", ErrAuthRequired)},
+		// Sentinels added for the 2026-09-15 directory review (H-2/H-3):
+		// each must cross the boundary so the caller gets the reason.
+		{"invalid hex data", ErrInvalidHexData},
+		{"invalid role", ErrInvalidRole},
+		{"block beyond head", ErrBlockBeyondHead},
+		{"call reverted", ErrCallReverted},
+		{"relay value rejected", ErrRelayValueRejected},
+		{"tx nonce conflict", ErrTxNonceConflict},
+		{"tx already known", ErrTxAlreadyKnown},
+		{"tx chain id mismatch", ErrTxChainIDMismatch},
+		{"insufficient funds", ErrInsufficientFunds},
+		{"curated nonce conflict with raw cause", Curate(ErrTxNonceConflict, errors.New("raw node text"))},
 	}
 
 	for _, tc := range tests {
@@ -93,5 +105,48 @@ func TestSafeForClient_Sanitized(t *testing.T) {
 				t.Errorf("SafeForClient(%v) = %q, want %q", tc.err, got.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// TestCurate_RawCauseNeverReachesClient pins the contract of Curate: the
+// error reads (and sanitizes) as the safe sentinel, matches both the sentinel
+// and the raw cause under errors.Is, and RawCause recovers the raw cause for
+// operator logs. A curated error that leaked its raw text through Error()
+// would defeat SafeForClient's verbatim pass-through of input-class errors.
+func TestCurate_RawCauseNeverReachesClient(t *testing.T) {
+	raw := errors.New("invalid nonce; got 286, expected 288 [cosmossdk.io/errors]")
+	curated := Curate(ErrTxNonceConflict, raw)
+	wrapped := fmt.Errorf("send transaction: %w", curated)
+
+	if curated.Error() != ErrTxNonceConflict.Error() {
+		t.Errorf("Error() = %q, want the safe sentinel text only", curated.Error())
+	}
+	if !errors.Is(wrapped, ErrTxNonceConflict) {
+		t.Error("curated error must match its safe sentinel")
+	}
+	if !errors.Is(wrapped, raw) {
+		t.Error("curated error must still match its raw cause")
+	}
+	if !IsInputError(wrapped) {
+		t.Error("curated input sentinel must classify as an input error")
+	}
+	if got := SafeForClient(wrapped).Error(); got != "send transaction: "+ErrTxNonceConflict.Error() {
+		t.Errorf("SafeForClient = %q, must not contain raw text", got)
+	}
+	if got := RawCause(wrapped); !errors.Is(got, raw) || got.Error() != raw.Error() {
+		t.Errorf("RawCause = %v, want the raw node error", got)
+	}
+}
+
+func TestCurate_NilRawReturnsSafeUnchanged(t *testing.T) {
+	if got := Curate(ErrBlockNotFound, nil); !errors.Is(got, ErrBlockNotFound) || got.Error() != ErrBlockNotFound.Error() {
+		t.Errorf("Curate(safe, nil) = %v, want safe itself", got)
+	}
+	plain := errors.New("plain")
+	if got := RawCause(plain); !errors.Is(got, plain) {
+		t.Errorf("RawCause(plain) = %v, want plain", got)
+	}
+	if got := RawCause(nil); got != nil {
+		t.Errorf("RawCause(nil) = %v, want nil", got)
 	}
 }
