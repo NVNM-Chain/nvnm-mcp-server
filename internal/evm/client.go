@@ -281,6 +281,9 @@ func (c *client) BalanceAt(ctx context.Context, address defitypes.Address, block
 	err := guardNodeDecode("get balance", func() error {
 		balance, err := c.rpc.GetBalance(ctx, address, blockNumOrLatest(block))
 		if err != nil {
+			if curated := classifyNodeRPCError(err); curated != nil {
+				return curated
+			}
 			return fmt.Errorf("failed to get balance: %w", err)
 		}
 		out = normalizeBalance(address, balance)
@@ -295,6 +298,9 @@ func (c *client) CodeAt(ctx context.Context, address defitypes.Address, block *b
 	defer cancel()
 	code, err := c.rpc.GetCode(ctx, address, blockNumOrLatest(block))
 	if err != nil {
+		if curated := classifyNodeRPCError(err); curated != nil {
+			return nil, curated
+		}
 		return nil, fmt.Errorf("failed to get code: %w", err)
 	}
 	return &CodeResult{
@@ -402,6 +408,14 @@ func (c *client) SendRawTransaction(ctx context.Context, signedTxHex string) (st
 
 	hashPtr, err := c.rpc.SendRawTransaction(ctx, txBytes)
 	if err != nil {
+		// Nonce conflicts, mempool duplicates, wrong-chain signatures and
+		// unfunded signers are the broadcast failures an agent can act on;
+		// surface the curated sentinel instead of the generic collapse. The
+		// raw node text stays attached (apperrors.Curate) so the write-audit
+		// line can still record it via apperrors.RawCause.
+		if curated := classifyNodeRPCError(err); curated != nil {
+			return "", fmt.Errorf("send transaction: %w", apperrors.Curate(curated, err))
+		}
 		return "", fmt.Errorf("send transaction: %w", err)
 	}
 	if hashPtr == nil {

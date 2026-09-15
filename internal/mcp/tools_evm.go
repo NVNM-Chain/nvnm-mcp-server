@@ -427,6 +427,12 @@ func makeCallContractHandler(
 		}
 		result, err := c.CallContract(ctx, msg, input.BlockNum.bigInt())
 		if err != nil {
+			// A revert is the caller's problem (wrong selector, bad calldata,
+			// failed require), not an outage; surface the curated sentinel so
+			// the agent can correct the call instead of retrying blindly.
+			if curated := evm.ClassifyCallRevert(err); curated != nil {
+				return nil, callContractOutput{}, curated
+			}
 			return nil, callContractOutput{},
 				fmt.Errorf("contract call failed: %w", err)
 		}
@@ -474,5 +480,11 @@ func parseHexData(s string) ([]byte, error) {
 		return nil, fmt.Errorf("hex data too large (%d chars, max %d): %w",
 			len(s), maxHexDataLen, apperrors.ErrInvalidABI)
 	}
-	return hex.DecodeString(s)
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		// A bare hex.DecodeString error carries no sentinel, so SafeForClient
+		// collapsed a caller typo into "upstream operation failed".
+		return nil, fmt.Errorf("%w", apperrors.ErrInvalidHexData)
+	}
+	return b, nil
 }

@@ -24,6 +24,30 @@ const gasEstimateBufferPercent = 20
 // chain's actual minimum is enforced by the broadcast step, not here.
 var defaultPriorityFeeWei = big.NewInt(1_000_000_000)
 
+// maxRegistryNameLen is the anchoring precompile's registry-name cap, observed
+// live 2026-09-15 as "name exceeds max length: got=2000 max=128". Checked
+// client-side so the caller gets the reason without a gas-estimation round
+// trip; the revert classifier keeps a matching entry as the backstop.
+const maxRegistryNameLen = 128
+
+// registryRoles is the precompile's role vocabulary for grantRole/revokeRole.
+// Any other value reverts on chain with an opaque reason, so it is rejected
+// here with the documented "must be admin or editor" message.
+var registryRoles = map[string]bool{"admin": true, "editor": true}
+
+// validateRole rejects a role outside registryRoles. Exact match: the chain
+// compares the string literally, so silently lower-casing "Admin" would
+// encode a different call than the caller reviewed.
+func validateRole(role string) error {
+	if role == "" {
+		return fmt.Errorf("role is required: %w", apperrors.ErrMissingRequired)
+	}
+	if !registryRoles[role] {
+		return fmt.Errorf("role %q: %w", role, apperrors.ErrInvalidRole)
+	}
+	return nil
+}
+
 // PrepareAddRegistry constructs an unsigned addRegistry transaction.
 func (c *client) PrepareAddRegistry(
 	ctx context.Context,
@@ -37,6 +61,10 @@ func (c *client) PrepareAddRegistry(
 	}
 	if req.Name == "" {
 		return nil, fmt.Errorf("name is required: %w", apperrors.ErrMissingRequired)
+	}
+	if len(req.Name) > maxRegistryNameLen {
+		return nil, fmt.Errorf("name is %d characters, the anchoring precompile allows at most %d: %w",
+			len(req.Name), maxRegistryNameLen, apperrors.ErrInputTooLarge)
 	}
 
 	calldata, err := c.parsedABI.Methods["addRegistry"].EncodeArgs(
@@ -254,8 +282,8 @@ func (c *client) PrepareGrantRole(
 	if req.Account == "" {
 		return nil, fmt.Errorf("account address is required: %w", apperrors.ErrMissingRequired)
 	}
-	if req.Role == "" {
-		return nil, fmt.Errorf("role is required: %w", apperrors.ErrMissingRequired)
+	if err := validateRole(req.Role); err != nil {
+		return nil, err
 	}
 
 	account, err := defitypes.AddressFromHex(req.Account)
@@ -290,8 +318,8 @@ func (c *client) PrepareRevokeRole(
 	if req.Account == "" {
 		return nil, fmt.Errorf("account address is required: %w", apperrors.ErrMissingRequired)
 	}
-	if req.Role == "" {
-		return nil, fmt.Errorf("role is required: %w", apperrors.ErrMissingRequired)
+	if err := validateRole(req.Role); err != nil {
+		return nil, err
 	}
 
 	account, err := defitypes.AddressFromHex(req.Account)
@@ -351,7 +379,7 @@ func (c *client) buildUnsignedTx(
 		// otherwise let SafeForClient collapse it to avoid leaking raw chain
 		// detail (rc8 E2E F5).
 		if reason, ok, kind := classifyPrecompileRevert(err); ok {
-			return nil, fmt.Errorf("%s: %w", reason, kind)
+			return nil, curatePrecompileErr(reason, kind)
 		}
 		return nil, fmt.Errorf("estimate gas: %w", err)
 	}

@@ -199,14 +199,18 @@ func makeSendRawTxHandler(
 
 		txHash, err := c.SendRawTransaction(ctx, broadcastHex)
 		if err != nil {
+			// The audit trail keeps the node's raw rejection text (operator
+			// diagnostics); the client sees only the curated sentinel that
+			// SafeForClient lets through.
+			auditErr := boundAuditErr(apperrors.RawCause(err))
 			failAttrs := append([]slog.Attr{
 				slog.String("tool", "evm_send_raw_transaction"),
 				slog.String("phase", "broadcast_failed"),
 				slog.Int("signed_tx_len", len(input.SignedTxHex)),
-				slog.String("error", boundAuditErr(err)),
+				slog.String("error", auditErr),
 			}, identityAttrs()...)
 			logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup(failAttrs))
-			recordAudit("broadcast_failed", "", boundAuditErr(err))
+			recordAudit("broadcast_failed", "", auditErr)
 			recordBroadcast("failed")
 			return nil, sendRawTxOutput{}, err
 		}

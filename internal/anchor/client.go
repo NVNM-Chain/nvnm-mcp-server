@@ -361,6 +361,13 @@ func (c *client) callPrecompile(
 
 	output, err := c.evmClient.CallContract(ctx, msg, nil)
 	if err != nil {
+		// Reads revert for caller-input reasons too (a missing record,
+		// record_id without registry_id). Surface the curated reason the
+		// same way the gas-estimation path does; anything unrecognized keeps
+		// the generic wrap and collapses at SafeForClient.
+		if reason, ok, kind := classifyPrecompileRevert(err); ok {
+			return nil, curatePrecompileErr(reason, kind)
+		}
 		return nil, fmt.Errorf("%s call failed: %w", method, err)
 	}
 	return output, nil
