@@ -151,8 +151,8 @@ make run
 # off for that process (writes stay authenticated) so boot can succeed.
 cp .env.example .env      # then fill in values
 
-# HTTP is fail-closed: it refuses to boot without at least one enabled API
-# key in the file .env points at (MCP_API_KEYS_FILE=.mcp-keys.json). Create
+# HTTP is fail-closed: it refuses to boot without at least one enabled,
+# unexpired API key in the file .env points at (MCP_API_KEYS_FILE=.mcp-keys.json). Create
 # one first -- ROLES is required. Pick the least you need:
 #   reader      read tools only
 #   writer      reads + evm_send_raw_transaction (broadcast)
