@@ -286,9 +286,9 @@ func (c *client) PrepareGrantRole(
 		return nil, err
 	}
 
-	account, err := defitypes.AddressFromHex(req.Account)
+	account, err := evm.ParseAddress(req.Account)
 	if err != nil {
-		return nil, fmt.Errorf("account %q: %w", req.Account, apperrors.ErrInvalidAddress)
+		return nil, fmt.Errorf("account %w", err)
 	}
 	// Normalize an optional record-scoping checksum the same way as
 	// addRecord so a 0x-prefixed digest matches the stored bare-hex form.
@@ -322,9 +322,9 @@ func (c *client) PrepareRevokeRole(
 		return nil, err
 	}
 
-	account, err := defitypes.AddressFromHex(req.Account)
+	account, err := evm.ParseAddress(req.Account)
 	if err != nil {
-		return nil, fmt.Errorf("account %q: %w", req.Account, apperrors.ErrInvalidAddress)
+		return nil, fmt.Errorf("account %w", err)
 	}
 	// Normalize an optional record-scoping checksum the same way as
 	// addRecord/grantRole so a 0x-prefixed digest matches the stored bare-hex form.
@@ -350,9 +350,9 @@ func (c *client) buildUnsignedTx(
 	calldata []byte,
 	preferLegacy bool,
 ) (*UnsignedTransaction, error) {
-	from, err := defitypes.AddressFromHex(fromHex)
+	from, err := evm.ParseAddress(fromHex)
 	if err != nil {
-		return nil, fmt.Errorf("from %q: %w", fromHex, apperrors.ErrInvalidAddress)
+		return nil, fmt.Errorf("from %w", err)
 	}
 
 	nonce, err := c.evmClient.PendingNonceAt(ctx, from)

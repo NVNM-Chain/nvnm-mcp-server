@@ -199,7 +199,7 @@ func makeGetBlockHandler(
 					"provide block_number or block_hash, not both: %w",
 					apperrors.ErrInvalidBlockRef)
 			}
-			hash, err := parseHash(*input.BlockHash)
+			hash, err := parseHash32(*input.BlockHash, apperrors.ErrInvalidHash)
 			if err != nil {
 				return nil, blockOutput{},
 					fmt.Errorf("invalid block_hash: %w", err)
@@ -359,7 +359,7 @@ func makeGetLogsHandler(
 		if len(input.Topics) > 0 {
 			topicSet := make([]defitypes.Hash, len(input.Topics))
 			for i, t := range input.Topics {
-				hash, err := parseHash(t)
+				hash, err := parseHash32(t, apperrors.ErrInvalidTopics)
 				if err != nil {
 					return nil, getLogsOutput{},
 						fmt.Errorf("invalid topic at index %d: %w", i, err)
@@ -445,28 +445,36 @@ func makeCallContractHandler(
 
 // --- Validation helpers ---
 
+// parseAddress is the single address parser for tool inputs. It defers to
+// evm.ParseAddress so the EIP-55 checksum rule for mixed-case input is
+// enforced identically on every tool.
 func parseAddress(s string) (defitypes.Address, error) {
-	addr, err := defitypes.AddressFromHex(s)
-	if err != nil {
-		return defitypes.Address{},
-			fmt.Errorf("%q: %w", s, apperrors.ErrInvalidAddress)
-	}
-	return addr, nil
+	return evm.ParseAddress(s)
 }
 
+// parseHash parses a transaction hash. Block hashes and log topics share the
+// 32-byte shape but are not transaction hashes; they go through
+// parseHash32 so a bad block_hash is not reported as an "invalid
+// transaction hash" (directory review 2026-09-15, L-1).
 func parseHash(s string) (defitypes.Hash, error) {
-	s = strings.TrimPrefix(s, "0x")
-	if len(s) != 64 {
+	return parseHash32(s, apperrors.ErrInvalidTxHash)
+}
+
+// parseHash32 parses a 0x-prefixed (or bare) 32-byte hex value, wrapping
+// every failure in kind so the message names what the caller got wrong.
+func parseHash32(s string, kind error) (defitypes.Hash, error) {
+	raw := strings.TrimPrefix(s, "0x")
+	if len(raw) != 64 {
 		return defitypes.Hash{},
-			fmt.Errorf("%q: %w", s, apperrors.ErrInvalidTxHash)
+			fmt.Errorf("%q: want 32 bytes (64 hex digits), got %d: %w", s, len(raw), kind)
 	}
-	b, err := hex.DecodeString(s)
+	b, err := hex.DecodeString(raw)
 	if err != nil {
-		return defitypes.Hash{}, fmt.Errorf("invalid hash hex: %w", err)
+		return defitypes.Hash{}, fmt.Errorf("%q: not valid hex: %w", s, kind)
 	}
 	h, err := defitypes.HashFromBytes(b, defitypes.PadNone)
 	if err != nil {
-		return defitypes.Hash{}, fmt.Errorf("invalid hash bytes: %w", err)
+		return defitypes.Hash{}, fmt.Errorf("%q: %w", s, kind)
 	}
 	return h, nil
 }

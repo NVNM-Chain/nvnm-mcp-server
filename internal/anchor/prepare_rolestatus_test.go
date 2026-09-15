@@ -284,6 +284,46 @@ func TestPrepareGrantRole_RejectsUnknownRole(t *testing.T) {
 	}
 }
 
+// TestPrepare_RejectsBadEIP55Checksum verifies every prepare path parses
+// `from` (and `account`) through evm.ParseAddress, so a mixed-case address
+// with a wrong EIP-55 checksum is refused before any RPC instead of being
+// silently accepted (directory review 2026-09-15, M-2).
+func TestPrepare_RejectsBadEIP55Checksum(t *testing.T) {
+	c := prepareTestClient(t)
+	const badCase = "0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207" // pragma: allowlist secret -- wrong checksum on purpose
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"add_registry from": func() error {
+			_, err := c.PrepareAddRegistry(ctx, PrepareAddRegistryRequest{From: badCase, Name: "n", Description: "d"})
+			return err
+		},
+		"grant_role from": func() error {
+			_, err := c.PrepareGrantRole(ctx, PrepareGrantRoleRequest{From: badCase, RegistryID: 1, Account: testFrom, Role: "editor"})
+			return err
+		},
+		"grant_role account": func() error {
+			_, err := c.PrepareGrantRole(ctx, PrepareGrantRoleRequest{From: testFrom, RegistryID: 1, Account: badCase, Role: "editor"})
+			return err
+		},
+		"revoke_role account": func() error {
+			_, err := c.PrepareRevokeRole(ctx, PrepareRevokeRoleRequest{From: testFrom, RegistryID: 1, Account: badCase, Role: "editor"})
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if !errors.Is(err, apperrors.ErrInvalidAddress) {
+				t.Fatalf("err = %v, want ErrInvalidAddress", err)
+			}
+			if !strings.Contains(err.Error(), "EIP-55") {
+				t.Errorf("message must explain the checksum failure: %v", err)
+			}
+		})
+	}
+}
+
 // TestPrepareAddRegistry_NameLengthCap pins the client-side mirror of the
 // precompile's 128-character registry-name cap (observed live as "name
 // exceeds max length: got=2000 max=128"). Exactly 128 is accepted; 129 is

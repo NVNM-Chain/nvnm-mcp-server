@@ -30,6 +30,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
@@ -239,6 +240,135 @@ func TestSendRawTx_AuditKeepsRawCauseOfCuratedBroadcastError(t *testing.T) {
 	}
 	if !strings.Contains(logBuf.String(), "got 286, expected 288") {
 		t.Errorf("audit log line must keep the raw node reason: %s", logBuf.String())
+	}
+}
+
+// --- M-3 ---------------------------------------------------------------
+
+// anchor_get_records with neither registry_id nor checksum used to list the
+// first 100 records of the whole chain (142 KB) through an undocumented
+// mode. It is now a fail-fast input error naming the two entry points.
+func TestHandler_GetRecords_RequiresRegistryOrChecksum(t *testing.T) {
+	m := &mockAnchor{records: &anchor.GetRecordsResponse{Records: []anchor.Record{}}}
+	handler := makeGetRecordsHandler(m)
+	empty := ""
+
+	for name, in := range map[string]getRecordsInput{
+		"no arguments":        {},
+		"empty checksum":      {Checksum: &empty},
+		"pagination only":     {Offset: u64p(0), Limit: u64p(5)},
+		"record_id only":      {RecordID: u64p(1)},
+		"index only":          {Index: u64p(1)},
+		"record_id and index": {RecordID: u64p(1), Index: u64p(1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := handler(ctx, nil, in)
+			if !errors.Is(err, apperrors.ErrMissingRequired) {
+				t.Fatalf("err = %v, want ErrMissingRequired", err)
+			}
+			if !strings.Contains(err.Error(), "registry_id") || !strings.Contains(err.Error(), "checksum") {
+				t.Errorf("message must name both entry points: %v", err)
+			}
+		})
+	}
+
+	// The documented modes still reach the client.
+	digest := "abcd"
+	for name, in := range map[string]getRecordsInput{
+		"registry only":       {RegistryID: u64p(1)},
+		"checksum only":       {Checksum: &digest},
+		"registry + checksum": {RegistryID: u64p(1), Checksum: &digest},
+		"registry + record":   {RegistryID: u64p(1), RecordID: u64p(1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := handler(ctx, nil, in); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func u64p(n uint64) *uint64 { return &n }
+
+// --- M-2 ---------------------------------------------------------------
+
+func TestParseAddress_EIP55(t *testing.T) {
+	const good = "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207" // pragma: allowlist secret -- EIP-55 test vector
+	lower := strings.ToLower(good)
+	upper := "0x" + strings.ToUpper(good[2:])
+	badCase := "0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207" // pragma: allowlist secret -- wrong checksum on purpose
+
+	for _, in := range []string{good, lower, upper, good[2:]} {
+		if _, err := parseAddress(in); err != nil {
+			t.Errorf("parseAddress(%q): unexpected error %v", in, err)
+		}
+	}
+	_, err := parseAddress(badCase)
+	if !errors.Is(err, apperrors.ErrInvalidAddress) {
+		t.Fatalf("parseAddress(%q): err = %v, want ErrInvalidAddress", badCase, err)
+	}
+	if !strings.Contains(err.Error(), "EIP-55") || !strings.Contains(err.Error(), good) {
+		t.Errorf("checksum error must name EIP-55 and the expected spelling: %v", err)
+	}
+	if _, err := parseAddress("0x1234"); !errors.Is(err, apperrors.ErrInvalidAddress) {
+		t.Errorf("short input: err = %v, want ErrInvalidAddress", err)
+	}
+}
+
+// Every tool that takes an address goes through the same parser, so one
+// representative per surface is enough to pin the wiring.
+func TestHandlers_RejectBadEIP55Checksum(t *testing.T) {
+	const badCase = "0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207" // pragma: allowlist secret -- wrong checksum on purpose
+	cases := map[string]func() error{
+		"evm_get_balance": func() error {
+			_, _, err := makeGetBalanceHandler(&mockEVM{}, testServerConfig(true))(ctx, nil, getBalanceInput{Address: badCase})
+			return err
+		},
+		"wallet_status": func() error {
+			_, _, err := makeWalletStatusHandler(&mockEVM{}, testServerConfig(true))(ctx, nil, walletStatusInput{Address: badCase})
+			return err
+		},
+		// The anchor_prepare_* tools parse `from`/`account` inside the real
+		// anchor client (covered by TestPrepare_RejectsBadEIP55Checksum in
+		// internal/anchor), so they are not repeated against the mock here.
+	}
+	for name, call := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := call(); !errors.Is(err, apperrors.ErrInvalidAddress) {
+				t.Errorf("err = %v, want ErrInvalidAddress", err)
+			}
+		})
+	}
+}
+
+func TestListingCursor_RejectsWrongLength(t *testing.T) {
+	if _, err := listingCursor("AAAAAAAAAAQ=", 0); err != nil { // 8 bytes, the real shape
+		t.Fatalf("valid cursor rejected: %v", err)
+	}
+	// Valid base64 of "hello world" (11 bytes): the chain would answer an
+	// empty page, which reads as an empty table.
+	_, err := listingCursor("aGVsbG8gd29ybGQ=", 0)
+	if !errors.Is(err, apperrors.ErrInvalidCursor) {
+		t.Fatalf("err = %v, want ErrInvalidCursor", err)
+	}
+	if !strings.Contains(err.Error(), "11 bytes") {
+		t.Errorf("message should say what was decoded: %v", err)
+	}
+}
+
+// --- L-3 ---------------------------------------------------------------
+
+func TestPageRegistries_PastEndIsEmptyNotNil(t *testing.T) {
+	page := pageRegistries([]anchor.Registry{{ID: 1}}, 5, 10)
+	if page == nil {
+		t.Fatal("page past the end must be an empty slice, not nil (serializes as null)")
+	}
+	if len(page) != 0 {
+		t.Errorf("len = %d, want 0", len(page))
+	}
+	b, _ := json.Marshal(page)
+	if string(b) != "[]" {
+		t.Errorf("json = %s, want []", b)
 	}
 }
 
