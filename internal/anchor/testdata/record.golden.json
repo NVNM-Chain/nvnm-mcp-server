@@ -7,6 +7,6 @@
   "uri": "https://qa8-api.inveniam.io/dataroom/2/103402411912619200",
   "status": "Active",
   "is_latest": true,
-  "timestamp": "2026-03-01 14:30:00.000000000 +0000 UTC",
+  "timestamp": "2026-03-01T14:30:00Z",
   "metadata": "{\"taxonomyId\":\"abc-123\",\"fileId\":\"def-456\"}"
 }

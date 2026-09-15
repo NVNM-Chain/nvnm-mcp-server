@@ -52,7 +52,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 		Title: "Get Transaction Receipt",
 		Description: "Returns the receipt for a mined transaction, " +
 			"including status, gas used, logs, and created contract address. " +
-			"Always call this after submitting a transaction to confirm the outcome. " +
+			"Use it after a broadcast to confirm the outcome. " +
 			"status='success' means the transaction executed correctly on-chain. " +
 			"status='reverted' means the transaction was included but the contract " +
 			"rejected it (e.g. permission denied, bad input) -- the write did NOT occur " +

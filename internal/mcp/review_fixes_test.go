@@ -372,6 +372,26 @@ func TestPageRegistries_PastEndIsEmptyNotNil(t *testing.T) {
 	}
 }
 
+// --- L-14 --------------------------------------------------------------
+
+// Tool descriptions describe the tool; they do not instruct the model
+// ("Always call…", "Call this first…" read as behavioral directives in the
+// directory review).
+func TestToolDescriptions_NoBehaviouralImperatives(t *testing.T) {
+	session := startTestServer(t)
+	result, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tool := range result.Tools {
+		for _, phrase := range []string{"Always call", "Call this first", "You must", "you must call"} {
+			if strings.Contains(tool.Description, phrase) {
+				t.Errorf("%s: description contains %q", tool.Name, phrase)
+			}
+		}
+	}
+}
+
 // --- M-1 ---------------------------------------------------------------
 
 // The prepare tools run anonymously under keyless reads (authpolicy.go
