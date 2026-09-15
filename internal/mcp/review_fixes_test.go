@@ -9,12 +9,16 @@ package mcp
 //	H-1  evm_get_block fabricated a block for a non-existent number and
 //	     accepted negative block numbers.
 //	H-2  reviewer-reachable inputs collapsed to "upstream operation failed".
+//	H-3  the relay scope did not enforce value == 0.
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -135,6 +139,75 @@ func TestHandler_CallContract_UnrelatedErrorStillCollapses(t *testing.T) {
 	}
 	if got := apperrors.SafeForClient(err).Error(); got != "upstream operation failed" {
 		t.Errorf("client sees %q, want the generic collapse (no host leak)", got)
+	}
+}
+
+// --- H-3 ---------------------------------------------------------------
+
+// signedTxToWithValue is signedTxTo with a caller-chosen native value.
+func signedTxToWithValue(t *testing.T, key *wallet.PrivateKey, to defitypes.Address, value *big.Int) string {
+	t.Helper()
+	tx := defitypes.NewTransaction().
+		SetType(defitypes.DynamicFeeTxType).
+		SetChainID(787111).SetNonce(0).SetGasLimit(21000).
+		SetMaxFeePerGas(big.NewInt(2_000_000_000)).
+		SetMaxPriorityFeePerGas(big.NewInt(1_000_000_000)).
+		SetTo(to).SetValue(value).SetInput([]byte{0x01})
+	if err := key.SignTransaction(context.Background(), tx); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	raw, err := tx.EncodeRLP()
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	return "0x" + hex.EncodeToString(raw)
+}
+
+// The live review broadcast a 1-wei call to the precompile; it reverted and
+// burned gas. Both relay modes that enforce scope must now refuse it before
+// the node ever sees it, and the audit must record the rejection.
+func TestSendRawTx_ValueToPrecompileRejected(t *testing.T) {
+	key := wallet.NewRandomKey()
+	anchorAddr := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxToWithValue(t, key, anchorAddr, big.NewInt(1))
+
+	for _, keyless := range []bool{true, false} {
+		var logBuf strings.Builder
+		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+		cc := &captureClient{}
+		fm := &fakeWriteMetrics{}
+		h := makeSendRawTxHandler(cc, anchorHex, keyless, false, nil, fm, signerGates{}, logger)
+
+		_, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw})
+		if !errors.Is(err, apperrors.ErrRelayValueRejected) {
+			t.Fatalf("keyless=%v: err = %v, want ErrRelayValueRejected", keyless, err)
+		}
+		if cc.called {
+			t.Errorf("keyless=%v: transaction must not reach the node", keyless)
+		}
+		if len(fm.rejects) != 1 || fm.rejects[0] != "relay_scope" {
+			t.Errorf("keyless=%v: rejects = %v, want [relay_scope]", keyless, fm.rejects)
+		}
+		if !strings.Contains(logBuf.String(), "relay_scope_rejected") || !strings.Contains(logBuf.String(), "value_wei=1") {
+			t.Errorf("keyless=%v: audit line missing or lacks value_wei: %s", keyless, logBuf.String())
+		}
+	}
+}
+
+// The escape hatch (MCP_RELAY_ALLOW_ANY) is unchanged: no scope, no value
+// gate -- the operator opted out of the relay restrictions entirely.
+func TestSendRawTx_ValueAllowedUnderRelayAllowAny(t *testing.T) {
+	key := wallet.NewRandomKey()
+	anchorAddr := defitypes.MustAddressFromHex(anchorHex)
+	raw := signedTxToWithValue(t, key, anchorAddr, big.NewInt(1))
+	cc := &captureClient{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := makeSendRawTxHandler(cc, anchorHex, false, true, nil, nil, signerGates{}, logger)
+	if _, _, err := h(context.Background(), &sdkmcp.CallToolRequest{}, sendRawTxInput{SignedTxHex: raw}); err != nil {
+		t.Fatalf("relayAllowAny: unexpected error %v", err)
+	}
+	if !cc.called {
+		t.Error("relayAllowAny: transaction should have been broadcast")
 	}
 }
 

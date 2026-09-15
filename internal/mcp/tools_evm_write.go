@@ -307,15 +307,16 @@ func decodeAndScope(
 		recordReject(telemetry.CauseAnchorMisconfig)
 		return nil, fmt.Errorf("anchor address misconfigured: %w", apperrors.ErrInvalidAddress)
 	}
-	if serr := checkRelayScope(dtx.To, anchor); serr != nil {
+	if serr := checkRelayScope(dtx.To, dtx.Value, anchor); serr != nil {
 		logger.LogAttrs(ctx, slog.LevelWarn, "audit", auditGroup([]slog.Attr{
 			slog.String("tool", "evm_send_raw_transaction"),
 			slog.String("phase", "relay_scope_rejected"),
 			slog.String("signer", dtx.Signer.String()),
 			slog.String("to", addrString(dtx.To)),
+			slog.String("value_wei", dtx.Value.String()),
 		}))
 		recordReject(telemetry.CauseRelayScope)
-		return nil, serr // ErrRelayScopeRejected (input class)
+		return nil, serr // ErrRelayScopeRejected / ErrRelayValueRejected (input class)
 	}
 	return dtx, nil
 }
