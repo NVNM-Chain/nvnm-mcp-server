@@ -10,6 +10,8 @@ package mcp
 //	     accepted negative block numbers.
 //	H-2  reviewer-reachable inputs collapsed to "upstream operation failed".
 //	H-3  the relay scope did not enforce value == 0.
+//	M-1  the prepare-tool descriptions claimed an unconditional RBAC
+//	     requirement that keyless-read deployments do not enforce.
 
 import (
 	"context"
@@ -237,5 +239,49 @@ func TestSendRawTx_AuditKeepsRawCauseOfCuratedBroadcastError(t *testing.T) {
 	}
 	if !strings.Contains(logBuf.String(), "got 286, expected 288") {
 		t.Errorf("audit log line must keep the raw node reason: %s", logBuf.String())
+	}
+}
+
+// --- M-1 ---------------------------------------------------------------
+
+// The prepare tools run anonymously under keyless reads (authpolicy.go
+// authExemptTools), so their descriptions may not state the API-key role as
+// an unconditional requirement. They must say the role applies only when the
+// deployment authenticates the caller.
+func TestPrepareToolDescriptions_RoleClaimIsConditional(t *testing.T) {
+	session := startTestServer(t)
+	result, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	prepareTools := map[string]bool{
+		"anchor_prepare_add_registry":         true,
+		"anchor_prepare_add_record":           true,
+		"anchor_prepare_update_record_status": true,
+		"anchor_prepare_grant_role":           true,
+		"anchor_prepare_revoke_role":          true,
+	}
+	seen := 0
+	for _, tool := range result.Tools {
+		if !prepareTools[tool.Name] {
+			continue
+		}
+		seen++
+		d := tool.Description
+		if !authExemptTools[tool.Name] {
+			t.Errorf("%s: expected to be auth-exempt under keyless reads", tool.Name)
+		}
+		if !strings.Contains(d, "when this deployment") {
+			t.Errorf("%s: description must scope the role requirement to authenticating deployments: %q", tool.Name, d)
+		}
+		for _, stale := range []string{"but requires the writer", "but requires the admin"} {
+			if strings.Contains(d, stale) {
+				t.Errorf("%s: description still states the role as unconditional (%q)", tool.Name, stale)
+			}
+		}
+	}
+	if seen != len(prepareTools) {
+		t.Errorf("saw %d prepare tools, want %d", seen, len(prepareTools))
 	}
 }

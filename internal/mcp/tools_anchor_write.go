@@ -34,24 +34,36 @@ func registerAnchorWriteTools(
 		"Confirm either path with evm_get_transaction_receipt(tx_hash). " +
 		"The server never holds or receives private keys."
 
+	// The access-control sentences must be true in BOTH deployment modes
+	// (directory review 2026-09-15, M-1): under keyless reads (the hosted
+	// default) the prepare tools run without credentials and RBAC is not
+	// consulted -- authentication applies at evm_send_raw_transaction; only
+	// an authenticated caller is role-checked. The earlier wording stated
+	// the role as an unconditional requirement, which was false for the
+	// hosted deployment.
+
 	// accessControlReadWrite matches requireRole(ctx, "writer", "admin",
-	// "automation") on add_registry / add_record.
-	const accessControlReadWrite = " Access control: this tool is annotated " +
-		"read-only (it does not modify server or chain state by itself) but " +
-		"requires the writer, admin, or automation role because the output is " +
-		"a signing-ready payload."
+	// "automation") on add_registry / add_record / update_record_status.
+	const accessControlReadWrite = " Access control: annotated read-only " +
+		"(it does not modify server or chain state by itself) and it is the " +
+		"broadcast step, not this tool, that is authenticated; when this " +
+		"deployment does authenticate the caller, the API key must hold the " +
+		"writer, admin, or automation role because the output is a " +
+		"signing-ready payload."
 
 	// accessControlAdminOnlyGrant matches requireRole(ctx, "admin") on grant_role.
-	const accessControlAdminOnlyGrant = " Access control: this tool is annotated " +
-		"read-only (it does not modify server or chain state by itself) but " +
-		"requires the admin role -- granting roles is an administrative " +
-		"operation -- and the output is a signing-ready payload."
+	const accessControlAdminOnlyGrant = " Access control: annotated read-only " +
+		"(it does not modify server or chain state by itself); when this " +
+		"deployment authenticates the caller, the API key must hold the admin " +
+		"role -- granting roles is an administrative operation. Whether the " +
+		"`from` address may actually grant is decided on chain (registry admin)."
 
 	// accessControlAdminOnlyRevoke matches requireRole(ctx, "admin") on revoke_role.
-	const accessControlAdminOnlyRevoke = " Access control: this tool is annotated " +
-		"read-only (it does not modify server or chain state by itself) but " +
-		"requires the admin role -- revoking roles is an administrative " +
-		"operation -- and the output is a signing-ready payload."
+	const accessControlAdminOnlyRevoke = " Access control: annotated read-only " +
+		"(it does not modify server or chain state by itself); when this " +
+		"deployment authenticates the caller, the API key must hold the admin " +
+		"role -- revoking roles is an administrative operation. Whether the " +
+		"`from` address may actually revoke is decided on chain (registry admin)."
 
 	addTool(srv, &mcp.Tool{
 		Name:        "anchor_prepare_add_registry",
