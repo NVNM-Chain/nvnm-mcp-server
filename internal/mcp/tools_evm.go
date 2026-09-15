@@ -204,18 +204,20 @@ func makeGetBlockHandler(
 				return nil, blockOutput{},
 					fmt.Errorf("invalid block_hash: %w", err)
 			}
+			// The client distinguishes a missing block (ErrBlockNotFound), a
+			// reference past the head (ErrBlockBeyondHead) and an outage
+			// (generic, collapsed by SafeForClient); a blanket "block not
+			// found:" prefix here used to mislabel all three.
 			block, err := c.BlockByHash(ctx, hash, input.FullTx)
 			if err != nil {
-				return nil, blockOutput{},
-					fmt.Errorf("block not found: %w", err)
+				return nil, blockOutput{}, err
 			}
 			return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 		}
 
 		block, err := c.BlockByNumber(ctx, input.BlockNumber.bigInt(), input.FullTx)
 		if err != nil {
-			return nil, blockOutput{},
-				fmt.Errorf("block not found: %w", err)
+			return nil, blockOutput{}, err
 		}
 		return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 	}

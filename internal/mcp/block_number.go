@@ -36,7 +36,10 @@ type blockNumberArg struct {
 var customTypeSchemas = map[reflect.Type]*jsonschema.Schema{
 	reflect.TypeFor[blockNumberArg](): {
 		AnyOf: []*jsonschema.Schema{
-			{Type: "integer"},
+			// Block numbers are non-negative. Without the floor the node
+			// silently mapped negative values onto real blocks
+			// the schema rejects them before any RPC.
+			{Type: "integer", Minimum: jsonschema.Ptr(0.0)},
 			{Type: "string", Enum: []any{"latest", "earliest"}},
 			{Type: "null"},
 		},
@@ -66,6 +69,10 @@ func (b *blockNumberArg) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &n); err != nil {
 		return fmt.Errorf("block number must be an integer or \"latest\"/\"earliest\": %w",
 			apperrors.ErrInvalidBlockRef)
+	}
+	if n < 0 {
+		// Mirrors the schema's minimum for direct-construction paths.
+		return fmt.Errorf("block number must be 0 or greater (got %d): %w", n, apperrors.ErrInvalidBlockRef)
 	}
 	*b = blockNumberArg{num: &n}
 	return nil
