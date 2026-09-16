@@ -83,6 +83,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **Bumped indirect `golang.org/x/crypto` v0.55.0 → v0.56.0** to clear
+  [CVE-2026-56855](https://go.dev/issue/81317) and
+  [CVE-2026-78662](https://go.dev/issue/81316) (SSH mux DoS on established /
+  not-yet-established channels). This server does not import
+  `golang.org/x/crypto/ssh`; the bump satisfies version scanners. No
+  first-party code change.
 - **Bumped indirect `google.golang.org/grpc` v1.82.1 → v1.83.2** to clear
   `govulncheck` / Dependabot on [GHSA-vp52-pcj8-j9qc](https://github.com/advisories/GHSA-vp52-pcj8-j9qc)
   (HTTP/2 DATA-frame fragmentation → heap exhaustion on the receive path;
