@@ -83,12 +83,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
-- **Bumped indirect `google.golang.org/grpc` v1.82.1 → v1.83.1** to clear
+- **Bumped indirect `google.golang.org/grpc` v1.82.1 → v1.83.2** to clear
   `govulncheck` / Dependabot on [GHSA-vp52-pcj8-j9qc](https://github.com/advisories/GHSA-vp52-pcj8-j9qc)
   (HTTP/2 DATA-frame fragmentation → heap exhaustion on the receive path;
-  also GHSA-qc2q-p7wx-3px3, xDS RBAC header matching). gRPC is pulled by
-  goose and the OTLP exporters; this server does not run a gRPC server or
-  use xDS. No first-party code change.
+  also GHSA-qc2q-p7wx-3px3) and [CVE-2026-84445](https://github.com/advisories/GHSA-2v4p-qf9q-27wj)
+  (xDS server panic when `:authority` and `Host` are both missing; fixed in
+  1.83.2). gRPC is pulled by goose and the OTLP exporters; this server does
+  not run a gRPC server or use `xds.NewGRPCServer`. No first-party code change.
 - **F1–F5 posture recorded, item by item.** `docs/SECURITY_AUDIT.md` gains a
   dated entry replacing the stale "F1–F5 are all open" claim: F1, F4, F5
   closed with code and test evidence; F2 closed in code with the hosted
