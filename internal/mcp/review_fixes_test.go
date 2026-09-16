@@ -100,6 +100,27 @@ func TestHandler_GetBlock_NotFoundIsSurfaced(t *testing.T) {
 	}
 }
 
+func TestGetBlockDescription_StatesNotFoundAndNonNegative(t *testing.T) {
+	session := startTestServer(t)
+	result, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tool := range result.Tools {
+		if tool.Name != "evm_get_block" {
+			continue
+		}
+		if !strings.Contains(tool.Description, "0 or greater") {
+			t.Errorf("description must state block_number ≥ 0: %q", tool.Description)
+		}
+		if !strings.Contains(tool.Description, "not-found") {
+			t.Errorf("description must state missing block is not-found: %q", tool.Description)
+		}
+		return
+	}
+	t.Fatal("evm_get_block not in tools/list")
+}
+
 // --- H-2 ---------------------------------------------------------------
 
 func TestHandler_CallContract_BadHexIsInputError(t *testing.T) {

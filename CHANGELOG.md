@@ -116,6 +116,13 @@ Findings and evidence: `docs/ANTHROPIC_DIRECTORY_REVIEW_2026-09-15.md`.
   first if you have never used this server" → "Intended as the first call
   of a session…". A test rejects behavioural imperatives in any description.
 
+### Documentation
+
+- **`evm_get_block` description** now matches the schema/handler (`block_number`
+  ≥ 0; missing block is not-found). `docs/TOOL_REFERENCE.md` I/O tables match
+  (`+from`, `−base_fee_per_gas`, RFC 3339 timestamps, `anchor_get_records`
+  requires `registry_id` or `checksum`).
+
 ### Added
 
 - **`nonce` inside `wallet_tx_request`** on every `anchor_prepare_*`

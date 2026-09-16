@@ -32,9 +32,10 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 		Name:  "evm_get_block",
 		Title: "Get Block",
 		Description: "Returns a block by number or hash. " +
-			"Use block_number (an integer or the tag \"latest\"/\"earliest\") for " +
-			"number lookup, block_hash for hash lookup. Provide one or the " +
+			"Use block_number (an integer 0 or greater, or the tag \"latest\"/\"earliest\") " +
+			"for number lookup, block_hash for hash lookup. Provide one or the " +
 			"other -- supplying both is rejected. Omit both for the latest block. " +
+			"A missing block is not-found, not a zero placeholder. " +
 			"Set full_transactions to true to include transaction details.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBlockHandler(evmClient))
