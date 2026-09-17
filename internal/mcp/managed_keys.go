@@ -209,6 +209,24 @@ func (m *ManagedKeyStore) Empty() bool {
 	return m.store.Empty()
 }
 
+// UsableCount returns the number of keys that would be accepted right now:
+// enabled AND not past expires_at as of the store clock. Empty()/ActiveCount
+// count only the enabled flag, so a file whose every key has expired passed
+// the HTTP fail-closed boot check and the server came up with zero keys
+// that could authenticate anything (directory review 2026-09-15, L-9).
+func (m *ManagedKeyStore) UsableCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	now := m.now()
+	count := 0
+	for i := range m.entries {
+		if classifyEntry(&m.entries[i], now) == auth.RejectNone {
+			count++
+		}
+	}
+	return count
+}
+
 // List returns redacted summaries of all keys.
 func (m *ManagedKeyStore) List() []KeySummary {
 	m.mu.RLock()

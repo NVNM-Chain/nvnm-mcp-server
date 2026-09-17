@@ -10,6 +10,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
@@ -355,8 +356,16 @@ func TestHandler_GetBlock_InvalidHash(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid hash")
 	}
-	if !errors.Is(err, apperrors.ErrInvalidTxHash) {
-		t.Errorf("error = %v, want ErrInvalidTxHash", err)
+	// A block hash is not a transaction hash; the message must not say it
+	// is (directory review 2026-09-15, L-1).
+	if !errors.Is(err, apperrors.ErrInvalidHash) {
+		t.Errorf("error = %v, want ErrInvalidHash", err)
+	}
+	if errors.Is(err, apperrors.ErrInvalidTxHash) || strings.Contains(err.Error(), "transaction hash") {
+		t.Errorf("block-hash error must not be reported as a transaction-hash error: %v", err)
+	}
+	if !apperrors.IsInputError(err) {
+		t.Errorf("must be an input-class error: %v", err)
 	}
 }
 
@@ -754,10 +763,15 @@ func TestHandler_GetRegistry_MissingID(t *testing.T) {
 
 	_, _, err := handler(ctx, nil, getRegistryInput{})
 	if err == nil {
-		t.Fatal("expected error when id not provided")
+		t.Fatal("expected error when id is zero")
 	}
-	if !errors.Is(err, apperrors.ErrMissingRequired) {
-		t.Errorf("error = %v, want ErrMissingRequired", err)
+	// id=0 is present but invalid (IDs start at 1); an absent id is already
+	// a schema rejection, so "missing" was the wrong word (M-2).
+	if !errors.Is(err, apperrors.ErrInvalidRegistryID) {
+		t.Errorf("error = %v, want ErrInvalidRegistryID", err)
+	}
+	if !strings.Contains(err.Error(), "1 or greater") {
+		t.Errorf("error must state the valid range: %v", err)
 	}
 }
 
@@ -1774,7 +1788,8 @@ func TestHandler_GetRecords_WithPagination(t *testing.T) {
 
 	offset := uint64(0)
 	limit := uint64(10)
-	_, out, err := handler(ctx, nil, getRecordsInput{Offset: &offset, Limit: &limit})
+	registryID := uint64(1)
+	_, out, err := handler(ctx, nil, getRecordsInput{RegistryID: &registryID, Offset: &offset, Limit: &limit})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

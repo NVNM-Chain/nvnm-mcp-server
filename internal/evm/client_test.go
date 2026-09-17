@@ -75,9 +75,16 @@ func (s *stubRPCClient) SendRawTransaction(context.Context, []byte) (*defitypes.
 // as a nil *big.Int) is converted to an error rather than crashing the process
 // with a nil-pointer panic. On the stdio transport an unrecovered panic here is
 // a denial of service triggerable by a hostile or MITM'd RPC node (EV-2).
+//
+// The fixture carries a non-zero hash so it reads as a present-but-malformed
+// block: an all-zero block is a JSON-RPC null (block not found), which
+// BlockByNumber now reports as ErrBlockNotFound before normalization runs.
 func TestClient_BlockByNumber_HostileNilNumberReturnsError(t *testing.T) {
 	c := &client{
-		rpc:     &stubRPCClient{block: &defitypes.Block{ /* Number: nil */ }},
+		rpc: &stubRPCClient{block: &defitypes.Block{
+			Hash: defitypes.MustHashFromHex("0x0000000000000000000000000000000000000000000000000000000000000001", defitypes.PadNone),
+			/* Number: nil */
+		}},
 		timeout: time.Second,
 	}
 

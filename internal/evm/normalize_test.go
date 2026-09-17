@@ -251,3 +251,28 @@ func TestNormalizeLog_PendingFieldsNil(t *testing.T) {
 		t.Errorf("topics = %v, want empty", nl.Topics)
 	}
 }
+
+// TestNormalizeBlock_FullTxMapsFrom pins the M-7 fix (directory review
+// 2026-09-15): the node returns the recovered sender on every included
+// transaction, and the block summary now carries it instead of an always-
+// empty `from`.
+func TestNormalizeBlock_FullTxMapsFrom(t *testing.T) {
+	from := defitypes.MustAddressFromHex("0x57eb2e9ee9345ce3dd4063e130d58ec79aba7207")
+	to := defitypes.MustAddressFromHex("0x0000000000000000000000000000000000000A00")
+	tx := defitypes.OnChainTransaction{}
+	tx.From = &from
+	tx.To = &to
+	tx.Value = big.NewInt(0)
+	block := &defitypes.Block{
+		Number:       big.NewInt(5000),
+		Timestamp:    time.Unix(1709300000, 0),
+		Transactions: []defitypes.OnChainTransaction{tx},
+	}
+	nb := normalizeBlock(block, true)
+	if len(nb.Transactions) != 1 {
+		t.Fatalf("transactions = %d, want 1", len(nb.Transactions))
+	}
+	if got, want := nb.Transactions[0].From, "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207"; got != want { // pragma: allowlist secret -- EIP-55 test vector
+		t.Errorf("from = %q, want EIP-55 %q", got, want)
+	}
+}

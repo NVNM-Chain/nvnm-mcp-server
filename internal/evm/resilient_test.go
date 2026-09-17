@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/defiweb/go-eth/rpc/transport"
 	defitypes "github.com/defiweb/go-eth/types"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -168,6 +169,60 @@ func TestResilientClient_CircuitBreakerTrips(t *testing.T) {
 	}
 	if !errors.Is(err, ierrors.ErrCircuitOpen) {
 		t.Errorf("error = %v, want ErrCircuitOpen", err)
+	}
+}
+
+// TestResilientClient_CallerInputErrorsDoNotTripBreaker is the H-8 regression
+// (directory review re-test 2026-09-15): a caller-input rejection or a
+// JSON-RPC application error from a healthy node must not count toward the
+// breaker, otherwise five bad anonymous lookups blank the service for
+// BreakerTimeout. Only transport-class failures trip it.
+func TestResilientClient_CallerInputErrorsDoNotTripBreaker(t *testing.T) {
+	benign := []error{
+		ierrors.ErrBlockNotFound,
+		ierrors.ErrTxNotFound,
+		fmt.Errorf("records call failed: %w", ierrors.ErrRecordNotFound),
+		ierrors.ErrCallReverted,
+		ierrors.ErrBlockBeyondHead,
+		fmt.Errorf("send transaction: %w", ierrors.Curate(ierrors.ErrTxNonceConflict, errors.New("invalid nonce"))),
+		// A raw JSON-RPC application error the higher layers have not (yet)
+		// curated: the node answered, so it is healthy.
+		fmt.Errorf("estimate gas: %w", &transport.RPCError{Code: -32000, Message: "desc = unauthorized"}),
+		fmt.Errorf("get block by hash: %w", &transport.RPCError{Code: -32000, Message: "block not found for hash 0x1"}),
+	}
+	for _, e := range benign {
+		if !breakerCountsAsSuccess(e) {
+			t.Errorf("breakerCountsAsSuccess(%v) = false, want true", e)
+		}
+	}
+	failures := []error{
+		fmt.Errorf("%w: connection refused", ierrors.ErrUpstreamRPC),
+		context.DeadlineExceeded,
+		&net.OpError{Op: "dial", Err: errors.New("refused")},
+		fmt.Errorf("get block by number: %w", ierrors.ErrNodeResponseDecode),
+		errors.New("something unclassified"),
+	}
+	for _, e := range failures {
+		if breakerCountsAsSuccess(e) {
+			t.Errorf("breakerCountsAsSuccess(%v) = true, want false", e)
+		}
+	}
+
+	// End to end: many consecutive not-found answers leave the breaker
+	// closed, and a real call afterwards still reaches the node.
+	inner := &failingClient{failCount: 100, failErr: ierrors.ErrBlockNotFound}
+	cfg := testResilientConfig()
+	cfg.MaxRetries = 0
+	cfg.BreakerThreshold = 3
+	cfg.BreakerTimeout = time.Hour // would be fatal to the test if tripped
+	rc := NewResilientClient(inner, cfg, newTestMetrics(t), slog.Default())
+	for i := 0; i < 10; i++ {
+		if _, err := rc.ChainID(context.Background()); !errors.Is(err, ierrors.ErrBlockNotFound) {
+			t.Fatalf("call %d: err = %v, want ErrBlockNotFound (breaker must stay closed)", i, err)
+		}
+	}
+	if calls := int(inner.callCount.Load()); calls != 10 {
+		t.Errorf("inner calls = %d, want 10 (every call must reach the node)", calls)
 	}
 }
 

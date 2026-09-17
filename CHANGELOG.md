@@ -9,6 +9,120 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (connector-directory review 2026-09-15, High items H-1/H-2/H-3, M-1)
+
+Findings and evidence: `docs/ANTHROPIC_DIRECTORY_REVIEW_2026-09-15.md`.
+
+- **H-1 · `evm_get_block` no longer fabricates a block.** A non-existent
+  block number made the node return JSON `null`, which `go-eth` decodes as
+  a zero-value block; the server normalized it into an all-zero block with
+  `isError:false`. `BlockByNumber`/`BlockByHash` now return `block not
+  found` for a nil or hash-less block (the genesis block keeps working: it
+  has a non-zero hash). The node's `block not found for hash …` error is
+  classified the same way. Negative block numbers are rejected by the
+  schema (`minimum: 0` on the integer branch of every `block_number` /
+  `from_block` / `to_block` input) and by `blockNumberArg.UnmarshalJSON`;
+  previously the node silently mapped `-5` onto a real block.
+- **H-3 · relay scope enforces `value == 0`.** `checkRelayScope` compared
+  only the destination, so a signed call to the precompile carrying native
+  value was broadcast, reverted on chain and burned the signer's gas (the
+  precompile is not payable) while README/TOOL_REFERENCE promised value
+  transfers are refused. Such transactions are now rejected before
+  broadcast with the new `ErrRelayValueRejected` message; the audit line
+  records `value_wei`. `MCP_RELAY_ALLOW_ANY` is unchanged (no scope at all).
+- **H-2 · curated errors for the rejections a reviewer actually hits.**
+  Every case below previously collapsed to `upstream operation failed`.
+  The node/precompile phrasing was captured live and added to the
+  substring allow-lists; only the curated text is ever surfaced:
+  - `evm_send_raw_transaction`: stale/duplicate nonce
+    (`ErrTxNonceConflict`), re-broadcast of a pending tx
+    (`ErrTxAlreadyKnown`), signature for another chain
+    (`ErrTxChainIDMismatch`), unfunded signer (`ErrInsufficientFunds`).
+    The write-audit log line and `write_audit.error` keep the node's raw
+    text via `apperrors.Curate`/`RawCause`; the client sees the sentinel.
+  - `anchor_get_records`: unknown record / version → `record not found`;
+    `record_id` without `registry_id` → an input error naming the fix.
+    The precompile revert classifier now runs on the read path
+    (`callPrecompile`), not only on gas estimation.
+  - `anchor_prepare_grant_role` / `revoke_role`: the chain's
+    `missing required role` phrasing now maps to the same curated on-chain
+    role-denial text as `unauthorized`; `address does not have the
+    specified role` (revoking an unheld role) gets its own message;
+    `role` is validated client-side (`admin` or `editor`, exact match,
+    `ErrInvalidRole`) as the docs have long claimed.
+  - `anchor_prepare_add_registry`: names over the precompile's 128-char
+    cap are rejected client-side (`ErrInputTooLarge`, names the cap) with
+    a revert-classifier backstop; a `collections: not found … Registry`
+    revert (unknown registry on `add_record`) maps to `registry not found`.
+  - `evm_call_contract`: non-hex `data` is an input error
+    (`ErrInvalidHexData`); a revert (`execution reverted`, precompile
+    `unknown method id` / `invalid input length`) is `ErrCallReverted`
+    with remediation, via the new `evm.ClassifyCallRevert` (applied only
+    in the tool handler so the anchor client keeps seeing raw reasons).
+  - `evm_get_balance` / `evm_get_code` / `evm_get_block` at a block past
+    the head → `ErrBlockBeyondHead` ("use latest or a block at or below
+    the head") instead of the generic collapse.
+- **H-8 · caller-input errors no longer trip the upstream circuit
+  breaker.** Found while re-testing the fixes: `gobreaker` counted every
+  non-nil error as an upstream failure, so five consecutive bad lookups
+  (unknown record, revert, block past the head, …) from any anonymous
+  caller opened the breaker and every tool answered `service temporarily
+  unavailable (circuit open)` for `CIRCUIT_BREAKER_TIMEOUT` (30 s) -- a
+  trivially reachable denial of service. `IsSuccessful` now treats a
+  JSON-RPC application error (`*transport.RPCError`: the node answered, so
+  it is up) and any input-class / not-found sentinel as a health signal;
+  transport errors, timeouts and malformed node responses still count.
+- **M-1 · `anchor_prepare_*` descriptions match keyless mode.** Each
+  description stated the API-key role as an unconditional requirement,
+  but under `MCP_KEYLESS_READS=true` (the hosted default) the prepare
+  tools run anonymously and RBAC is not consulted. The access-control
+  sentence now says the role applies when the deployment authenticates the
+  caller, and that on-chain permission is decided by the registry's admin.
+  A test pins the wording against `authExemptTools`.
+
+### Fixed (connector-directory review 2026-09-15, Medium / Low batch)
+
+- **M-3 · `anchor_get_records` requires `registry_id` or `checksum`.** A
+  call with neither used to list the first 100 records of the entire chain
+  (142 KB on the populated testnet) through a mode the description never
+  listed. It is now a fail-fast input error naming the two entry points;
+  the description says so. `record_id`/`index` still need `registry_id`.
+- **M-2 · silent acceptance closed.** (a) Every address parameter goes
+  through `evm.ParseAddress`, which enforces the EIP-55 checksum on
+  mixed-case input (all-lower/upper hex still accepted) and names the
+  expected spelling in the error. (b) `anchor_get_registries` `key` must
+  decode to the 8-byte registry cursor; valid-base64-of-anything-else used
+  to yield a silent empty page. (c) `anchor_get_registry {id: 0}` reports
+  `invalid registry ID` ("1 or greater") instead of "missing".
+- **M-7 · `evm_get_block` `full_transactions` now carries `from`**
+  (recovered sender, EIP-55). The never-populated `base_fee_per_gas` field
+  is removed from the response type and docs rather than kept as a promise
+  the decoder cannot honour.
+- **L-1 · hash error wording.** A bad `block_hash` reports `invalid hash`,
+  a bad log topic `invalid log topics`; only `tx_hash` says "invalid
+  transaction hash". Messages state the expected size and what was received.
+- **L-2 · RFC 3339 timestamps.** `created_at` / `timestamp` are re-rendered
+  from the precompile's Go `time.String()` form to RFC 3339 UTC
+  (`2026-04-14T13:10:26.791492184Z`), the format the docs always showed.
+  Unrecognized layouts pass through unchanged. Goldens updated.
+- **L-3 · `[]` not `null`** for an empty registries page (offset past the
+  end, empty cursor page, empty name-match window).
+- **L-9 · expired keys no longer satisfy the HTTP fail-closed boot check.**
+  `ManagedKeyStore.UsableCount` counts enabled AND unexpired keys; a file
+  whose only enabled key had expired used to boot a server nobody could
+  authenticate to. The boot log now reports `usable` next to `enabled`.
+- **L-14 · descriptions describe, they do not instruct.** "Always call this
+  after submitting a transaction" → "Use it after a broadcast"; "Call this
+  first if you have never used this server" → "Intended as the first call
+  of a session…". A test rejects behavioural imperatives in any description.
+
+### Documentation
+
+- **`evm_get_block` description** now matches the schema/handler (`block_number`
+  ≥ 0; missing block is not-found). `docs/TOOL_REFERENCE.md` I/O tables match
+  (`+from`, `−base_fee_per_gas`, RFC 3339 timestamps, `anchor_get_records`
+  requires `registry_id` or `checksum`).
+
 ### Added
 
 - **`nonce` inside `wallet_tx_request`** on every `anchor_prepare_*`

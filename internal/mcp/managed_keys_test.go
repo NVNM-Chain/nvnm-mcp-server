@@ -427,3 +427,49 @@ func TestManagedKeyStore_Empty_EnabledOnly(t *testing.T) {
 		t.Fatal("Empty() = true, want false: store with one enabled key should not be empty")
 	}
 }
+
+// TestManagedKeyStore_UsableCount pins the boot-time fail-closed check
+// (directory review 2026-09-15, L-9): a key that is enabled but past
+// expires_at is not usable, so a file holding only such keys must report
+// zero even though ActiveCount still says one.
+func TestManagedKeyStore_UsableCount(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	mks, err := NewManagedKeyStore(tempKeysFile(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mks.now = func() time.Time { return now }
+
+	if got := mks.UsableCount(); got != 0 {
+		t.Fatalf("empty store UsableCount = %d, want 0", got)
+	}
+	if _, err := mks.Create(context.Background(), "expired", []string{"reader"}, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got, active := mks.UsableCount(), mks.ActiveCount(); got != 0 || active != 1 {
+		t.Fatalf("only-expired store: UsableCount = %d (want 0), ActiveCount = %d (want 1)", got, active)
+	}
+	if _, err := mks.Create(context.Background(), "revoked", []string{"reader"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mks.Update("revoked", KeyUpdate{Enabled: boolPtr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mks.UsableCount(); got != 0 {
+		t.Fatalf("expired+revoked store: UsableCount = %d, want 0", got)
+	}
+	if _, err := mks.Create(context.Background(), "future", []string{"reader"}, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mks.Create(context.Background(), "forever", []string{"reader"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mks.UsableCount(); got != 2 {
+		t.Fatalf("UsableCount = %d, want 2 (unexpired + never-expiring)", got)
+	}
+	// Time moving past the "future" expiry drops it from the count.
+	mks.now = func() time.Time { return now.Add(2 * time.Hour) }
+	if got := mks.UsableCount(); got != 1 {
+		t.Fatalf("after expiry UsableCount = %d, want 1", got)
+	}
+}

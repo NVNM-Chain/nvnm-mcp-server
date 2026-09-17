@@ -68,7 +68,8 @@ func TestGetRecords_CapsAndLabelsUntrusted(t *testing.T) {
 	c := &fakeAnchor{records: []anchor.Record{{RecordID: 1, Metadata: big, URI: "ipfs://ok"}}}
 	h := makeGetRecordsHandler(c)
 
-	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRecordsInput{})
+	registryID := uint64(1)
+	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRecordsInput{RegistryID: &registryID})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}

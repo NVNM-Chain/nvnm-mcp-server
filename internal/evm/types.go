@@ -11,7 +11,6 @@ type NormalizedBlock struct {
 	TimestampUnix    uint64                `json:"timestamp_unix"`
 	GasLimit         uint64                `json:"gas_limit"`
 	GasUsed          uint64                `json:"gas_used"`
-	BaseFeePerGas    *string               `json:"base_fee_per_gas,omitempty"`
 	Miner            string                `json:"miner"`
 	TransactionCount int                   `json:"transaction_count"`
 	Transactions     []NormalizedTxSummary `json:"transactions,omitempty"`

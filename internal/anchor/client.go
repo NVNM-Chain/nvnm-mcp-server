@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	defiabi "github.com/defiweb/go-eth/abi"
 	defitypes "github.com/defiweb/go-eth/types"
@@ -361,6 +362,13 @@ func (c *client) callPrecompile(
 
 	output, err := c.evmClient.CallContract(ctx, msg, nil)
 	if err != nil {
+		// Reads revert for caller-input reasons too (a missing record,
+		// record_id without registry_id). Surface the curated reason the
+		// same way the gas-estimation path does; anything unrecognized keeps
+		// the generic wrap and collapses at SafeForClient.
+		if reason, ok, kind := classifyPrecompileRevert(err); ok {
+			return nil, curatePrecompileErr(reason, kind)
+		}
 		return nil, fmt.Errorf("%s call failed: %w", method, err)
 	}
 	return output, nil
@@ -402,11 +410,30 @@ func toRegistries(rows []abiRegistryRow) []Registry {
 			Description: rows[i].Description,
 			Creator:     rows[i].Creator,
 			CreatorEVM:  creatorEVM(rows[i].Creator),
-			CreatedAt:   rows[i].CreatedAt,
+			CreatedAt:   normalizeChainTime(rows[i].CreatedAt),
 			Metadata:    rows[i].Metadata,
 		}
 	}
 	return out
+}
+
+// chainTimeLayout is the layout the precompile uses for its createdAt /
+// timestamp strings: Go's time.Time.String() output (observed live as
+// "2026-04-14 13:10:26.791492184 +0000 UTC"). The chain hands these over as
+// ABI strings, so the server has to parse them to offer a standard format.
+const chainTimeLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
+
+// normalizeChainTime re-renders a chain timestamp as RFC 3339 (UTC,
+// nanosecond precision) -- the format every client library parses without
+// a custom layout and the one the docs always showed (directory review
+// 2026-09-15, L-2). A value in an unexpected layout is passed through
+// unchanged rather than dropped: the caller still sees what the chain said.
+func normalizeChainTime(s string) string {
+	t, err := time.Parse(chainTimeLayout, s)
+	if err != nil {
+		return s
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func toRecords(rows []abiRecordRow) []Record {
@@ -421,7 +448,7 @@ func toRecords(rows []abiRecordRow) []Record {
 			URI:          rows[i].URI,
 			Status:       rows[i].Status,
 			IsLatest:     rows[i].IsLatest,
-			Timestamp:    rows[i].Timestamp,
+			Timestamp:    normalizeChainTime(rows[i].Timestamp),
 			Metadata:     rows[i].Metadata,
 		}
 	}

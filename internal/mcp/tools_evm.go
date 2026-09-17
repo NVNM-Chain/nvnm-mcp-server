@@ -32,9 +32,10 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 		Name:  "evm_get_block",
 		Title: "Get Block",
 		Description: "Returns a block by number or hash. " +
-			"Use block_number (an integer or the tag \"latest\"/\"earliest\") for " +
-			"number lookup, block_hash for hash lookup. Provide one or the " +
+			"Use block_number (an integer 0 or greater, or the tag \"latest\"/\"earliest\") " +
+			"for number lookup, block_hash for hash lookup. Provide one or the " +
 			"other -- supplying both is rejected. Omit both for the latest block. " +
+			"A missing block is not-found, not a zero placeholder. " +
 			"Set full_transactions to true to include transaction details.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBlockHandler(evmClient))
@@ -52,7 +53,7 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 		Title: "Get Transaction Receipt",
 		Description: "Returns the receipt for a mined transaction, " +
 			"including status, gas used, logs, and created contract address. " +
-			"Always call this after submitting a transaction to confirm the outcome. " +
+			"Use it after a broadcast to confirm the outcome. " +
 			"status='success' means the transaction executed correctly on-chain. " +
 			"status='reverted' means the transaction was included but the contract " +
 			"rejected it (e.g. permission denied, bad input) -- the write did NOT occur " +
@@ -199,23 +200,25 @@ func makeGetBlockHandler(
 					"provide block_number or block_hash, not both: %w",
 					apperrors.ErrInvalidBlockRef)
 			}
-			hash, err := parseHash(*input.BlockHash)
+			hash, err := parseHash32(*input.BlockHash, apperrors.ErrInvalidHash)
 			if err != nil {
 				return nil, blockOutput{},
 					fmt.Errorf("invalid block_hash: %w", err)
 			}
+			// The client distinguishes a missing block (ErrBlockNotFound), a
+			// reference past the head (ErrBlockBeyondHead) and an outage
+			// (generic, collapsed by SafeForClient); a blanket "block not
+			// found:" prefix here used to mislabel all three.
 			block, err := c.BlockByHash(ctx, hash, input.FullTx)
 			if err != nil {
-				return nil, blockOutput{},
-					fmt.Errorf("block not found: %w", err)
+				return nil, blockOutput{}, err
 			}
 			return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 		}
 
 		block, err := c.BlockByNumber(ctx, input.BlockNumber.bigInt(), input.FullTx)
 		if err != nil {
-			return nil, blockOutput{},
-				fmt.Errorf("block not found: %w", err)
+			return nil, blockOutput{}, err
 		}
 		return nil, blockOutput{NormalizedBlock: *block, NextActions: evmGetBlockNext()}, nil
 	}
@@ -357,7 +360,7 @@ func makeGetLogsHandler(
 		if len(input.Topics) > 0 {
 			topicSet := make([]defitypes.Hash, len(input.Topics))
 			for i, t := range input.Topics {
-				hash, err := parseHash(t)
+				hash, err := parseHash32(t, apperrors.ErrInvalidTopics)
 				if err != nil {
 					return nil, getLogsOutput{},
 						fmt.Errorf("invalid topic at index %d: %w", i, err)
@@ -425,6 +428,12 @@ func makeCallContractHandler(
 		}
 		result, err := c.CallContract(ctx, msg, input.BlockNum.bigInt())
 		if err != nil {
+			// A revert is the caller's problem (wrong selector, bad calldata,
+			// failed require), not an outage; surface the curated sentinel so
+			// the agent can correct the call instead of retrying blindly.
+			if curated := evm.ClassifyCallRevert(err); curated != nil {
+				return nil, callContractOutput{}, curated
+			}
 			return nil, callContractOutput{},
 				fmt.Errorf("contract call failed: %w", err)
 		}
@@ -437,28 +446,36 @@ func makeCallContractHandler(
 
 // --- Validation helpers ---
 
+// parseAddress is the single address parser for tool inputs. It defers to
+// evm.ParseAddress so the EIP-55 checksum rule for mixed-case input is
+// enforced identically on every tool.
 func parseAddress(s string) (defitypes.Address, error) {
-	addr, err := defitypes.AddressFromHex(s)
-	if err != nil {
-		return defitypes.Address{},
-			fmt.Errorf("%q: %w", s, apperrors.ErrInvalidAddress)
-	}
-	return addr, nil
+	return evm.ParseAddress(s)
 }
 
+// parseHash parses a transaction hash. Block hashes and log topics share the
+// 32-byte shape but are not transaction hashes; they go through
+// parseHash32 so a bad block_hash is not reported as an "invalid
+// transaction hash" (directory review 2026-09-15, L-1).
 func parseHash(s string) (defitypes.Hash, error) {
-	s = strings.TrimPrefix(s, "0x")
-	if len(s) != 64 {
+	return parseHash32(s, apperrors.ErrInvalidTxHash)
+}
+
+// parseHash32 parses a 0x-prefixed (or bare) 32-byte hex value, wrapping
+// every failure in kind so the message names what the caller got wrong.
+func parseHash32(s string, kind error) (defitypes.Hash, error) {
+	raw := strings.TrimPrefix(s, "0x")
+	if len(raw) != 64 {
 		return defitypes.Hash{},
-			fmt.Errorf("%q: %w", s, apperrors.ErrInvalidTxHash)
+			fmt.Errorf("%q: want 32 bytes (64 hex digits), got %d: %w", s, len(raw), kind)
 	}
-	b, err := hex.DecodeString(s)
+	b, err := hex.DecodeString(raw)
 	if err != nil {
-		return defitypes.Hash{}, fmt.Errorf("invalid hash hex: %w", err)
+		return defitypes.Hash{}, fmt.Errorf("%q: not valid hex: %w", s, kind)
 	}
 	h, err := defitypes.HashFromBytes(b, defitypes.PadNone)
 	if err != nil {
-		return defitypes.Hash{}, fmt.Errorf("invalid hash bytes: %w", err)
+		return defitypes.Hash{}, fmt.Errorf("%q: %w", s, kind)
 	}
 	return h, nil
 }
@@ -472,5 +489,11 @@ func parseHexData(s string) ([]byte, error) {
 		return nil, fmt.Errorf("hex data too large (%d chars, max %d): %w",
 			len(s), maxHexDataLen, apperrors.ErrInvalidABI)
 	}
-	return hex.DecodeString(s)
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		// A bare hex.DecodeString error carries no sentinel, so SafeForClient
+		// collapsed a caller typo into "upstream operation failed".
+		return nil, fmt.Errorf("%w", apperrors.ErrInvalidHexData)
+	}
+	return b, nil
 }

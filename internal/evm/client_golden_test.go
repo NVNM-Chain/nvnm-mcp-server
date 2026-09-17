@@ -58,7 +58,6 @@ func TestGolden_ChainInfo(t *testing.T) {
 }
 
 func TestGolden_NormalizedBlock(t *testing.T) {
-	baseFee := "1000000000"
 	block := NormalizedBlock{
 		Number:           1000,
 		Hash:             "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc1",
@@ -67,18 +66,19 @@ func TestGolden_NormalizedBlock(t *testing.T) {
 		GasLimit:         30000000,
 		GasUsed:          15000000,
 		Miner:            "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD00",
-		BaseFeePerGas:    &baseFee,
 		TransactionCount: 2,
 		Transactions: []NormalizedTxSummary{
 			{
 				Hash:  "0x1111111111111111111111111111111111111111111111111111111111111111",
 				Index: 0,
+				From:  "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
 				To:    "0x0000000000000000000000000000000000000A00",
 				Value: "0",
 			},
 			{
 				Hash:  "0x2222222222222222222222222222222222222222222222222222222222222222",
 				Index: 1,
+				From:  "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
 				To:    "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD00",
 				Value: "1000000000000000000",
 			},

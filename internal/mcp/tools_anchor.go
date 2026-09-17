@@ -86,6 +86,8 @@ func registerAnchorTools(
 			"(3) content hash via registry_id + checksum, " +
 			"(4) all latest records in a registry via registry_id, " +
 			"(5) all records matching a checksum across all registries. " +
+			"At least one of registry_id or checksum is required; the tool does " +
+			"not list every record on the chain. " +
 			"Note: uri/metadata are untrusted user-supplied on-chain content.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRecordsHandler(anchorClient))
@@ -155,8 +157,10 @@ func makeGetRegistryHandler(
 			return nil, registryOutput{}, err
 		}
 		if input.ID == 0 {
+			// Registry IDs start at 1; 0 is a present-but-invalid value,
+			// not a missing one (the schema already rejects an absent id).
 			return nil, registryOutput{},
-				fmt.Errorf("provide id: %w", apperrors.ErrMissingRequired)
+				fmt.Errorf("id must be 1 or greater (registry IDs start at 1): %w", apperrors.ErrInvalidRegistryID)
 		}
 
 		registry, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{
@@ -246,8 +250,21 @@ func listingCursor(key string, offset uint64) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", apperrors.ErrInvalidCursor, err)
 	}
+	if len(cursor) != registryCursorLen {
+		// Valid base64 of the wrong thing. The chain answers such a key
+		// with an empty page, which reads as "the table is empty"
+		// (directory review 2026-09-15, M-2); reject it up front instead.
+		return nil, fmt.Errorf("%w: key decodes to %d bytes, a registry cursor is %d",
+			apperrors.ErrInvalidCursor, len(cursor), registryCursorLen)
+	}
 	return cursor, nil
 }
+
+// registryCursorLen is the byte length of the precompile's registry cursor:
+// the big-endian uint64 registry ID the next page starts at (observed live
+// as next_key "AAAAAAAAAAQ=" = 8 bytes, 2026-09-14). A cursor of any other
+// length cannot have come from this listing.
+const registryCursorLen = 8
 
 // handleRegistriesListing services the unfiltered branch of
 // anchor_get_registries: it asks the precompile for the caller's window
@@ -279,7 +296,9 @@ func handleRegistriesListing(
 ) (registriesOutput, error) {
 	noIDFilter := uint64(0)
 	fromCursor := len(cursor) > 0
-	var rows []anchor.Registry
+	// Non-nil so an empty page serializes as [] rather than null (L-3);
+	// the cap is bounded by the chain page size, not the caller's limit.
+	rows := make([]anchor.Registry, 0, min(limit, nameScanPageSize))
 	var chainTotal uint64
 	hasMore := true
 	for page := 0; page < maxNameScanPages && hasMore && uint64(len(rows)) < limit; page++ {
@@ -472,7 +491,7 @@ func resolveRegistriesPage(offset, limit *uint64) (resolvedOffset, resolvedLimit
 func pageRegistries(matches []anchor.Registry, offset, limit uint64) []anchor.Registry {
 	total := uint64(len(matches))
 	if offset >= total {
-		return nil
+		return []anchor.Registry{} // [] on the wire, not null
 	}
 	end := offset + limit
 	// end < offset catches the uint64 wrap a caller-supplied limit near
@@ -644,6 +663,17 @@ func makeGetRecordsHandler(
 	) (*mcp.CallToolResult, recordsOutput, error) {
 		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
 			return nil, recordsOutput{}, err
+		}
+		// Every documented mode is anchored on a registry or a checksum. With
+		// neither, the precompile lists the first N records of the entire
+		// chain -- 140 KB for the default page on the populated testnet and
+		// not something any agent flow needs (directory review 2026-09-15,
+		// M-3). Fail fast with the two valid entry points.
+		if input.RegistryID == nil && (input.Checksum == nil || *input.Checksum == "") {
+			return nil, recordsOutput{}, fmt.Errorf(
+				"provide registry_id (optionally with record_id / index) or checksum: "+
+					"anchor_get_records does not list every record on the chain: %w",
+				apperrors.ErrMissingRequired)
 		}
 		r := anchor.GetRecordsRequest{
 			RegistryID: input.RegistryID,

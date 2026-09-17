@@ -182,7 +182,7 @@ func TestGetRegistry_Success(t *testing.T) {
 		Description: "first registry",
 		Creator:     "nvnm1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5uyxmzt",
 		CreatorEVM:  "0x0102030405060708090a0b0c0d0e0f1011121314",
-		CreatedAt:   "2026-03-01 12:00:00.000000000 +0000 UTC",
+		CreatedAt:   "2026-03-01T12:00:00Z", // RFC 3339 form of the raw chain string above (L-2)
 		Metadata:    "{\"env\":\"test\"}",
 	}
 	if *reg != want {
@@ -490,7 +490,7 @@ func TestGetRecords_Success(t *testing.T) {
 		URI:          "ipfs://Qm123",
 		Status:       "Active",
 		IsLatest:     true,
-		Timestamp:    "2026-03-01 14:30:00.000000000 +0000 UTC",
+		Timestamp:    "2026-03-01T14:30:00Z", // RFC 3339 form of the raw chain string above (L-2)
 		Metadata:     "{\"file\":\"a.pdf\"}",
 	}
 	if resp.Records[0] != want {
@@ -677,5 +677,27 @@ func TestCallPrecompile_PackError(t *testing.T) {
 	_, err = c.GetRecords(context.Background(), GetRecordsRequest{RegistryID: &regID})
 	if err == nil || !strings.Contains(err.Error(), "failed to pack records call") {
 		t.Fatalf("want pack error for records, got %v", err)
+	}
+}
+
+// TestNormalizeChainTime pins the RFC 3339 re-rendering of the precompile's
+// Go-formatted timestamps (directory review 2026-09-15, L-2) and the
+// pass-through for anything in an unexpected layout.
+func TestNormalizeChainTime(t *testing.T) {
+	cases := map[string]string{
+		"2026-04-14 13:10:26.791492184 +0000 UTC": "2026-04-14T13:10:26.791492184Z",
+		"2026-03-01 12:00:00.000000000 +0000 UTC": "2026-03-01T12:00:00Z",
+		"2026-02-27 18:28:54.56053554 +0000 UTC":  "2026-02-27T18:28:54.56053554Z",
+		// A non-UTC offset is normalized to UTC, not just reformatted.
+		"2026-02-27 20:28:54.5 +0200 EET": "2026-02-27T18:28:54.5Z",
+		// Unknown layouts pass through untouched.
+		"2026-02-27T18:28:54Z": "2026-02-27T18:28:54Z",
+		"not a time":           "not a time",
+		"":                     "",
+	}
+	for in, want := range cases {
+		if got := normalizeChainTime(in); got != want {
+			t.Errorf("normalizeChainTime(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -153,8 +153,8 @@ func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 		Description: "Lobby tool. Returns chain identity (env, chain ID, " +
 			"precompile address, explorer/docs/bridge URLs), the chain's " +
 			"privacy-by-design property, prerequisites for writes, and a " +
-			"6-step canonical agent journey. Call this first if you have " +
-			"never used this server before. No chain calls.",
+			"6-step canonical agent journey. Intended as the first call of a " +
+			"session that has not used this server before. No chain calls.",
 		Annotations: newClosedWorldReadOnly(),
 	}, makeOverviewHandler(cfg))
 }

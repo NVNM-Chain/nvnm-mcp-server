@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
+	"github.com/defiweb/go-eth/rpc/transport"
 	defitypes "github.com/defiweb/go-eth/types"
 	gobreaker "github.com/sony/gobreaker/v2"
 	"golang.org/x/time/rate"
@@ -59,7 +60,8 @@ func NewResilientClient(inner Client, cfg ResilientConfig, metrics *telemetry.Me
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			return counts.ConsecutiveFailures >= cfg.BreakerThreshold
 		},
-		Timeout: cfg.BreakerTimeout,
+		IsSuccessful: breakerCountsAsSuccess,
+		Timeout:      cfg.BreakerTimeout,
 		OnStateChange: func(name string, from, to gobreaker.State) {
 			logger.Warn("circuit breaker state change",
 				slog.String("name", name),
@@ -87,6 +89,27 @@ func NewResilientClient(inner Client, cfg ResilientConfig, metrics *telemetry.Me
 		metrics: metrics,
 		logger:  logger,
 	}
+}
+
+// breakerCountsAsSuccess decides which outcomes the circuit breaker treats as
+// upstream health signals. The breaker exists to shed load from a node that
+// is DOWN; a node that answers with a JSON-RPC application error (revert,
+// not-found, nonce conflict, bad block reference) is demonstrably up, and so
+// is one whose reply we classified as a caller-input rejection. Counting
+// those as failures let five consecutive bad lookups from any anonymous
+// caller trip the breaker and blank the service for BreakerTimeout -- a
+// trivially reachable denial of service found during the 2026-09-15
+// directory review re-test (H-8). Transport errors, timeouts, and malformed
+// node responses still count.
+func breakerCountsAsSuccess(err error) bool {
+	if err == nil {
+		return true
+	}
+	var rpcErr *transport.RPCError
+	if errors.As(err, &rpcErr) {
+		return true
+	}
+	return ierrors.IsInputError(err) || ierrors.IsNotFound(err)
 }
 
 // resilientCall executes fn with rate limiting, circuit breaker, and retry.
