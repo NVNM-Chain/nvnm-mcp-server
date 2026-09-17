@@ -9,6 +9,218 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (connector-directory review 2026-09-15, High items H-1/H-2/H-3, M-1)
+
+Findings and evidence: `docs/ANTHROPIC_DIRECTORY_REVIEW_2026-09-15.md`.
+
+- **H-1 · `evm_get_block` no longer fabricates a block.** A non-existent
+  block number made the node return JSON `null`, which `go-eth` decodes as
+  a zero-value block; the server normalized it into an all-zero block with
+  `isError:false`. `BlockByNumber`/`BlockByHash` now return `block not
+  found` for a nil or hash-less block (the genesis block keeps working: it
+  has a non-zero hash). The node's `block not found for hash …` error is
+  classified the same way. Negative block numbers are rejected by the
+  schema (`minimum: 0` on the integer branch of every `block_number` /
+  `from_block` / `to_block` input) and by `blockNumberArg.UnmarshalJSON`;
+  previously the node silently mapped `-5` onto a real block.
+- **H-3 · relay scope enforces `value == 0`.** `checkRelayScope` compared
+  only the destination, so a signed call to the precompile carrying native
+  value was broadcast, reverted on chain and burned the signer's gas (the
+  precompile is not payable) while README/TOOL_REFERENCE promised value
+  transfers are refused. Such transactions are now rejected before
+  broadcast with the new `ErrRelayValueRejected` message; the audit line
+  records `value_wei`. `MCP_RELAY_ALLOW_ANY` is unchanged (no scope at all).
+- **H-2 · curated errors for the rejections a reviewer actually hits.**
+  Every case below previously collapsed to `upstream operation failed`.
+  The node/precompile phrasing was captured live and added to the
+  substring allow-lists; only the curated text is ever surfaced:
+  - `evm_send_raw_transaction`: stale/duplicate nonce
+    (`ErrTxNonceConflict`), re-broadcast of a pending tx
+    (`ErrTxAlreadyKnown`), signature for another chain
+    (`ErrTxChainIDMismatch`), unfunded signer (`ErrInsufficientFunds`).
+    The write-audit log line and `write_audit.error` keep the node's raw
+    text via `apperrors.Curate`/`RawCause`; the client sees the sentinel.
+  - `anchor_get_records`: unknown record / version → `record not found`;
+    `record_id` without `registry_id` → an input error naming the fix.
+    The precompile revert classifier now runs on the read path
+    (`callPrecompile`), not only on gas estimation.
+  - `anchor_prepare_grant_role` / `revoke_role`: the chain's
+    `missing required role` phrasing now maps to the same curated on-chain
+    role-denial text as `unauthorized`; `address does not have the
+    specified role` (revoking an unheld role) gets its own message;
+    `role` is validated client-side (`admin` or `editor`, exact match,
+    `ErrInvalidRole`) as the docs have long claimed.
+  - `anchor_prepare_add_registry`: names over the precompile's 128-char
+    cap are rejected client-side (`ErrInputTooLarge`, names the cap) with
+    a revert-classifier backstop; a `collections: not found … Registry`
+    revert (unknown registry on `add_record`) maps to `registry not found`.
+  - `evm_call_contract`: non-hex `data` is an input error
+    (`ErrInvalidHexData`); a revert (`execution reverted`, precompile
+    `unknown method id` / `invalid input length`) is `ErrCallReverted`
+    with remediation, via the new `evm.ClassifyCallRevert` (applied only
+    in the tool handler so the anchor client keeps seeing raw reasons).
+  - `evm_get_balance` / `evm_get_code` / `evm_get_block` at a block past
+    the head → `ErrBlockBeyondHead` ("use latest or a block at or below
+    the head") instead of the generic collapse.
+- **H-8 · caller-input errors no longer trip the upstream circuit
+  breaker.** Found while re-testing the fixes: `gobreaker` counted every
+  non-nil error as an upstream failure, so five consecutive bad lookups
+  (unknown record, revert, block past the head, …) from any anonymous
+  caller opened the breaker and every tool answered `service temporarily
+  unavailable (circuit open)` for `CIRCUIT_BREAKER_TIMEOUT` (30 s) -- a
+  trivially reachable denial of service. `IsSuccessful` now treats a
+  JSON-RPC application error (`*transport.RPCError`: the node answered, so
+  it is up) and any input-class / not-found sentinel as a health signal;
+  transport errors, timeouts and malformed node responses still count.
+- **M-1 · `anchor_prepare_*` descriptions match keyless mode.** Each
+  description stated the API-key role as an unconditional requirement,
+  but under `MCP_KEYLESS_READS=true` (the hosted default) the prepare
+  tools run anonymously and RBAC is not consulted. The access-control
+  sentence now says the role applies when the deployment authenticates the
+  caller, and that on-chain permission is decided by the registry's admin.
+  A test pins the wording against `authExemptTools`.
+
+### Fixed (connector-directory review 2026-09-15, Medium / Low batch)
+
+- **M-3 · `anchor_get_records` requires `registry_id` or `checksum`.** A
+  call with neither used to list the first 100 records of the entire chain
+  (142 KB on the populated testnet) through a mode the description never
+  listed. It is now a fail-fast input error naming the two entry points;
+  the description says so. `record_id`/`index` still need `registry_id`.
+- **M-2 · silent acceptance closed.** (a) Every address parameter goes
+  through `evm.ParseAddress`, which enforces the EIP-55 checksum on
+  mixed-case input (all-lower/upper hex still accepted) and names the
+  expected spelling in the error. (b) `anchor_get_registries` `key` must
+  decode to the 8-byte registry cursor; valid-base64-of-anything-else used
+  to yield a silent empty page. (c) `anchor_get_registry {id: 0}` reports
+  `invalid registry ID` ("1 or greater") instead of "missing".
+- **M-7 · `evm_get_block` `full_transactions` now carries `from`**
+  (recovered sender, EIP-55). The never-populated `base_fee_per_gas` field
+  is removed from the response type and docs rather than kept as a promise
+  the decoder cannot honour.
+- **L-1 · hash error wording.** A bad `block_hash` reports `invalid hash`,
+  a bad log topic `invalid log topics`; only `tx_hash` says "invalid
+  transaction hash". Messages state the expected size and what was received.
+- **L-2 · RFC 3339 timestamps.** `created_at` / `timestamp` are re-rendered
+  from the precompile's Go `time.String()` form to RFC 3339 UTC
+  (`2026-04-14T13:10:26.791492184Z`), the format the docs always showed.
+  Unrecognized layouts pass through unchanged. Goldens updated.
+- **L-3 · `[]` not `null`** for an empty registries page (offset past the
+  end, empty cursor page, empty name-match window).
+- **L-9 · expired keys no longer satisfy the HTTP fail-closed boot check.**
+  `ManagedKeyStore.UsableCount` counts enabled AND unexpired keys; a file
+  whose only enabled key had expired used to boot a server nobody could
+  authenticate to. The boot log now reports `usable` next to `enabled`.
+- **L-14 · descriptions describe, they do not instruct.** "Always call this
+  after submitting a transaction" → "Use it after a broadcast"; "Call this
+  first if you have never used this server" → "Intended as the first call
+  of a session…". A test rejects behavioural imperatives in any description.
+
+### Documentation
+
+- **`evm_get_block` description** now matches the schema/handler (`block_number`
+  ≥ 0; missing block is not-found). `docs/TOOL_REFERENCE.md` I/O tables match
+  (`+from`, `−base_fee_per_gas`, RFC 3339 timestamps, `anchor_get_records`
+  requires `registry_id` or `checksum`).
+
+### Added
+
+- **`nonce` inside `wallet_tx_request`** on every `anchor_prepare_*`
+  response (0x-hex quantity, same value as the parent `nonce`). MetaMask
+  looks the nonce up itself, so the browser path never noticed it was
+  missing; a headless signer passing `wallet_tx_request` straight into
+  `sign_transaction` failed until someone copied the nonce by hand.
+  Additive -- wallets ignore the field. (Ticket 15)
+
+### Added
+
+- **Cursor paging on `anchor_get_registries`.** The unfiltered listing now
+  exposes both of the precompile's paging styles: `pagination.next_key`
+  (the chain's cursor for the row after this page, absent when the table
+  ended) is passed through, and a new optional `key` input accepts it back
+  to continue -- an O(1) seek on the chain instead of the O(offset) walk
+  an `offset` costs. `key` cannot be combined with a non-zero `offset`,
+  `name`, `match`, or `registry_id` (`ErrInvalidCursor`). Chained fetches
+  for a `limit` above the 200-row chain page also continue by cursor now.
+
+### Changed
+
+- **Unfiltered `anchor_get_registries` `pagination.total` is the table
+  size again.** The rc21 fast path reported `offset` + rows on the page,
+  so a default call on a 4400-row table said `"total": 100`. The listing
+  now uses the chain's own count whenever it is non-zero; this precompile
+  returns `0` with `countTotal=true` (verified on the raw return words,
+  2026-09-14), so it falls back to one `reverse=true, limit=1` call for
+  the highest assigned registry ID -- the same peek the name scan already
+  used. A page that ends the table needs no peek. `total_is_lower_bound`
+  is now set only when that peek fails. No full-table walk. Clients page
+  with `offset + limit < total` or by `next_key`.
+
+- **Unfiltered `anchor_get_registries` no longer walks the whole table.**
+  "Show me the registries" used to page every registry over RPC so the
+  server could return an exact total -- commonly 20–30s on a populated
+  testnet, and again for every next page. The listing without `name` now
+  fetches the caller's page straight from the chain (offset and limit
+  forwarded as-is, in 200-row fetches when the limit exceeds the
+  precompile's page cap): one round-trip for a default page (plus the
+  table-size peek described above). The client-side full scan is kept
+  **only** for the `name`
+  filter (the precompile has no by-name index yet), isolated in its own
+  branch so a chain-side by-name query can replace it without touching
+  the listing. Tool description, `TOOL_REFERENCE.md` §11, and tests
+  updated; `scanAllRegistries` removed. (P2, #79)
+- **README Quick Start HTTP path now boots from a fresh clone.** Walked
+  literally (empty tree, no `.env`, no key): `cp .env.example .env &&
+  make run-http` died with `file ".mcp-keys.json" has no enabled keys`,
+  because `.env.example` points at a keys file nothing told the reader to
+  create. Quick Start and `.env.example` now say to run `make key-create
+  NAME=… ROLES=…` first, with the four roles described; the README and
+  Makefile examples that showed `ROLES` as optional are corrected
+  (`key-mgmt` requires it). Re-walked: `initialize` and `tools/list`
+  answer with the minted key, keyless requests still get 401. The stdio
+  path needed no change. Separately, `make run-http` used to pin `:8080`
+  regardless of `MCP_HTTP_ADDR` in `.env`, while `.env.example`,
+  `mcp-probe`, and `healthz` all assume `:8180`; it now listens where
+  `.env` says (`RUN_HTTP_ADDR=…` still overrides for one run). (Ticket 23)
+
+### Fixed
+
+- **`evm_get_logs` past the chain head no longer looks like an outage.**
+  Live probe (2026-09-10, testnet head 3,876,423): `from_block=1,
+  to_block=9999999` is rejected by the node as `invalid block range
+  params` -- a different string from the width cap (`maximum [from, to]
+  blocks distance`, which was and still is curated as "block range too
+  wide"). The new string fell through to the generic "upstream operation
+  failed". It is now mapped to a curated "invalid block range" input error
+  that tells the caller to use `to_block="latest"` or a block at or below
+  the head, since narrowing alone would not fix it. (Ticket 20)
+
+### Security
+
+- **Bumped indirect `golang.org/x/crypto` v0.55.0 → v0.56.0** to clear
+  [CVE-2026-56855](https://go.dev/issue/81317) and
+  [CVE-2026-78662](https://go.dev/issue/81316) (SSH mux DoS on established /
+  not-yet-established channels). This server does not import
+  `golang.org/x/crypto/ssh`; the bump satisfies version scanners. No
+  first-party code change.
+- **Bumped indirect `google.golang.org/grpc` v1.82.1 → v1.83.2** to clear
+  `govulncheck` / Dependabot on [GHSA-vp52-pcj8-j9qc](https://github.com/advisories/GHSA-vp52-pcj8-j9qc)
+  (HTTP/2 DATA-frame fragmentation → heap exhaustion on the receive path;
+  also GHSA-qc2q-p7wx-3px3) and [CVE-2026-84445](https://github.com/advisories/GHSA-2v4p-qf9q-27wj)
+  (xDS server panic when `:authority` and `Host` are both missing; fixed in
+  1.83.2). gRPC is pulled by goose and the OTLP exporters; this server does
+  not run a gRPC server or use `xds.NewGRPCServer`. No first-party code change.
+- **F1–F5 posture recorded, item by item.** `docs/SECURITY_AUDIT.md` gains a
+  dated entry replacing the stale "F1–F5 are all open" claim: F1, F4, F5
+  closed with code and test evidence; F2 closed in code with the hosted
+  deployment's `MCP_KEYLESS_PG_DSN` wiring still to be confirmed (the exact
+  operator questions are written down); F3 (public key-request endpoint
+  checks email syntax only) **accepted** -- the endpoint is off by default,
+  rate limited, only creates a pending request, and the key is emailed to
+  the requested address on approval, so a forged request yields queue spam,
+  not a credential. The F1 residual under `MCP_RELAY_ALLOW_ANY=true` is
+  likewise accepted. No code change. (P5)
+
 ## [1.0.0-rc20] - 2026-09-08
 
 ### Added

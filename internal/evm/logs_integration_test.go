@@ -7,11 +7,43 @@ package evm_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
+
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
+
+// TestIntegration_FilterLogs_RangeRejectionsCurated pins the two distinct
+// node rejections for an over-large eth_getLogs window against the live
+// node, so a change in the node's error text fails here instead of
+// degrading to "upstream operation failed" in production (rc21 ticket 20).
+// Probed 2026-09-10: 1..head -> "maximum [from, to] blocks distance";
+// 1..9999999 (past head) -> "invalid block range params".
+func TestIntegration_FilterLogs_RangeRejectionsCurated(t *testing.T) {
+	c := integrationClient(t)
+	ctx := context.Background()
+
+	head, err := c.LatestBlockNumber(ctx)
+	if err != nil {
+		t.Fatalf("LatestBlockNumber: %v", err)
+	}
+	query := func(from, to uint64) error {
+		fromBN := defitypes.BlockNumberFromUint64(from)
+		toBN := defitypes.BlockNumberFromUint64(to)
+		_, err := c.FilterLogs(ctx, defitypes.FilterLogsQuery{FromBlock: &fromBN, ToBlock: &toBN})
+		return err
+	}
+
+	if err := query(1, head); !errors.Is(err, apperrors.ErrLogRangeTooWide) {
+		t.Errorf("1..head: want ErrLogRangeTooWide (width cap), got %v", err)
+	}
+	if err := query(1, head+10_000_000); !errors.Is(err, apperrors.ErrLogRangeInvalid) {
+		t.Errorf("1..past-head: want ErrLogRangeInvalid, got %v", err)
+	}
+}
 
 func TestIntegration_FilterLogs(t *testing.T) {
 	c := integrationClient(t)

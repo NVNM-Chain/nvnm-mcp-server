@@ -145,9 +145,10 @@ type wirePage struct {
 }
 
 type wireRegistries struct {
-	Registries   []wireRegistry `json:"registries"`
-	Pagination   *wirePage      `json:"pagination"`
-	ContentTrust string         `json:"content_trust"`
+	Registries        []wireRegistry `json:"registries"`
+	Pagination        *wirePage      `json:"pagination"`
+	ContentTrust      string         `json:"content_trust"`
+	TotalIsLowerBound bool           `json:"total_is_lower_bound"`
 }
 
 type wireRecord struct {

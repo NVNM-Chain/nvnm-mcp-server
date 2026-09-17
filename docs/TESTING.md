@@ -210,8 +210,8 @@ three packages.
 |---------|----------|-------|-----------------|
 | `internal/evm` | `client_integration_test.go` | 12 | `ChainID`, `GetChainInfo`, `LatestBlockNumber`, `BlockByNumber`, `BlockByHash`, `BalanceAt`, `CodeAt`, `TransactionByHash` (placement fields + not-found), `TransactionReceipt` (mined + not-found abort) |
 | `internal/evm` | `resilient_integration_test.go` | 4 | Resilient wrapper: `ChainID`, `GetChainInfo`, `BalanceAt`, `Ping` |
-| `internal/evm` | `logs_integration_test.go` | 2 | `FilterLogs` on precompile address (finds real logs), empty-range query |
-| `internal/anchor` | `client_integration_test.go` | 6 | `Info`, `GetRegistries`, `GetRegistry` (by ID), `GetRecords` |
+| `internal/evm` | `logs_integration_test.go` | 3 | `FilterLogs` on precompile address (finds real logs), empty-range query, and the two node range rejections mapped to `ErrLogRangeTooWide` (1..head) / `ErrLogRangeInvalid` (past head) |
+| `internal/anchor` | `client_integration_test.go` | 7 | `Info`, `GetRegistries`, `GetRegistries` offset/limit window (the precompile contract the unfiltered MCP listing relies on: Offset honored, small Limit served exactly, no cursor past the end), `GetRegistry` (by ID), `GetRecords` |
 | `internal/anchor` | `write_integration_test.go` | 3 | Prepare-sign-submit for `AddRegistry`, `AddRecord`, `GrantRole` |
 | `internal/anchor` | `prepare_integration_test.go` | 2 | `PrepareAddRegistry` round-trips: EIP-1559 (type-2 default) and legacy (type-0 opt-out) |
 | `internal/anchor` | `prepare_rolestatus_integration_test.go` | 3 | Prepare-sign-submit for the methods: `UpdateRecordStatus` (record read back to confirm the status change landed) and `RevokeRole` (grant-then-revoke, plus the checksum-scoped pair) |
@@ -228,7 +228,19 @@ The anchor read tests depend on a stable registry named `mcp-test-data` (one reg
 
 Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-test-data` resolves `mcp-test-data` to its `registry_id` by scanning `GetRegistries` for an exact name match client-side (there is no on-chain by-name lookup); it reuses the existing registry if that scan finds one, otherwise it creates a new one. Every downstream call in the script, and in the anchor read tests, then operates on that numeric ID.
 
-**`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile returns `pagination.total = 0` for `registries` and `records` queries even though the client sets `countTotal: true`. The registry/record rows themselves decode correctly; only the count is unpopulated. The integration tests therefore assert on the returned slice length, not on `pagination.total`. MCP tool responses surface whatever the chain returns for `total`, so a downstream consumer should treat it as best-effort, not authoritative, on this network.
+**`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile
+returns `pagination.total = 0` for `registries` and `records` queries even
+though the client sets `countTotal: true` (confirmed 2026-09-14 on the raw
+ABI return words: the `total` slot is zero and byte-identical with
+`countTotal` true or false; encode/decode order is correct). The
+registry/record rows themselves decode correctly; only the count is
+unpopulated. The integration tests therefore assert on the returned slice
+length, not on `pagination.total`. The unfiltered MCP
+`anchor_get_registries` listing does not pass that `0` through: it uses the
+chain count whenever it is non-zero and otherwise spends one
+`reverse=true, limit=1` call for the highest assigned registry ID, so its
+`total` is the table size. `anchor_get_records` still surfaces the chain's
+value as-is.
 
 ### 3b. Deployment e2e (`tests/e2e`, tag `e2e`)
 
@@ -236,9 +248,11 @@ Hot-path check against a **running MCP server** — typically a deployment.
 Set `NVNM_MCP_TEST_SERVER_URL`. `make test-e2e` runs
 `TestE2E_HotPath_AnchorDocument` only: onboard → create registry →
 anchor a record → supersede it → observe the write through EVM tools.
-Registry read-back uses `anchor_get_registries` by name (full-table
-scan; HTTP wait 90s, fail if slower than 60s) then
-`anchor_get_registry` by id. Record read-back asserts `uri`,
+Registry read-back first lists unfiltered (`limit=2`; must answer
+within `ListingLatencyBudget`, 10s, report a `total` above 2 with a
+`next_key`),
+then uses `anchor_get_registries` by name (full-table scan; HTTP wait
+90s, fail if slower than 60s) then `anchor_get_registry` by id. Record read-back asserts `uri`,
 `is_latest`, and `registry_id`. Grant/revoke are not in this journey
 (admin-only MCP role, no role-read tool). Decode uses published JSON
 field names so a read/prepare contract change fails. It is not the

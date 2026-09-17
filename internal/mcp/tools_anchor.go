@@ -47,29 +47,31 @@ func registerAnchorTools(
 		Description: "Fetch a page of anchoring registries, optionally filtered by name. " +
 			"Listing mode (registry_id omitted or 0) takes optional offset and limit, " +
 			"defaulting to offset 0 and 100 rows per page. " +
-			"The precompile requires internal cursor pages of up to 200 rows, so every " +
-			"listing path -- filtered and unfiltered alike -- performs a full client-side " +
-			"scan of the registry table; the caller's offset/limit window is then applied " +
-			"to the complete result client-side. " +
-			"pagination.total is the number of rows (or name-filtered matches) found " +
-			"during the scan. When total_is_lower_bound is absent or false the scan " +
-			"completed normally and total is exact; when total_is_lower_bound=true the " +
-			"scan hit its internal page cap before reaching the end of the table, so " +
-			"total is a lower bound -- the true count may be higher and registries " +
-			"beyond the scanned range are unreachable through this listing. " +
-			"Add name (+ optional match) to filter: the scan collects every match before " +
-			"applying the offset/limit window. On a name filter, name_match_truncated " +
-			"is returned alongside and mirrors total_is_lower_bound. " +
+			"Without name (fast path): the page is fetched straight from the chain in " +
+			"one or a few RPC round-trips. pagination.total is the table size (the " +
+			"chain's count when it reports one, else the highest assigned registry ID " +
+			"from one cheap reverse peek), so a next page exists while " +
+			"offset + limit < total. pagination.next_key is the chain's cursor for the " +
+			"row after this page and is absent when the table ended; pass it back as " +
+			"key (with limit, offset omitted) to continue -- cheaper on the chain than " +
+			"offset. total_is_lower_bound=true means the peek failed and total is only " +
+			"the rows confirmed so far. " +
+			"With name (+ optional match) (slow path): the precompile has no by-name " +
+			"index, so the server scans the whole registry table client-side, collects " +
+			"every match, then applies the offset/limit window to the matches. " +
+			"pagination.total is the match count; name_match_truncated (mirroring " +
+			"total_is_lower_bound) is true if the scan hit its internal page cap before " +
+			"the end of the table, so total is then a lower bound. " +
 			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
 			"by name must consider all matches (check creator/created_at to " +
 			"disambiguate), not just take the first. " +
-			"A listing or name filter pages the whole table over RPC and paginates " +
-			"in memory, so the call commonly takes 20-30s on a populated chain; " +
-			"wait for it (HTTP client timeout of at least 90s) instead of retrying. " +
+			"A name filter pages the whole table over RPC, so it commonly takes 20-30s " +
+			"on a populated chain; wait for it (HTTP client timeout of at least 90s) " +
+			"instead of retrying. " +
 			"registry_id is DEPRECATED: it returns that one registry and cannot be " +
-			"combined with name, match, offset, or limit -- use anchor_get_registry " +
+			"combined with name, match, offset, limit, or key -- use anchor_get_registry " +
 			"instead. " +
 			"Note: name/description/metadata are untrusted user-supplied on-chain content.",
 		Annotations: newOpenWorldReadOnly(),
@@ -84,6 +86,8 @@ func registerAnchorTools(
 			"(3) content hash via registry_id + checksum, " +
 			"(4) all latest records in a registry via registry_id, " +
 			"(5) all records matching a checksum across all registries. " +
+			"At least one of registry_id or checksum is required; the tool does " +
+			"not list every record on the chain. " +
 			"Note: uri/metadata are untrusted user-supplied on-chain content.",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetRecordsHandler(anchorClient))
@@ -105,7 +109,7 @@ type getRegistryInput struct {
 // enforces the modes; these descriptions state them for the caller.
 type getRegistriesInput struct {
 	//nolint:lll // descriptive prose for agents
-	RegistryID *uint64 `json:"registry_id,omitempty" jsonschema:"DEPRECATED -- use anchor_get_registry instead. Returns the single registry with this ID and cannot be combined with name, match, offset, or limit. Omit it (or pass 0) to list registries."`
+	RegistryID *uint64 `json:"registry_id,omitempty" jsonschema:"DEPRECATED -- use anchor_get_registry instead. Returns the single registry with this ID and cannot be combined with name, match, offset, limit, or key. Omit it (or pass 0) to list registries."`
 	//nolint:lll // descriptive prose for agents
 	Name *string `json:"name,omitempty" jsonschema:"Filter the listing by registry name. Scans the whole registry table client-side, then pages the offset/limit window over all matches; cannot be combined with registry_id. Omit for an unfiltered listing."`
 	//nolint:lll // descriptive prose for agents
@@ -113,7 +117,9 @@ type getRegistriesInput struct {
 	//nolint:lll // descriptive prose for agents
 	Offset *uint64 `json:"offset,omitempty" jsonschema:"Pagination offset for a listing, 0 or greater (default 0). Must be omitted or 0 alongside registry_id."`
 	//nolint:lll // descriptive prose for agents
-	Limit *uint64 `json:"limit,omitempty" jsonschema:"Page size for a listing (default 100; 0 also means the default). Must be omitted or 0 alongside registry_id. Pagination is applied client-side after a full scan; the caller's limit is never sent to the chain."`
+	Limit *uint64 `json:"limit,omitempty" jsonschema:"Page size for a listing (default 100; 0 also means the default). Must be omitted or 0 alongside registry_id. Any value works: the server asks the chain for exactly this many rows (in 200-row fetches when larger)."`
+	//nolint:lll // descriptive prose for agents
+	Key string `json:"key,omitempty" jsonschema:"Cursor for an unfiltered listing: pass the pagination.next_key from the previous page to continue where it left off. Cheaper on the chain than offset. Cannot be combined with a non-zero offset, name, match, or registry_id."`
 }
 
 type getRecordsInput struct {
@@ -151,8 +157,10 @@ func makeGetRegistryHandler(
 			return nil, registryOutput{}, err
 		}
 		if input.ID == 0 {
+			// Registry IDs start at 1; 0 is a present-but-invalid value,
+			// not a missing one (the schema already rejects an absent id).
 			return nil, registryOutput{},
-				fmt.Errorf("provide id: %w", apperrors.ErrMissingRequired)
+				fmt.Errorf("id must be 1 or greater (registry IDs start at 1): %w", apperrors.ErrInvalidRegistryID)
 		}
 
 		registry, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{
@@ -192,7 +200,18 @@ func makeGetRegistriesHandler(
 
 		offset, limit := resolveRegistriesPage(input.Offset, input.Limit)
 
+		// Two listing paths behind one tool surface. A name filter has no
+		// chain-side index yet, so it must walk the whole table client-side
+		// (handleRegistriesNameLookup); when the chain ships a by-name query
+		// only that branch changes. An unfiltered listing needs no walk: the
+		// precompile pages the table itself (handleRegistriesListing).
 		if input.Name != nil && *input.Name != "" {
+			if input.Key != "" {
+				// The cursor names a position in the unfiltered table; the
+				// name filter pages a client-side match set. No position in
+				// one is meaningful in the other.
+				return nil, registriesOutput{}, apperrors.ErrInvalidCursor
+			}
 			out, err := handleRegistriesNameLookup(
 				ctx, c, logger, *input.Name, input.Match, offset, limit,
 			)
@@ -206,42 +225,170 @@ func makeGetRegistriesHandler(
 			return nil, registriesOutput{}, apperrors.ErrMatchWithoutName
 		}
 
-		// The precompile requires Limit=nameScanPageSize (200) for registryId=0
-		// unfiltered queries; smaller limits return an opaque upstream error.
-		// Walk the table cursor-based (same approach as the by-name scan) and
-		// apply offset/limit client-side.
-		all, truncated, err := scanAllRegistries(ctx, c, logger)
+		cursor, err := listingCursor(input.Key, offset)
 		if err != nil {
 			return nil, registriesOutput{}, err
 		}
-		page := pageRegistries(all, offset, limit)
-		for i := range page {
-			capRegistryFields(&page[i])
+		out, err := handleRegistriesListing(ctx, c, cursor, offset, limit)
+		return nil, out, err
+	}
+}
+
+// listingCursor decodes the caller's key into the raw cursor the precompile
+// expects. The Cosmos SDK pagination behind the precompile rejects a key
+// together with a non-zero offset (they are two ways of naming the same
+// position), so that combination -- and a key that is not base64 -- is
+// rejected here, before any chain call, as ErrInvalidCursor.
+func listingCursor(key string, offset uint64) ([]byte, error) {
+	if key == "" {
+		return nil, nil
+	}
+	if offset != 0 {
+		return nil, apperrors.ErrInvalidCursor
+	}
+	cursor, err := (&anchor.PageResponse{NextKey: key}).CursorBytes()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", apperrors.ErrInvalidCursor, err)
+	}
+	if len(cursor) != registryCursorLen {
+		// Valid base64 of the wrong thing. The chain answers such a key
+		// with an empty page, which reads as "the table is empty"
+		// (directory review 2026-09-15, M-2); reject it up front instead.
+		return nil, fmt.Errorf("%w: key decodes to %d bytes, a registry cursor is %d",
+			apperrors.ErrInvalidCursor, len(cursor), registryCursorLen)
+	}
+	return cursor, nil
+}
+
+// registryCursorLen is the byte length of the precompile's registry cursor:
+// the big-endian uint64 registry ID the next page starts at (observed live
+// as next_key "AAAAAAAAAAQ=" = 8 bytes, 2026-09-14). A cursor of any other
+// length cannot have come from this listing.
+const registryCursorLen = 8
+
+// handleRegistriesListing services the unfiltered branch of
+// anchor_get_registries: it asks the precompile for the caller's window
+// directly -- Offset from the caller, Limit = whatever is still missing,
+// capped at nameScanPageSize (the most rows the precompile returns per
+// call). One round-trip for any limit up to that cap; a larger limit
+// chains pages until it is filled or the table ends. Verified live
+// (2026-09-10, testnet, 4400 registries): Offset is honored, Limit below
+// the cap is served exactly, each call is ~0.5s, an offset past the end
+// yields zero rows and no cursor.
+//
+// Both of the precompile's paging styles are exposed. The first fetch is
+// positioned by the caller's cursor (key) when given, else by offset;
+// every chained fetch continues from the chain's own next_key, which the
+// Cosmos SDK serves as an O(1) seek rather than the O(offset) walk an
+// offset costs. The chain's cursor for the row after this page is passed
+// through as pagination.next_key (absent when the table ended), so a
+// cursor client pages on next_key and an offset client on offset+limit.
+//
+// pagination.total is the table size, not the page size. The chain's own
+// count is used whenever it is non-zero; this precompile reports
+// countTotal=0 (verified live 2026-09-14), so the fallback is the highest
+// assigned registry ID from one reverse peek -- exact while IDs are dense
+// from 1, a ceiling otherwise. A page that already ended the table needs
+// no peek. TotalIsLowerBound is set only when the peek fails; total is
+// then the rows confirmed so far.
+func handleRegistriesListing(
+	ctx context.Context, c anchor.Client, cursor []byte, offset, limit uint64,
+) (registriesOutput, error) {
+	noIDFilter := uint64(0)
+	fromCursor := len(cursor) > 0
+	// Non-nil so an empty page serializes as [] rather than null (L-3);
+	// the cap is bounded by the chain page size, not the caller's limit.
+	rows := make([]anchor.Registry, 0, min(limit, nameScanPageSize))
+	var chainTotal uint64
+	hasMore := true
+	for page := 0; page < maxNameScanPages && hasMore && uint64(len(rows)) < limit; page++ {
+		req := &anchor.PageRequest{Limit: min(limit-uint64(len(rows)), nameScanPageSize)}
+		if len(cursor) > 0 {
+			req.Key = cursor
+		} else {
+			req.Offset = offset
 		}
-		return nil, registriesOutput{
-			GetRegistriesResponse: anchor.GetRegistriesResponse{
-				Registries: page,
-				Pagination: &anchor.PageResponse{Total: uint64(len(all))},
-			},
-			ContentTrust:      contentTrustNotice,
-			TotalIsLowerBound: truncated,
-			NextActions:       anchorGetRegistriesNext(len(all) == 0),
-		}, nil
+		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+			RegistryID: &noIDFilter,
+			Pagination: req,
+		})
+		if err != nil {
+			return registriesOutput{}, err
+		}
+		rows = append(rows, resp.Registries...)
+		if resp.Pagination != nil {
+			chainTotal = max(chainTotal, resp.Pagination.Total)
+		}
+		cursor, err = resp.Pagination.CursorBytes()
+		if err != nil {
+			return registriesOutput{}, err
+		}
+		hasMore = len(cursor) > 0
+	}
+	for i := range rows {
+		capRegistryFields(&rows[i])
+	}
+	total, exact := listingTotal(ctx, c, listingTotalInputs{
+		chainTotal: chainTotal, offset: offset, rows: uint64(len(rows)),
+		hasMore: hasMore, fromCursor: fromCursor,
+	})
+	return registriesOutput{
+		GetRegistriesResponse: anchor.GetRegistriesResponse{
+			Registries: rows,
+			Pagination: &anchor.PageResponse{Total: total, NextKey: anchor.EncodeCursor(cursor)},
+		},
+		ContentTrust:      contentTrustNotice,
+		TotalIsLowerBound: !exact,
+		NextActions:       anchorGetRegistriesNext(len(rows) == 0),
+	}, nil
+}
+
+// listingTotalInputs is what one unfiltered page tells us about the table.
+type listingTotalInputs struct {
+	chainTotal uint64 // the chain's own count, 0 when it did not report one
+	offset     uint64 // caller's offset; 0 for a cursor-positioned page
+	rows       uint64 // rows returned across the chained fetches
+	hasMore    bool   // the chain handed back a cursor past this page
+	fromCursor bool   // positioned by key, so offset says nothing
+}
+
+// listingTotal resolves pagination.total for the unfiltered listing: the
+// chain's count when it reported one; else offset+rows when an
+// offset-positioned page ended the table (exact, no extra call); else one
+// reverse peek for the highest assigned ID. A failed peek is non-fatal:
+// the page still stands and total falls back to the rows confirmed so
+// far, flagged inexact. A cursor page never knows its position, so it
+// always resolves through the chain count or the peek.
+func listingTotal(ctx context.Context, c anchor.Client, in listingTotalInputs) (total uint64, exact bool) {
+	if in.chainTotal > 0 {
+		return in.chainTotal, true
+	}
+	if !in.hasMore && !in.fromCursor && (in.rows > 0 || in.offset == 0) {
+		return in.offset + in.rows, true
+	}
+	last, found, err := latestRegistryID(ctx, c)
+	switch {
+	case err != nil:
+		return in.offset + in.rows, false
+	case !found:
+		return 0, true
+	default:
+		return last, true
 	}
 }
 
 // handleRegistriesByID services the deprecated registry_id branch of
 // anchor_get_registries -- a single-registry lookup that predates
 // anchor_get_registry and is kept only for backward compatibility. It
-// accepts no listing parameter: offset and limit may be present only as 0,
-// since there is nothing to page.
+// accepts no listing parameter: offset and limit may be present only as 0
+// and key not at all, since there is nothing to page.
 func handleRegistriesByID(
 	ctx context.Context, c anchor.Client, input getRegistriesInput,
 ) (registriesOutput, error) {
 	nameSet := input.Name != nil && *input.Name != ""
 	offsetNonZero := input.Offset != nil && *input.Offset != 0
 	limitNonZero := input.Limit != nil && *input.Limit != 0
-	if nameSet || input.Match != "" || offsetNonZero || limitNonZero {
+	if nameSet || input.Match != "" || offsetNonZero || limitNonZero || input.Key != "" {
 		return registriesOutput{}, apperrors.ErrInvalidFilterCombination
 	}
 
@@ -344,7 +491,7 @@ func resolveRegistriesPage(offset, limit *uint64) (resolvedOffset, resolvedLimit
 func pageRegistries(matches []anchor.Registry, offset, limit uint64) []anchor.Registry {
 	total := uint64(len(matches))
 	if offset >= total {
-		return nil
+		return []anchor.Registry{} // [] on the wire, not null
 	}
 	end := offset + limit
 	// end < offset catches the uint64 wrap a caller-supplied limit near
@@ -368,7 +515,8 @@ func pageRegistries(matches []anchor.Registry, offset, limit uint64) []anchor.Re
 // against evm.testnet.nvnmchain.io, the precompile itself hard-caps the
 // actual page size at 200 regardless of the limit requested (limit=500
 // returned exactly 200 rows, silently, no error). Requesting more than 200
-// buys nothing; 200 is the real ceiling.
+// buys nothing; 200 is the real ceiling. handleRegistriesListing requests
+// the same size for its direct page fetch.
 //
 // maxNameScanPages is a safety backstop against an unbounded or misbehaving
 // chain, not an expected limit: at nameScanPageSize per page that is up to
@@ -402,13 +550,13 @@ func registryNameMatcher(target, mode string) (func(name string) bool, error) {
 }
 
 // latestRegistryID returns the highest currently-assigned registry ID via
-// reverse=true, limit=1 on the same "registries" precompile query
-// scanRegistriesByName pages -- the cheapest substitute this chain has for
+// reverse=true, limit=1 on the same "registries" precompile query the
+// listing and name scan page -- the cheapest substitute this chain has for
 // pagination.total, which it always reports as 0 (docs/TESTING.md). found
-// is false when no registries exist yet. This is a best-effort optimization,
-// not a correctness dependency: scanRegistriesByName's own termination (a
-// short page) never relies on it, so callers should treat a non-nil err as
-// non-fatal and fall back to the plain walk.
+// is false when no registries exist yet. Best-effort in both callers:
+// scanRegistriesByName's termination (a short page) never relies on it,
+// and handleRegistriesListing falls back to a flagged lower bound, so a
+// non-nil err is non-fatal.
 func latestRegistryID(ctx context.Context, c anchor.Client) (id uint64, found bool, err error) {
 	noIDFilter := uint64(0)
 	resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
@@ -507,64 +655,6 @@ func scanRegistriesByName(
 	return matches, true, nil
 }
 
-// scanAllRegistries pages through the entire registry table via cursor-based
-// pagination (Key, Limit=nameScanPageSize) and returns every registry in
-// insertion order. It is the unfiltered counterpart of scanRegistriesByName:
-// same walk, no client-side name match.
-//
-// The precompile requires Limit=nameScanPageSize (200) for registryId=0
-// unfiltered queries; smaller limits are rejected with an opaque upstream
-// error. Cursor-based iteration (Key) is used instead of Offset for the same
-// reason as scanRegistriesByName -- see its doc comment.
-//
-// truncated is true if maxNameScanPages was hit before the walk terminated
-// naturally (empty NextKey). Callers should propagate this to the API
-// response rather than silently returning a partial result.
-func scanAllRegistries(
-	ctx context.Context, c anchor.Client, logger *slog.Logger,
-) (all []anchor.Registry, truncated bool, err error) {
-	highestID, haveHighestID, peekErr := latestRegistryID(ctx, c)
-	if peekErr == nil && !haveHighestID {
-		// Definitive empty table -- skip the walk.
-		return nil, false, nil
-	}
-
-	noIDFilter := uint64(0)
-	var cursorKey []byte
-	var totalScanned uint64
-	for page := 0; page < maxNameScanPages; page++ {
-		resp, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
-			RegistryID: &noIDFilter,
-			Pagination: &anchor.PageRequest{Key: cursorKey, Limit: nameScanPageSize},
-		})
-		if err != nil {
-			return nil, false, err
-		}
-		totalScanned += uint64(len(resp.Registries))
-		all = append(all, resp.Registries...)
-		nextKey, err := resp.Pagination.CursorBytes()
-		if err != nil {
-			return nil, false, err
-		}
-		if len(nextKey) == 0 {
-			if peekErr == nil && haveHighestID && totalScanned < highestID {
-				logger.InfoContext(ctx, "anchor_get_registries full-table scan truncated by ID gap",
-					slog.Uint64("scanned", totalScanned),
-					slog.Uint64("highest_known_id", highestID),
-				)
-				return all, true, nil
-			}
-			return all, false, nil
-		}
-		cursorKey = nextKey
-	}
-	logger.InfoContext(ctx, "anchor_get_registries full-table scan hit page cap",
-		slog.Uint64("scanned", totalScanned),
-		slog.Int("max_pages", maxNameScanPages),
-	)
-	return all, true, nil
-}
-
 func makeGetRecordsHandler(
 	c anchor.Client,
 ) mcp.ToolHandlerFor[getRecordsInput, recordsOutput] {
@@ -573,6 +663,17 @@ func makeGetRecordsHandler(
 	) (*mcp.CallToolResult, recordsOutput, error) {
 		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
 			return nil, recordsOutput{}, err
+		}
+		// Every documented mode is anchored on a registry or a checksum. With
+		// neither, the precompile lists the first N records of the entire
+		// chain -- 140 KB for the default page on the populated testnet and
+		// not something any agent flow needs (directory review 2026-09-15,
+		// M-3). Fail fast with the two valid entry points.
+		if input.RegistryID == nil && (input.Checksum == nil || *input.Checksum == "") {
+			return nil, recordsOutput{}, fmt.Errorf(
+				"provide registry_id (optionally with record_id / index) or checksum: "+
+					"anchor_get_records does not list every record on the chain: %w",
+				apperrors.ErrMissingRequired)
 		}
 		r := anchor.GetRecordsRequest{
 			RegistryID: input.RegistryID,

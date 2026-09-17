@@ -447,6 +447,46 @@ func TestMCP_Tools(t *testing.T) {
 		}
 	})
 
+	// Unfiltered listing (rc21 P2): a direct chain page, not a scan. The mock
+	// serves one row and no cursor, so the wire must carry total=1 with
+	// total_is_lower_bound absent -- the "you have seen everything" shape.
+	t.Run("anchor_get_registries_unfiltered_page", func(t *testing.T) {
+		raw := callToolOK(t, session, "anchor_get_registries", map[string]any{
+			"offset": 0,
+			"limit":  5,
+		})
+		assertCallToolNextActions(t, "anchor_get_registries", raw, advertised)
+		out := decodeWire[wireRegistries](t, raw)
+		if len(out.Registries) != 1 || out.Registries[0].ID != 1 {
+			t.Fatalf("registries = %+v, want the single mocked row id=1", out.Registries)
+		}
+		if out.Pagination == nil || out.Pagination.Total != 1 || out.TotalIsLowerBound {
+			t.Errorf("pagination = %+v lower_bound=%v; want total=1 exact (no cursor from the chain)",
+				out.Pagination, out.TotalIsLowerBound)
+		}
+		if out.ContentTrust == "" {
+			t.Fatal("content_trust empty")
+		}
+	})
+
+	// Cursor mode on the wire: key is accepted by the real schema and reaches
+	// the handler; the mock ignores position, so the shape is what is under
+	// test -- the same exact total=1 with no further cursor.
+	t.Run("anchor_get_registries_by_cursor", func(t *testing.T) {
+		raw := callToolOK(t, session, "anchor_get_registries", map[string]any{
+			"key":   chainCursor(1),
+			"limit": 5,
+		})
+		assertCallToolNextActions(t, "anchor_get_registries", raw, advertised)
+		out := decodeWire[wireRegistries](t, raw)
+		if len(out.Registries) != 1 {
+			t.Fatalf("registries = %+v, want the single mocked row", out.Registries)
+		}
+		if out.Pagination == nil || out.Pagination.Total != 1 || out.Pagination.NextKey != "" {
+			t.Errorf("pagination = %+v; want total=1 and no next_key", out.Pagination)
+		}
+	})
+
 	t.Run("coverage", func(t *testing.T) {
 		var missed []string
 		for name := range advertised {

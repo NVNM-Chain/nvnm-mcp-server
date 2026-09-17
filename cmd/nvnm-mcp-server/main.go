@@ -493,14 +493,20 @@ func loadAPIKeys(
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("load API keys file: %w", err)
 		}
-		if mks.Empty() && cfg.Transport == "http" {
-			return nil, nil, nil, fmt.Errorf("%w: file %q has no enabled keys",
-				config.ErrHTTPAuthRequired, cfg.APIKeysFile)
+		// Fail closed on keys that could actually authenticate a request:
+		// enabled AND unexpired. A file whose only enabled key has expired
+		// used to pass this check and boot a server nobody could use (L-9).
+		if cfg.Transport == "http" && mks.UsableCount() == 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"%w: file %q has no enabled, unexpired keys (%d enabled, all past expires_at); "+
+					"create one with `make key-create` or renew with `key-mgmt renew`",
+				config.ErrHTTPAuthRequired, cfg.APIKeysFile, mks.ActiveCount())
 		}
 		logger.Info("loaded API keys",
 			slog.String("file", cfg.APIKeysFile),
 			slog.Int("total", mks.TotalCount()),
 			slog.Int("enabled", mks.ActiveCount()),
+			slog.Int("usable", mks.UsableCount()),
 		)
 		managedKeys = mks
 	case cfg.APIKey != "":

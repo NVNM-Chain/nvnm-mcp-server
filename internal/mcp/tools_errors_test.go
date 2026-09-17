@@ -185,7 +185,8 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_records", func() error {
-			_, _, err := makeGetRecordsHandler(a)(ctx, nil, getRecordsInput{})
+			registryID := uint64(1)
+			_, _, err := makeGetRecordsHandler(a)(ctx, nil, getRecordsInput{RegistryID: &registryID})
 			return err
 		}},
 		{"setup_wizard balance", func() error {

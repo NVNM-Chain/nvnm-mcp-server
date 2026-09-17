@@ -4,10 +4,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
@@ -122,8 +125,10 @@ type mockAnchor struct {
 	registriesPages     []*anchor.GetRegistriesResponse
 	registriesCallCount int
 	// lastRegistriesReq records the most recent GetRegistries request so
-	// tests can assert how tool inputs map onto the precompile call.
+	// tests can assert how tool inputs map onto the precompile call;
+	// registriesReqs keeps every request in order for multi-call paths.
 	lastRegistriesReq anchor.GetRegistriesRequest
+	registriesReqs    []anchor.GetRegistriesRequest
 	records           *anchor.GetRecordsResponse
 	unsignedTx        *anchor.UnsignedTransaction
 	// unsignedTxByMethod, when set, returns a distinct unsigned tx per
@@ -142,6 +147,7 @@ func (m *mockAnchor) GetRegistry(_ context.Context, _ anchor.GetRegistryRequest)
 }
 func (m *mockAnchor) GetRegistries(_ context.Context, req anchor.GetRegistriesRequest) (*anchor.GetRegistriesResponse, error) {
 	m.lastRegistriesReq = req
+	m.registriesReqs = append(m.registriesReqs, req)
 	m.registriesCallCount++
 	// registry_id > 0 is the deprecated single-registry lookup. Keep it on
 	// the fixed `registries` payload so listing mocks (pages / fn) can
@@ -161,6 +167,56 @@ func (m *mockAnchor) GetRegistries(_ context.Context, req anchor.GetRegistriesRe
 	}
 	return m.registries, m.returnErr
 }
+
+// newChainMock returns a mockAnchor that serves regs the way the live
+// precompile does for registryId=0 (probed 2026-09-14): Offset or Key
+// positions the page, Limit bounds it, Reverse walks from the end, the
+// cursor is the 8-byte big-endian index of the next row and is set only
+// when rows remain, and pagination.total is whatever chainTotal says (the
+// live chain reports 0). Use it for tests of the direct listing path,
+// where the request parameters are the behavior under test.
+func newChainMock(regs []anchor.Registry) *mockAnchor {
+	return newChainMockWithTotal(regs, 0)
+}
+
+// newChainMockWithTotal is newChainMock for a chain whose countTotal works.
+func newChainMockWithTotal(regs []anchor.Registry, chainTotal uint64) *mockAnchor {
+	m := &mockAnchor{}
+	m.registriesFn = func(int) (*anchor.GetRegistriesResponse, error) {
+		p := m.lastRegistriesReq.Pagination
+		if p == nil {
+			p = &anchor.PageRequest{Limit: 100}
+		}
+		n := uint64(len(regs))
+		resp := &anchor.GetRegistriesResponse{Pagination: &anchor.PageResponse{Total: chainTotal}}
+		if p.Reverse {
+			if n > 0 {
+				resp.Registries = []anchor.Registry{regs[n-1]}
+			}
+			return resp, nil
+		}
+		start := p.Offset
+		if len(p.Key) > 0 {
+			start = binary.BigEndian.Uint64(p.Key)
+		}
+		start = min(start, n)
+		end := min(start+p.Limit, n)
+		resp.Registries = regs[start:end]
+		if end < n {
+			resp.Pagination.NextKey = chainCursor(end)
+		}
+		return resp, nil
+	}
+	return m
+}
+
+// chainCursor renders a row index the way the precompile renders next_key.
+func chainCursor(index uint64) string {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, index)
+	return anchor.EncodeCursor(b)
+}
+
 func (m *mockAnchor) GetRecords(_ context.Context, _ anchor.GetRecordsRequest) (*anchor.GetRecordsResponse, error) {
 	return m.records, m.returnErr
 }
@@ -300,8 +356,16 @@ func TestHandler_GetBlock_InvalidHash(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid hash")
 	}
-	if !errors.Is(err, apperrors.ErrInvalidTxHash) {
-		t.Errorf("error = %v, want ErrInvalidTxHash", err)
+	// A block hash is not a transaction hash; the message must not say it
+	// is (directory review 2026-09-15, L-1).
+	if !errors.Is(err, apperrors.ErrInvalidHash) {
+		t.Errorf("error = %v, want ErrInvalidHash", err)
+	}
+	if errors.Is(err, apperrors.ErrInvalidTxHash) || strings.Contains(err.Error(), "transaction hash") {
+		t.Errorf("block-hash error must not be reported as a transaction-hash error: %v", err)
+	}
+	if !apperrors.IsInputError(err) {
+		t.Errorf("must be an input-class error: %v", err)
 	}
 }
 
@@ -699,21 +763,24 @@ func TestHandler_GetRegistry_MissingID(t *testing.T) {
 
 	_, _, err := handler(ctx, nil, getRegistryInput{})
 	if err == nil {
-		t.Fatal("expected error when id not provided")
+		t.Fatal("expected error when id is zero")
 	}
-	if !errors.Is(err, apperrors.ErrMissingRequired) {
-		t.Errorf("error = %v, want ErrMissingRequired", err)
+	// id=0 is present but invalid (IDs start at 1); an absent id is already
+	// a schema rejection, so "missing" was the wrong word (M-2).
+	if !errors.Is(err, apperrors.ErrInvalidRegistryID) {
+		t.Errorf("error = %v, want ErrInvalidRegistryID", err)
+	}
+	if !strings.Contains(err.Error(), "1 or greater") {
+		t.Errorf("error must state the valid range: %v", err)
 	}
 }
 
+// TestHandler_GetRegistries_NoFilter proves the unfiltered listing is a
+// single direct page fetch, not a table walk: one precompile call carrying
+// the caller's offset and limit. The whole 2-row table fits the page, so
+// total is exact from the page alone, no peek, and no next_key.
 func TestHandler_GetRegistries_NoFilter(t *testing.T) {
-	// The unfiltered listing walks the table cursor-based (scanAllRegistries):
-	// one call for latestRegistryID + at least one scan-loop call.  The mock
-	// returns the same 2-registry page for every call; the scan terminates on
-	// an empty NextKey after the first loop iteration.
-	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
-		Registries: []anchor.Registry{{ID: 1}, {ID: 2}},
-	}}
+	m := newChainMock([]anchor.Registry{{ID: 1}, {ID: 2}})
 	handler := makeGetRegistriesHandler(m, testLogger())
 
 	_, out, err := handler(ctx, nil, getRegistriesInput{})
@@ -723,39 +790,40 @@ func TestHandler_GetRegistries_NoFilter(t *testing.T) {
 	if len(out.Registries) != 2 {
 		t.Errorf("len(Registries) = %d, want 2", len(out.Registries))
 	}
-	// Pagination.Total now reflects the full scan count, not the precompile's
-	// reported total (which is always 0 on this chain).
-	if out.Pagination == nil || out.Pagination.Total != 2 {
-		t.Errorf("Pagination.Total = %v, want 2", out.Pagination)
+	if out.Pagination == nil || out.Pagination.Total != 2 || out.Pagination.NextKey != "" {
+		t.Errorf("Pagination = %+v, want Total=2 and no next_key (table ended)", out.Pagination)
 	}
-	// The scan always passes RegistryID=&0 (not nil) to the precompile so that
-	// the zero value is unambiguously the "no ID filter" sentinel.
+	if out.TotalIsLowerBound {
+		t.Error("TotalIsLowerBound = true, want false (page reached the end of the table)")
+	}
+	if m.registriesCallCount != 1 {
+		t.Errorf("registriesCallCount = %d, want 1 (no peek, no walk)", m.registriesCallCount)
+	}
+	// RegistryID=&0 (not nil) is the unambiguous "no ID filter" sentinel.
 	if m.lastRegistriesReq.RegistryID == nil || *m.lastRegistriesReq.RegistryID != 0 {
 		t.Errorf("last RegistryID = %v, want ptr-to-0 (unfiltered listing)", m.lastRegistriesReq.RegistryID)
 	}
-	// The scan uses cursor-based pagination with Limit=nameScanPageSize (200),
-	// never the caller's raw offset/limit.
+	// The caller's window is what the chain is asked for: offset 0 and the
+	// default page size, cursor-free.
 	page := m.lastRegistriesReq.Pagination
 	if page == nil {
 		t.Fatal("Pagination = nil")
 	}
-	if page.Limit != nameScanPageSize {
-		t.Errorf("Limit = %d, want nameScanPageSize (%d)", page.Limit, nameScanPageSize)
+	if page.Limit != defaultRegistriesPageSize || page.Offset != 0 || len(page.Key) != 0 {
+		t.Errorf("precompile page = %+v, want Offset=0 Limit=%d no Key", page, defaultRegistriesPageSize)
 	}
 }
 
-// TestHandler_GetRegistries_WithPagination proves an unfiltered listing
-// applies offset/limit client-side (not forwarded to the precompile).
-// The precompile is always called with cursor-based pagination at
-// nameScanPageSize; the caller's window is sliced from the collected set.
+// TestHandler_GetRegistries_WithPagination proves the caller's offset and
+// limit are forwarded to the chain as-is, and that a mid-table page reports
+// the table size (from the reverse peek, since this chain counts nothing)
+// plus the chain's cursor -- never offset + rows as "total".
 func TestHandler_GetRegistries_WithPagination(t *testing.T) {
 	regs := make([]anchor.Registry, 10)
 	for i := range regs {
 		regs[i] = anchor.Registry{ID: uint64(i + 1)}
 	}
-	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
-		Registries: regs,
-	}}
+	m := newChainMock(regs)
 	handler := makeGetRegistriesHandler(m, testLogger())
 
 	offset := uint64(4)
@@ -764,92 +832,161 @@ func TestHandler_GetRegistries_WithPagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Client-side slice: [offset, offset+limit) of the 10-registry scan.
-	if len(out.Registries) != 3 {
-		t.Errorf("len(Registries) = %d, want 3", len(out.Registries))
+	if len(out.Registries) != 3 || out.Registries[0].ID != 5 || out.Registries[2].ID != 7 {
+		t.Errorf("Registries = %+v, want IDs [5 6 7]", out.Registries)
 	}
-	if out.Registries[0].ID != 5 || out.Registries[2].ID != 7 {
-		t.Errorf("Registries IDs = %v, want [5 6 7]", func() []uint64 {
-			ids := make([]uint64, len(out.Registries))
-			for i, r := range out.Registries {
-				ids[i] = r.ID
-			}
-			return ids
-		}())
-	}
-	// Total reflects the full scanned count, not the page size.
 	if out.Pagination == nil || out.Pagination.Total != 10 {
-		t.Errorf("Pagination.Total = %v, want 10", out.Pagination)
+		t.Errorf("Pagination.Total = %v, want 10 (table size, not offset+rows)", out.Pagination)
 	}
-	// The precompile must NOT have received the caller's offset/limit;
-	// it always gets cursor-based nameScanPageSize.
-	scanPage := m.lastRegistriesReq.Pagination
-	if scanPage == nil {
-		t.Fatal("Pagination = nil on last GetRegistries call")
+	if out.Pagination.NextKey != chainCursor(7) {
+		t.Errorf("next_key = %q, want the chain's cursor for row 7", out.Pagination.NextKey)
 	}
-	if scanPage.Offset != 0 {
-		t.Errorf("precompile Offset = %d, want 0 (caller offset must not be forwarded)", scanPage.Offset)
+	if out.TotalIsLowerBound {
+		t.Error("TotalIsLowerBound = true, want false (peek supplied the total)")
 	}
-	if scanPage.Limit != nameScanPageSize {
-		t.Errorf("precompile Limit = %d, want nameScanPageSize (%d)", scanPage.Limit, nameScanPageSize)
+	if m.registriesCallCount != 2 {
+		t.Errorf("registriesCallCount = %d, want 2 (page + reverse peek)", m.registriesCallCount)
+	}
+	// The peek is the last call: reverse=true limit=1.
+	if p := m.lastRegistriesReq.Pagination; p == nil || !p.Reverse || p.Limit != 1 {
+		t.Errorf("last call = %+v, want the reverse peek (Reverse=true Limit=1)", p)
 	}
 }
 
-// TestHandler_GetRegistries_ListingDefaultsPagination proves that for all
-// input combinations the precompile scan always receives cursor-based
-// pagination at nameScanPageSize, and the returned window is sliced
-// client-side from the full scan result.
+// TestHandler_GetRegistries_ByCursor proves key positions the page: the
+// chain is asked with Key (offset untouched), rows start where the cursor
+// says, and the response carries the next cursor.
+func TestHandler_GetRegistries_ByCursor(t *testing.T) {
+	regs := make([]anchor.Registry, 10)
+	for i := range regs {
+		regs[i] = anchor.Registry{ID: uint64(i + 1)}
+	}
+	m := newChainMock(regs)
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	limit := uint64(3)
+	_, out, err := handler(ctx, nil, getRegistriesInput{Key: chainCursor(4), Limit: &limit})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Registries) != 3 || out.Registries[0].ID != 5 || out.Registries[2].ID != 7 {
+		t.Errorf("Registries = %+v, want IDs [5 6 7]", out.Registries)
+	}
+	if out.Pagination == nil || out.Pagination.Total != 10 || out.Pagination.NextKey != chainCursor(7) {
+		t.Errorf("Pagination = %+v, want Total=10 next_key=%q", out.Pagination, chainCursor(7))
+	}
+	if out.TotalIsLowerBound {
+		t.Error("TotalIsLowerBound = true, want false")
+	}
+	// First call carried the cursor and no offset.
+	first := m.registriesReqs[0].Pagination
+	if first == nil || !bytes.Equal(first.Key, mustCursorBytes(t, chainCursor(4))) || first.Offset != 0 {
+		t.Errorf("first precompile page = %+v, want Key=cursor(4) Offset=0", first)
+	}
+}
+
+// TestHandler_GetRegistries_CursorLastPage proves a cursor page that ends
+// the table still resolves total through the peek (a cursor page does not
+// know its own offset) and reports no next_key.
+func TestHandler_GetRegistries_CursorLastPage(t *testing.T) {
+	regs := []anchor.Registry{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}}
+	m := newChainMock(regs)
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	limit := uint64(10)
+	_, out, err := handler(ctx, nil, getRegistriesInput{Key: chainCursor(3), Limit: &limit})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Registries) != 2 || out.Registries[0].ID != 4 {
+		t.Errorf("Registries = %+v, want IDs [4 5]", out.Registries)
+	}
+	if out.Pagination == nil || out.Pagination.Total != 5 || out.Pagination.NextKey != "" || out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v lower_bound=%v, want Total=5 exact, no next_key",
+			out.Pagination, out.TotalIsLowerBound)
+	}
+	if m.registriesCallCount != 2 {
+		t.Errorf("registriesCallCount = %d, want 2 (page + peek: a cursor page cannot use offset+rows)",
+			m.registriesCallCount)
+	}
+}
+
+// TestHandler_GetRegistries_CursorRejections covers every way a key can be
+// unusable: combined with a non-zero offset (the SDK rejects both), with a
+// name filter (different table), with registry_id, or not base64. All are
+// rejected before any chain call.
+func TestHandler_GetRegistries_CursorRejections(t *testing.T) {
+	offset := uint64(3)
+	zero := uint64(0)
+	name := "anything"
+	regID := uint64(1)
+	garbage := "not!base64"
+	tests := []struct {
+		name  string
+		input getRegistriesInput
+		want  error
+	}{
+		{"key with non-zero offset", getRegistriesInput{Key: chainCursor(4), Offset: &offset}, apperrors.ErrInvalidCursor},
+		{"key with name", getRegistriesInput{Key: chainCursor(4), Name: &name}, apperrors.ErrInvalidCursor},
+		{"key with registry_id", getRegistriesInput{Key: chainCursor(4), RegistryID: &regID},
+			apperrors.ErrInvalidFilterCombination},
+		{"key not base64", getRegistriesInput{Key: garbage}, apperrors.ErrInvalidCursor},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newChainMock([]anchor.Registry{{ID: 1}})
+			handler := makeGetRegistriesHandler(m, testLogger())
+
+			_, _, err := handler(ctx, nil, tc.input)
+			if !errors.Is(err, tc.want) {
+				t.Errorf("error = %v, want %v", err, tc.want)
+			}
+			if m.registriesCallCount != 0 {
+				t.Errorf("registriesCallCount = %d, want 0 (rejected before any chain call)", m.registriesCallCount)
+			}
+		})
+	}
+	// key with an explicit zero offset is fine: zero is "not positioned".
+	m := newChainMock([]anchor.Registry{{ID: 1}, {ID: 2}})
+	handler := makeGetRegistriesHandler(m, testLogger())
+	if _, _, err := handler(ctx, nil, getRegistriesInput{Key: chainCursor(1), Offset: &zero}); err != nil {
+		t.Errorf("key + offset=0: unexpected error %v", err)
+	}
+}
+
+// TestHandler_GetRegistries_ListingDefaultsPagination covers the offset/limit
+// defaults on the direct-fetch path against a 3-row chain, and that total
+// is the table size in every case -- including a page that is smaller than
+// the table and an offset past its end.
 func TestHandler_GetRegistries_ListingDefaultsPagination(t *testing.T) {
 	zero := uint64(0)
 	two := uint64(2)
 	five := uint64(5)
 	regIDZero := uint64(0)
 
-	// Three registries in the mock — enough to exercise different slice windows.
-	mockRegs := []anchor.Registry{{ID: 1}, {ID: 2}, {ID: 3}}
+	chain := []anchor.Registry{{ID: 1}, {ID: 2}, {ID: 3}}
 
 	tests := []struct {
 		name         string
 		input        getRegistriesInput
-		wantRegCount int    // expected len(out.Registries)
-		wantTotal    uint64 // expected out.Pagination.Total
+		wantOffset   uint64 // forwarded to the precompile on the first call
+		wantLimit    uint64 // forwarded to the precompile on the first call
+		wantRegCount int
+		wantNextKey  string
+		wantCalls    int
 	}{
-		{
-			"nothing supplied",
-			getRegistriesInput{},
-			3, 3, // offset=0, limit=defaultRegistriesPageSize → all 3 returned
-		},
-		{
-			"offset within range",
-			getRegistriesInput{Offset: &two},
-			1, 3, // offset=2, limit=defaultRegistriesPageSize → 1 registry (index 2)
-		},
-		{
-			"limit below total",
-			getRegistriesInput{Limit: &two},
-			2, 3, // offset=0, limit=2 → first 2
-		},
-		{
-			"explicit zero limit defaults to page size",
-			getRegistriesInput{Offset: &two, Limit: &zero},
-			1, 3, // offset=2, limit=defaultRegistriesPageSize → 1 registry
-		},
-		{
-			"offset past end returns empty",
-			getRegistriesInput{Offset: &five},
-			0, 3, // offset=5 ≥ len(3) → empty slice
-		},
-		{
-			"registry_id zero treated as unfiltered listing",
-			getRegistriesInput{RegistryID: &regIDZero},
-			3, 3,
-		},
+		{"nothing supplied", getRegistriesInput{}, 0, defaultRegistriesPageSize, 3, "", 1},
+		{"offset within range", getRegistriesInput{Offset: &two}, 2, defaultRegistriesPageSize, 1, "", 1},
+		{"limit below table", getRegistriesInput{Limit: &two}, 0, 2, 2, chainCursor(2), 2},
+		{"explicit zero limit defaults to page size",
+			getRegistriesInput{Offset: &two, Limit: &zero}, 2, defaultRegistriesPageSize, 1, "", 1},
+		{"offset past end", getRegistriesInput{Offset: &five, Limit: &two}, 5, 2, 0, "", 2},
+		{"registry_id zero treated as unfiltered listing",
+			getRegistriesInput{RegistryID: &regIDZero}, 0, defaultRegistriesPageSize, 3, "", 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
-				Registries: mockRegs,
-			}}
+			m := newChainMock(chain)
 			handler := makeGetRegistriesHandler(m, testLogger())
 
 			_, out, err := handler(ctx, nil, tc.input)
@@ -859,20 +996,167 @@ func TestHandler_GetRegistries_ListingDefaultsPagination(t *testing.T) {
 			if len(out.Registries) != tc.wantRegCount {
 				t.Errorf("len(Registries) = %d, want %d", len(out.Registries), tc.wantRegCount)
 			}
-			if out.Pagination == nil || out.Pagination.Total != tc.wantTotal {
-				t.Errorf("Pagination.Total = %v, want %d", out.Pagination, tc.wantTotal)
+			if out.Pagination == nil || out.Pagination.Total != 3 {
+				t.Errorf("Pagination.Total = %v, want 3 (the table size)", out.Pagination)
 			}
-			// The scan loop call must always use cursor-based nameScanPageSize,
-			// regardless of what offset/limit the caller supplied.
-			scanPage := m.lastRegistriesReq.Pagination
-			if scanPage == nil {
-				t.Fatal("Pagination = nil on last GetRegistries call")
+			if out.Pagination.NextKey != tc.wantNextKey {
+				t.Errorf("next_key = %q, want %q", out.Pagination.NextKey, tc.wantNextKey)
 			}
-			if scanPage.Limit != nameScanPageSize {
-				t.Errorf("precompile Limit = %d, want nameScanPageSize (%d)", scanPage.Limit, nameScanPageSize)
+			if out.TotalIsLowerBound {
+				t.Error("TotalIsLowerBound = true, want false")
+			}
+			if m.registriesCallCount != tc.wantCalls {
+				t.Errorf("registriesCallCount = %d, want %d", m.registriesCallCount, tc.wantCalls)
+			}
+			page := m.registriesReqs[0].Pagination
+			if page == nil {
+				t.Fatal("Pagination = nil on first GetRegistries call")
+			}
+			if page.Offset != tc.wantOffset || page.Limit != tc.wantLimit {
+				t.Errorf("precompile page = %+v, want Offset=%d Limit=%d", page, tc.wantOffset, tc.wantLimit)
 			}
 		})
 	}
+}
+
+// TestHandler_GetRegistries_ChainTotalPreferred proves that when the chain
+// does report a count, it is used as-is and no peek is spent.
+func TestHandler_GetRegistries_ChainTotalPreferred(t *testing.T) {
+	regs := make([]anchor.Registry, 10)
+	for i := range regs {
+		regs[i] = anchor.Registry{ID: uint64(i + 1)}
+	}
+	m := newChainMockWithTotal(regs, 10)
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	limit := uint64(3)
+	_, out, err := handler(ctx, nil, getRegistriesInput{Limit: &limit})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Pagination == nil || out.Pagination.Total != 10 || out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v lower_bound=%v, want Total=10 exact from the chain",
+			out.Pagination, out.TotalIsLowerBound)
+	}
+	if m.registriesCallCount != 1 {
+		t.Errorf("registriesCallCount = %d, want 1 (chain counted; no peek)", m.registriesCallCount)
+	}
+}
+
+// TestHandler_GetRegistries_EmptyTable proves an empty chain yields an
+// exact total of 0: the page is empty and the peek finds nothing.
+func TestHandler_GetRegistries_EmptyTable(t *testing.T) {
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	offset := uint64(5000)
+	_, out, err := handler(ctx, nil, getRegistriesInput{Offset: &offset})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Registries) != 0 {
+		t.Errorf("len(Registries) = %d, want 0", len(out.Registries))
+	}
+	if out.Pagination == nil || out.Pagination.Total != 0 || out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v, TotalIsLowerBound = %v; want Total=0 exact",
+			out.Pagination, out.TotalIsLowerBound)
+	}
+}
+
+// TestHandler_GetRegistries_PeekFailureIsLowerBound proves a failed reverse
+// peek does not fail the listing: the page still returns, total falls back
+// to the rows confirmed so far, and total_is_lower_bound says so.
+func TestHandler_GetRegistries_PeekFailureIsLowerBound(t *testing.T) {
+	regs := make([]anchor.Registry, 10)
+	for i := range regs {
+		regs[i] = anchor.Registry{ID: uint64(i + 1)}
+	}
+	inner := newChainMock(regs)
+	m := &mockAnchor{}
+	m.registriesFn = func(i int) (*anchor.GetRegistriesResponse, error) {
+		if p := m.lastRegistriesReq.Pagination; p != nil && p.Reverse {
+			return nil, errors.New("peek down")
+		}
+		inner.lastRegistriesReq = m.lastRegistriesReq
+		return inner.registriesFn(i)
+	}
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	offset := uint64(4)
+	limit := uint64(3)
+	_, out, err := handler(ctx, nil, getRegistriesInput{Offset: &offset, Limit: &limit})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Registries) != 3 {
+		t.Errorf("len(Registries) = %d, want 3", len(out.Registries))
+	}
+	if out.Pagination == nil || out.Pagination.Total != 7 || !out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v, TotalIsLowerBound = %v; want Total=7 (offset+rows) as a floor",
+			out.Pagination, out.TotalIsLowerBound)
+	}
+	if out.Pagination.NextKey != chainCursor(7) {
+		t.Errorf("next_key = %q, want %q (cursor survives a failed peek)", out.Pagination.NextKey, chainCursor(7))
+	}
+}
+
+// TestHandler_GetRegistries_LimitSpansChainPages proves a caller limit above
+// the chain page cap is served in successive fetches: the first asks for the
+// cap, the next continues from the chain's cursor and asks only for what is
+// still missing, and the exact total is reported when the last page ends the
+// table.
+func TestHandler_GetRegistries_LimitSpansChainPages(t *testing.T) {
+	chain := make([]anchor.Registry, nameScanPageSize+2)
+	for i := range chain {
+		chain[i] = anchor.Registry{ID: uint64(i + 1)}
+	}
+	m := newChainMock(chain)
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	limit := uint64(nameScanPageSize + 50)
+	_, out, err := handler(ctx, nil, getRegistriesInput{Limit: &limit})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Registries) != nameScanPageSize+2 {
+		t.Errorf("len(Registries) = %d, want %d", len(out.Registries), nameScanPageSize+2)
+	}
+	if out.Pagination == nil || out.Pagination.Total != uint64(nameScanPageSize+2) ||
+		out.Pagination.NextKey != "" || out.TotalIsLowerBound {
+		t.Errorf("Pagination = %+v, TotalIsLowerBound = %v; want exact total %d, no next_key",
+			out.Pagination, out.TotalIsLowerBound, nameScanPageSize+2)
+	}
+	if m.registriesCallCount != 2 {
+		t.Errorf("registriesCallCount = %d, want 2", m.registriesCallCount)
+	}
+	// The second fetch resumes from the chain's cursor (not a recomputed
+	// offset) and asks only for the 50 rows still missing.
+	p := m.lastRegistriesReq.Pagination
+	if !bytes.Equal(p.Key, mustCursorBytes(t, chainCursor(nameScanPageSize))) || p.Offset != 0 || p.Limit != 50 {
+		t.Errorf("second fetch = %+v, want Key=cursor(%d) Offset=0 Limit=50", p, nameScanPageSize)
+	}
+}
+
+// TestHandler_GetRegistries_ListingPropagatesError proves an upstream failure
+// on the direct fetch surfaces as-is rather than as an empty page.
+func TestHandler_GetRegistries_ListingPropagatesError(t *testing.T) {
+	m := &mockAnchor{returnErr: errors.New("rpc down")}
+	handler := makeGetRegistriesHandler(m, testLogger())
+
+	_, _, err := handler(ctx, nil, getRegistriesInput{})
+	if err == nil || err.Error() != "rpc down" {
+		t.Fatalf("err = %v, want rpc down", err)
+	}
+}
+
+// mustCursorBytes decodes a base64 next_key for request assertions.
+func mustCursorBytes(t *testing.T, key string) []byte {
+	t.Helper()
+	b, err := (&anchor.PageResponse{NextKey: key}).CursorBytes()
+	if err != nil {
+		t.Fatalf("decode cursor %q: %v", key, err)
+	}
+	return b
 }
 
 // TestHandler_GetRegistries_ByName_DefaultsPagination proves the name-filtered
@@ -1387,131 +1671,6 @@ func TestHandler_GetRegistries_ByName_TruncatedScanStillPages(t *testing.T) {
 	}
 }
 
-// TestHandler_GetRegistries_UnfilteredTruncated proves that when the full-table
-// scan hits its page cap (maxNameScanPages), the unfiltered listing sets
-// TotalIsLowerBound=true and leaves pagination.total as the scanned floor.
-func TestHandler_GetRegistries_UnfilteredTruncated(t *testing.T) {
-	m := &mockAnchor{
-		registriesFn: func(_ int) (*anchor.GetRegistriesResponse, error) {
-			page := make([]anchor.Registry, nameScanPageSize)
-			for i := range page {
-				page[i] = anchor.Registry{ID: uint64(i + 1)}
-			}
-			return &anchor.GetRegistriesResponse{
-				Registries: page,
-				Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("always-more"))},
-			}, nil
-		},
-	}
-	handler := makeGetRegistriesHandler(m, testLogger())
-
-	_, out, err := handler(ctx, nil, getRegistriesInput{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !out.TotalIsLowerBound {
-		t.Error("TotalIsLowerBound = false, want true (unfiltered scan hit page cap)")
-	}
-	wantTotal := uint64(nameScanPageSize * maxNameScanPages)
-	if out.Pagination == nil || out.Pagination.Total != wantTotal {
-		t.Errorf("Pagination.Total = %v, want %d (scanned floor)", out.Pagination, wantTotal)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// scanAllRegistries unit tests
-// ---------------------------------------------------------------------------
-
-// TestScanAllRegistries_EmptyTableSkipsWalk proves the peek short-circuits an
-// empty registry table without issuing a second GetRegistries call -- mirrors
-// TestScanRegistriesByName_EmptyTableSkipsWalk for the unfiltered walk.
-func TestScanAllRegistries_EmptyTableSkipsWalk(t *testing.T) {
-	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
-
-	all, truncated, err := scanAllRegistries(ctx, m, testLogger())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if truncated {
-		t.Error("expected truncated=false for a definitively empty table")
-	}
-	if len(all) != 0 {
-		t.Errorf("len(all) = %d, want 0", len(all))
-	}
-	if m.registriesCallCount != 1 {
-		t.Errorf("registriesCallCount = %d, want 1 (peek only, walk skipped)", m.registriesCallCount)
-	}
-}
-
-// TestScanAllRegistries_PagesUntilShortPage proves the unfiltered walk crosses
-// multiple chain pages and terminates naturally on an empty NextKey, returning
-// all rows without spurious truncation -- mirrors
-// TestScanRegistriesByName_PagesUntilShortPage.
-func TestScanAllRegistries_PagesUntilShortPage(t *testing.T) {
-	full := make([]anchor.Registry, nameScanPageSize)
-	for i := range full {
-		full[i] = anchor.Registry{ID: uint64(i + 1), Name: "filler"}
-	}
-	pages := []*anchor.GetRegistriesResponse{
-		// Peek: highest ID=201 reconciles exactly with the 201 rows the walk
-		// will scan (200 filler + 1 last), so the peek doesn't flag truncation.
-		{Registries: []anchor.Registry{{ID: 201}}},
-		// Full page with NextKey set -- walk must advance the cursor.
-		{Registries: full, Pagination: &anchor.PageResponse{NextKey: anchor.EncodeCursor([]byte("cursor-1"))}},
-		// Short terminal page with no NextKey -- walk ends here.
-		{Registries: []anchor.Registry{{ID: 201, Name: "last-registry"}}},
-	}
-	m := &mockAnchor{registriesPages: pages}
-
-	all, truncated, err := scanAllRegistries(ctx, m, testLogger())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if truncated {
-		t.Error("expected truncated=false; walk ended naturally and reconciled with the peek")
-	}
-	if len(all) != nameScanPageSize+1 {
-		t.Errorf("len(all) = %d, want %d", len(all), nameScanPageSize+1)
-	}
-	if m.registriesCallCount != 3 {
-		t.Errorf("registriesCallCount = %d, want 3 (peek, one full page, one short page)", m.registriesCallCount)
-	}
-}
-
-// TestScanAllRegistries_IDGapTruncation proves that when the walk exhausts all
-// pages (empty NextKey signals end of table) but the row count is lower than
-// the highest known registry ID, the result is reported as truncated.
-// Concurrent writes or non-contiguous IDs can cause the scan to miss entries;
-// callers must not treat a truncated result as complete.
-func TestScanAllRegistries_IDGapTruncation(t *testing.T) {
-	pages := []*anchor.GetRegistriesResponse{
-		// Peek: highest known ID=5.
-		{Registries: []anchor.Registry{{ID: 5}}},
-		// Single walk page -- only 3 rows, no NextKey (end of table as seen by
-		// the precompile). totalScanned(3) < highestID(5) triggers ID-gap path.
-		{Registries: []anchor.Registry{
-			{ID: 1, Name: "reg-one"},
-			{ID: 2, Name: "reg-two"},
-			{ID: 4, Name: "reg-four"},
-		}},
-	}
-	m := &mockAnchor{registriesPages: pages}
-
-	all, truncated, err := scanAllRegistries(ctx, m, testLogger())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !truncated {
-		t.Error("expected truncated=true; scanned 3 rows but highest known ID was 5")
-	}
-	if len(all) != 3 {
-		t.Errorf("len(all) = %d, want 3", len(all))
-	}
-	if m.registriesCallCount != 2 {
-		t.Errorf("registriesCallCount = %d, want 2 (peek + one walk page)", m.registriesCallCount)
-	}
-}
-
 func TestLatestRegistryID_ReturnsHighestID(t *testing.T) {
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
 		Registries: []anchor.Registry{{ID: 42, Name: "most-recent"}},
@@ -1629,7 +1788,8 @@ func TestHandler_GetRecords_WithPagination(t *testing.T) {
 
 	offset := uint64(0)
 	limit := uint64(10)
-	_, out, err := handler(ctx, nil, getRecordsInput{Offset: &offset, Limit: &limit})
+	registryID := uint64(1)
+	_, out, err := handler(ctx, nil, getRecordsInput{RegistryID: &registryID, Offset: &offset, Limit: &limit})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -17,6 +17,7 @@
     "value": "0x0",
     "chainId": "0xe607",
     "gas": "0x1d4c0",
+    "nonce": "0x64",
     "maxFeePerGas": "0xba43b7400",
     "maxPriorityFeePerGas": "0x77359400"
   }

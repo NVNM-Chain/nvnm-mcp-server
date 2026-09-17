@@ -62,6 +62,7 @@ This README is the technical entry point. For deeper context, follow the links b
 | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) | Per-alert investigation playbook; what to do when each Prometheus rule fires |
 | [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) | Frozen-snapshot security assessment with remediation results |
 | [`docs/OWASP_AUDIT.md`](docs/OWASP_AUDIT.md) | OWASP Top 10:2021 audit — per-category findings and remediation status |
+| [`docs/OPEN_QUESTIONS_OPERATOR.md`](docs/OPEN_QUESTIONS_OPERATOR.md) | Questions only the hosted operator / listing owner can answer (F2 deployment wiring, Anthropic directory submission) |
 | [`docs/SECURITY_CONSUMER_GUIDANCE.md`](docs/SECURITY_CONSUMER_GUIDANCE.md) | Threats that fall on the consuming LLM agent / application, not the server |
 | [`docs/DATA_HANDLING.md`](docs/DATA_HANDLING.md) | Privacy-by-design technical reference (what is and isn't stored) |
 | [`docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf`](docs/NVNM_MCP_Privacy_Policy_Jul_2026.pdf) | Counsel-finalized Privacy Policy for the hosted Service (published legal artifact) |
@@ -149,7 +150,17 @@ make run
 # Exception: MCP_KEYLESS_WRITES=true without MCP_KEYLESS_PG_DSN is turned
 # off for that process (writes stay authenticated) so boot can succeed.
 cp .env.example .env      # then fill in values
-make run-http
+
+# HTTP is fail-closed: it refuses to boot without at least one enabled,
+# unexpired API key in the file .env points at (MCP_API_KEYS_FILE=.mcp-keys.json). Create
+# one first -- ROLES is required. Pick the least you need:
+#   reader      read tools only
+#   writer      reads + evm_send_raw_transaction (broadcast)
+#   admin       writer + anchor_prepare_grant_role / revoke_role
+#   automation  write access for unattended pipelines (non-interactive callers)
+make key-create NAME=local-dev ROLES=reader    # prints the raw key ONCE -- save it
+make run-http                                  # listens on MCP_HTTP_ADDR from .env (:8180)
+# Then send requests with: Authorization: Bearer <raw key>
 ```
 
 ### Connect to an MCP client
@@ -183,7 +194,7 @@ When using HTTP transport, authentication is strongly recommended. The server su
 export AUTH_PROVIDER=apikey  # default, can be omitted
 
 # Create an API key for a client
-make key-create NAME=my-agent
+make key-create NAME=my-agent ROLES=reader,writer   # ROLES is required
 
 # List all keys
 make key-list
@@ -476,7 +487,7 @@ make clean          # Remove build artifacts
 ### API Key Management
 
 ```bash
-make key-create NAME=my-agent                            # Create a new API key
+make key-create NAME=my-agent ROLES=reader,writer        # Create a new API key (ROLES required: reader, writer, admin, automation)
 make key-list                                            # List all keys (ID, enabled, roles, created)
 make key-disable NAME=my-agent                           # Disable a key (rejected at auth)
 make key-enable NAME=my-agent                            # Re-enable a disabled key

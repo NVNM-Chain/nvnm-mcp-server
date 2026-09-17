@@ -4,9 +4,13 @@
 package evm
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	defitypes "github.com/defiweb/go-eth/types"
+
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 )
 
 // TestAddressHex_EIP55 pins the checksum casing against the reference
@@ -35,5 +39,46 @@ func TestHashHex(t *testing.T) {
 	h := defitypes.MustHashFromHex(raw, defitypes.PadNone)
 	if got := HashHex(h); got != raw {
 		t.Errorf("HashHex = %s, want %s", got, raw)
+	}
+}
+
+// TestParseAddress_EIP55Checksum pins the strict parser: lower/upper-case
+// hex carries no checksum and passes; correctly checksummed mixed case
+// passes; mixed case with the wrong checksum is rejected and the message
+// tells the caller the expected spelling (directory review 2026-09-15, M-2).
+func TestParseAddress_EIP55Checksum(t *testing.T) {
+	const good = "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207" // pragma: allowlist secret -- EIP-55 test vector
+	accept := []string{
+		good,
+		"0x57eb2e9ee9345ce3dd4063e130d58ec79aba7207", // pragma: allowlist secret -- same vector, lower case
+		"0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
+		"57EB2e9ee9345ce3dD4063E130D58EC79aba7207",   // pragma: allowlist secret -- same vector, no 0x
+		"0X57eb2e9ee9345ce3dd4063e130d58ec79aba7207", // pragma: allowlist secret -- same vector, 0X prefix
+	}
+	for _, in := range accept {
+		addr, err := ParseAddress(in)
+		if err != nil {
+			t.Errorf("ParseAddress(%q): %v", in, err)
+			continue
+		}
+		if AddressHex(addr) != good {
+			t.Errorf("ParseAddress(%q) = %s, want %s", in, AddressHex(addr), good)
+		}
+	}
+	reject := map[string]string{
+		"0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207": "EIP-55", // pragma: allowlist secret -- wrong checksum on purpose
+		"0x1234":         "invalid Ethereum address",
+		"not-an-address": "invalid Ethereum address",
+		"":               "invalid Ethereum address",
+	}
+	for in, want := range reject {
+		_, err := ParseAddress(in)
+		if !errors.Is(err, apperrors.ErrInvalidAddress) {
+			t.Errorf("ParseAddress(%q): err = %v, want ErrInvalidAddress", in, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ParseAddress(%q): message %q lacks %q", in, err.Error(), want)
+		}
 	}
 }

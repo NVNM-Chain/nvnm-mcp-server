@@ -82,6 +82,7 @@ type WalletTxRequest struct {
 	Value                string `json:"value"`
 	ChainID              string `json:"chainId"`
 	Gas                  string `json:"gas"`
+	Nonce                string `json:"nonce"`
 	GasPrice             string `json:"gasPrice"`
 	MaxFeePerGas         string `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas"`

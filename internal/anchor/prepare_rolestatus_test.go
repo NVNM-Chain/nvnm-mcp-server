@@ -210,6 +210,24 @@ func TestPrepareRevokeRole_Validation(t *testing.T) {
 			wantErr: apperrors.ErrInvalidAddress,
 			wantMsg: "not-an-address",
 		},
+		{
+			// Documented as a client-side rejection since rc8, but never
+			// implemented: "owner" reached gas estimation and came back as the
+			// generic upstream failure (directory review 2026-09-15, H-2 #9).
+			name:    "unknown role",
+			req:     PrepareRevokeRoleRequest{From: testFrom, RegistryID: 1, Account: testFrom, Role: "owner"},
+			wantErr: apperrors.ErrInvalidRole,
+			wantMsg: `must be "admin" or "editor"`,
+		},
+		{
+			// The chain compares the role string literally, so a case
+			// variant is a different (invalid) role, not a normalization
+			// candidate.
+			name:    "role is case-sensitive",
+			req:     PrepareRevokeRoleRequest{From: testFrom, RegistryID: 1, Account: testFrom, Role: "Editor"},
+			wantErr: apperrors.ErrInvalidRole,
+			wantMsg: `"Editor"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,6 +243,110 @@ func TestPrepareRevokeRole_Validation(t *testing.T) {
 				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantMsg)
 			}
 		})
+	}
+}
+
+// TestPrepareGrantRole_RejectsUnknownRole mirrors the revoke case on the
+// grant side and confirms the accepted vocabulary still builds a transaction
+// (so the validator is not accidentally rejecting everything).
+func TestPrepareGrantRole_RejectsUnknownRole(t *testing.T) {
+	c := prepareTestClient(t)
+	base := PrepareGrantRoleRequest{From: testFrom, RegistryID: 1, Account: testFrom}
+
+	for _, role := range []string{"owner", "ADMIN", "editor ", ""} {
+		req := base
+		req.Role = role
+		_, err := c.PrepareGrantRole(context.Background(), req)
+		if err == nil {
+			t.Errorf("role %q: expected error", role)
+			continue
+		}
+		if role == "" {
+			if !errors.Is(err, apperrors.ErrMissingRequired) {
+				t.Errorf("empty role: err = %v, want ErrMissingRequired", err)
+			}
+			continue
+		}
+		if !errors.Is(err, apperrors.ErrInvalidRole) {
+			t.Errorf("role %q: err = %v, want ErrInvalidRole", role, err)
+		}
+		if !apperrors.IsInputError(err) {
+			t.Errorf("role %q: must be an input-class error: %v", role, err)
+		}
+	}
+
+	for _, role := range []string{"admin", "editor"} {
+		req := base
+		req.Role = role
+		if _, err := c.PrepareGrantRole(context.Background(), req); err != nil {
+			t.Errorf("role %q: unexpected error %v", role, err)
+		}
+	}
+}
+
+// TestPrepare_RejectsBadEIP55Checksum verifies every prepare path parses
+// `from` (and `account`) through evm.ParseAddress, so a mixed-case address
+// with a wrong EIP-55 checksum is refused before any RPC instead of being
+// silently accepted (directory review 2026-09-15, M-2).
+func TestPrepare_RejectsBadEIP55Checksum(t *testing.T) {
+	c := prepareTestClient(t)
+	const badCase = "0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207" // pragma: allowlist secret -- wrong checksum on purpose
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"add_registry from": func() error {
+			_, err := c.PrepareAddRegistry(ctx, PrepareAddRegistryRequest{From: badCase, Name: "n", Description: "d"})
+			return err
+		},
+		"grant_role from": func() error {
+			_, err := c.PrepareGrantRole(ctx, PrepareGrantRoleRequest{From: badCase, RegistryID: 1, Account: testFrom, Role: "editor"})
+			return err
+		},
+		"grant_role account": func() error {
+			_, err := c.PrepareGrantRole(ctx, PrepareGrantRoleRequest{From: testFrom, RegistryID: 1, Account: badCase, Role: "editor"})
+			return err
+		},
+		"revoke_role account": func() error {
+			_, err := c.PrepareRevokeRole(ctx, PrepareRevokeRoleRequest{From: testFrom, RegistryID: 1, Account: badCase, Role: "editor"})
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if !errors.Is(err, apperrors.ErrInvalidAddress) {
+				t.Fatalf("err = %v, want ErrInvalidAddress", err)
+			}
+			if !strings.Contains(err.Error(), "EIP-55") {
+				t.Errorf("message must explain the checksum failure: %v", err)
+			}
+		})
+	}
+}
+
+// TestPrepareAddRegistry_NameLengthCap pins the client-side mirror of the
+// precompile's 128-character registry-name cap (observed live as "name
+// exceeds max length: got=2000 max=128"). Exactly 128 is accepted; 129 is
+// rejected before any RPC with an input-class error naming the cap.
+func TestPrepareAddRegistry_NameLengthCap(t *testing.T) {
+	c := prepareTestClient(t)
+
+	ok := PrepareAddRegistryRequest{From: testFrom, Name: strings.Repeat("a", maxRegistryNameLen), Description: "d"}
+	if _, err := c.PrepareAddRegistry(context.Background(), ok); err != nil {
+		t.Fatalf("128-char name: unexpected error %v", err)
+	}
+
+	long := ok
+	long.Name = strings.Repeat("a", maxRegistryNameLen+1)
+	_, err := c.PrepareAddRegistry(context.Background(), long)
+	if !errors.Is(err, apperrors.ErrInputTooLarge) {
+		t.Fatalf("129-char name: err = %v, want ErrInputTooLarge", err)
+	}
+	if !strings.Contains(err.Error(), "at most 128") {
+		t.Errorf("error must name the cap: %v", err)
+	}
+	if !apperrors.IsInputError(err) {
+		t.Errorf("must be an input-class error: %v", err)
 	}
 }
 

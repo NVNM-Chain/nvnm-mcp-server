@@ -1,7 +1,7 @@
 # Pre-Red-Team Security Assessment: NVNM Chain MCP Server
 
 **Date:** 2026-04-01
-**Last reviewed:** 2026-07-08 (Phase 5 anonymous-write bundle + F1-F5 remediation, commit `8a74b49`; see the "Update log" at the end)
+**Last reviewed:** 2026-09-10 (F1–F5 posture: each finding closed with evidence or accepted with rationale; see the last "Update log" entry)
 **Scope:** Full repository defensive security review
 **Status:** Assessment complete; remediation complete (see Phase 4)
 
@@ -676,6 +676,7 @@ The sections below record changes made after the original 2026-04-01 pre-red-tea
 - [2026-06-25 — Phase 3 Postgres key-store backend (commit c7e6edd)](#update-2026-06-25-phase-3-postgres-key-store-backend)
 - [2026-06-26 — Phase 4 key expiry — enforcement, reject taxonomy, bounded disclosure](#update-2026-06-26-phase-4-key-expiry--enforcement-reject-taxonomy-bounded-disclosure)
 - [2026-07-08 — Phase 5 anonymous-write bundle + F1–F5 remediation](#update-2026-07-08-phase-5-anonymous-write-bundle--f1f5-remediation)
+- [2026-09-10 — F1–F5 posture: closed or accepted, item by item](#update-2026-09-10-f1f5-posture--closed-or-accepted-item-by-item)
 
 ---
 
@@ -1447,3 +1448,40 @@ gates, plus `write_audit`, lives on a **dedicated** Postgres pool
   single source of truth for audit-scope detail and is kept current as the
   audit surface evolves; this entry is a dated historical record of what
   changed in `8a74b49`.
+
+## Update 2026-09-10: F1–F5 posture — closed or accepted, item by item
+
+*Supersedes any statement that "F1–F5 are all open". That claim was
+inherited from the 2026-07 handover bundle and was already false on the
+2026-08-24 code read; this entry is the current, reviewable posture. Each
+row is either **closed with evidence** (code + test in this tree) or
+**accepted with rationale** (a decision, recorded here, that the residual
+risk is tolerable for this product). One row is conditional on deployment
+configuration that a code review cannot see; it is marked as such and the
+exact question to ask the operator is given below.*
+
+| Finding | Status | Evidence / rationale |
+|---|---|---|
+| **F1** — authed/self-host broadcasts had a weaker audit trail than the keyless path | **Closed with evidence**, one narrow residual **accepted** | `resolveBroadcast` decodes in authed mode and enforces the same anchor-precompile relay-scope gate as the keyless path (`decodeAndScope`, `internal/mcp/tools_evm_write.go`); `loadWriteAudit` provisions `write_audit` whenever `MCP_KEYLESS_PG_DSN` is set, in any mode. Tests: `TestSendRawTx_RecordsWriteAuditOnSuccess`, `TestSendRawTx_RecordsWriteAuditOnFailure`, `TestCheckRelayScope`. **Residual (accepted):** with `MCP_RELAY_ALLOW_ANY=true` *and* a signed tx that fails to decode, there is no recovered signer to key a `write_audit` row on; the broadcast is logged (structured line with `client_id`) but not persisted. Rationale: the flag is opt-in, off by default, documented as the unrestricted-relay escape hatch, and the caller on that path is authenticated, so the structured log still attributes the action. Fixing it would mean an audit row without a signer key, i.e. a schema change for a mode we tell operators not to run. |
+| **F2** — admin mutations were never persisted | **Closed in code; persistence is conditional on deployment** | Append-only `admin_audit` table (`internal/mcp/migrations/0004_admin_audit.sql`) records all 7 admin mutation types with the resolved `actor_id`; falls back to an attributed structured-log line when no DSN is set. Tests: `TestPostgresAdminAuditStore_RecordRoundTrip`, `TestRecordAdminAudit_StoreAttached`, `TestRecordAdminAudit_NilStoreLogsFallback`, `TestAdminAudit_HandleCreate_Success`. **Open question for the hosted operator** (cannot be answered from the repo): is `MCP_KEYLESS_PG_DSN` set on the hosted deployment? If yes, F2 is closed there too; if no, hosted admin actions are logs-only and the operator's log retention is the audit store. See "Question for the hosted operator" below. |
+| **F3** — public key-request endpoint verifies email syntax, not ownership | **Accepted with rationale** | `POST /api/v1/keys/request` creates a **pending** request only; nothing is minted until an admin approves it (`admin_keys_pending.go`). On approval the key is emailed to the address in the request (`approvalEmailBody` → `email.Send(req.Email, …)`), so a requester who typed someone else's address does not receive the key — the address owner does, and can ignore it. Blast radius of a forged request is therefore spam in the review queue, not a credential. That queue is already hardened: the endpoint is **off by default** (`NVNM_KEY_REQUEST_ENABLED=false`), per-source-IP rate limited at 0.5 req/s burst 3 (`NVNM_KEY_REQUEST_RATE_LIMIT/_BURST`, `TestKeyRequest_RateLimited429`), body-capped at 16 KiB, and free-text fields reject control/bidi characters (`TestValidateKeyRequest_ControlChars`). Email-ownership proof (confirmation link) would add an outbound-mail dependency and a second state machine to protect a queue whose worst case is a human deleting junk. Decision 2026-09-10: accept. Revisit if the endpoint is ever changed to auto-approve or to deliver keys anywhere other than the requested address. |
+| **F4** — minted keys silently logged in clear when SMTP unset | **Closed with evidence** | With `NVNM_KEY_REQUEST_ENABLED=true` and no `NVNM_SMTP_HOST`, boot fails with `ErrKeyInLogsNotAllowed` unless the operator sets `NVNM_ALLOW_KEY_IN_LOGS=true`; each approval on that path logs at WARN. Tests: `internal/config/config_keyinlogs_test.go`, `cmd/nvnm-mcp-server/helpers_test.go`. Not a silent default. |
+| **F5** — admin actions not attributable to an individual | **Closed with evidence** | `ADMIN_API_KEYS_FILE` maps `sha256(admin-key) → admin-id`, resolved at constant time; approve/reject record the acting admin as decider (`TestAdminPending_Approve_DeciderIsAdminActor`, `TestAdminPending_Reject_DeciderIsAdminActor`) and `admin_audit` carries `actor_id`. The single shared `ADMIN_API_KEY` remains supported as the fallback for one-operator deployments; an operator who wants per-person attribution uses the file. |
+
+### Question for the hosted operator (closes the F2 conditional)
+
+The full question set, with answer slots, lives in
+[`OPEN_QUESTIONS_OPERATOR.md`](OPEN_QUESTIONS_OPERATOR.md) § 1. In short,
+ask whoever owns the hosted deployment (`mcp-testnet.nvnmchain.io`,
+`mcp.nvnmchain.io`) to answer, per environment:
+
+1. Is `MCP_KEYLESS_PG_DSN` set on the running server? (If `MCP_KEYLESS_WRITES=true`
+   the binary refuses to boot without it, so "yes" is implied there — confirm.)
+2. Does that Postgres contain the `write_audit` and `admin_audit` tables
+   with rows (i.e. migration `0004_admin_audit.sql` applied)?
+3. Is `ADMIN_API_KEYS_FILE` set (per-admin attribution) or only the shared
+   `ADMIN_API_KEY`?
+4. Is `NVNM_KEY_REQUEST_ENABLED` on, and if so is `NVNM_SMTP_HOST` set (so
+   `NVNM_ALLOW_KEY_IN_LOGS` is not in use)?
+
+A "yes" to 1–2 closes F2 with evidence; record the answers here with a date.

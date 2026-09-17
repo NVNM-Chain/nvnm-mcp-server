@@ -44,6 +44,13 @@ var (
 	ErrLogRangeTooWide = errors.New(
 		"block range too wide: the upstream node caps the from_block-to_block " +
 			"distance for log queries; narrow the range and retry")
+	// ErrLogRangeInvalid marks an eth_getLogs query the node rejects outright
+	// (observed live for to_block beyond the chain head): not a width problem,
+	// so it gets its own instruction rather than "narrow the range".
+	ErrLogRangeInvalid = errors.New(
+		"invalid block range: to_block must not exceed the current chain head " +
+			"and from_block must not exceed to_block; use to_block=\"latest\" " +
+			"or a block number at or below the head")
 	// ErrEmptyMetadataObject marks the literal empty JSON object "{}" passed
 	// as record metadata, which the anchoring precompile rejects on-chain.
 	// The message is the client-facing text, surfaced verbatim (input class);
@@ -64,7 +71,7 @@ var (
 	// shape that cannot be honored at the same time. The message is the
 	// client-facing text, surfaced verbatim (input class).
 	ErrInvalidFilterCombination = errors.New(
-		"registry_id cannot be combined with name, match, offset, or limit: " +
+		"registry_id cannot be combined with name, match, offset, limit, or key: " +
 			"registry_id fetches a single registry by ID, which is a " +
 			"different query shape from a registry listing; drop the other " +
 			"parameters, or omit registry_id to list registries")
@@ -76,6 +83,71 @@ var (
 	ErrMatchWithoutName = errors.New(
 		"match requires name: the match mode only applies to a name lookup; " +
 			"supply name, or omit match for a paged listing")
+	// ErrInvalidCursor marks an anchor_get_registries call whose key
+	// (pagination cursor) cannot be used: it is not valid base64, or it was
+	// combined with a non-zero offset, a name filter, or registry_id. The
+	// cursor names a position in the unfiltered registry table, so it
+	// cannot be mixed with the other ways of naming one. The message is the
+	// client-facing text, surfaced verbatim (input class).
+	ErrInvalidCursor = errors.New(
+		"key must be the next_key from a previous unfiltered listing and " +
+			"cannot be combined with a non-zero offset, name, match, or " +
+			"registry_id: page with either key or offset, not both")
+	// ErrInvalidHexData marks calldata (or similar free-form hex input) that
+	// is not valid hex. Input class so the caller learns it is their bytes,
+	// not the node, that failed.
+	ErrInvalidHexData = errors.New("invalid hex data: must be 0x-prefixed hex with an even number of digits")
+	// ErrInvalidRole marks a registry role outside the precompile's set. The
+	// message is the client-facing text, surfaced verbatim (input class).
+	ErrInvalidRole = errors.New("invalid role: must be \"admin\" or \"editor\"")
+	// ErrBlockBeyondHead marks a block reference past the chain head (observed
+	// live as "height N must be less than or equal to the current blockchain
+	// height M"). Input class; the message is the client-facing text.
+	ErrBlockBeyondHead = errors.New(
+		"block number is beyond the current chain head: use \"latest\" or a " +
+			"block number at or below the head (evm_get_chain_id reports it)")
+	// ErrCallReverted marks an eth_call the target contract rejected. The
+	// node's raw reason is never echoed (it may carry internal type paths);
+	// the message is the client-facing text (input class).
+	ErrCallReverted = errors.New(
+		"contract call reverted: the target rejected the call (unknown function " +
+			"selector, malformed calldata, or a failed require/permission check); " +
+			"check `to` and `data`, and pass `from` if the function checks msg.sender")
+	// ErrRelayValueRejected marks a write to the anchor precompile that carries
+	// a non-zero native value. The precompile is not payable, so such a
+	// transaction can only revert and burn the signer's gas; the relay refuses
+	// it before broadcast. Input class; the message is the client-facing text.
+	ErrRelayValueRejected = errors.New(
+		"transaction not relayed: this connector only broadcasts zero-value calls " +
+			"to the NVNM anchoring registry and the signed transaction carries a " +
+			"non-zero value; re-prepare with the anchor_prepare_* tools (value is " +
+			"always 0) and re-sign")
+	// ErrTxNonceConflict marks a broadcast the node rejected because the signed
+	// nonce is already used or already occupied by a pending transaction
+	// (observed live as "invalid nonce; got N, expected M: tx nonce is lower
+	// than account nonce"). Input class; the message is the client-facing text.
+	ErrTxNonceConflict = errors.New(
+		"transaction rejected: nonce conflict -- the signed nonce is already used " +
+			"by a mined or pending transaction from this address; call the " +
+			"anchor_prepare_* tool again for a fresh nonce, re-sign, and re-broadcast")
+	// ErrTxAlreadyKnown marks a re-broadcast of a transaction the node already
+	// holds (observed live as "tx already in mempool"). Input class.
+	ErrTxAlreadyKnown = errors.New(
+		"transaction already known to the network: this exact signed transaction " +
+			"is already pending or mined; do not re-broadcast -- poll " +
+			"evm_get_transaction_receipt with its hash instead")
+	// ErrTxChainIDMismatch marks a signature made for a different chain
+	// (observed live as "invalid chain id for signer: have 1 want 787111").
+	// Input class; the message is the client-facing text.
+	ErrTxChainIDMismatch = errors.New(
+		"transaction signed for a different chain: sign with the chain_id " +
+			"returned by the anchor_prepare_* tool for this deployment")
+	// ErrInsufficientFunds marks a broadcast the node rejected because the
+	// signer cannot cover gas * price + value. Input class.
+	ErrInsufficientFunds = errors.New(
+		"insufficient funds: the signer's balance does not cover gas for this " +
+			"transaction; fund the address (nvnm_setup_wizard explains how) and " +
+			"re-broadcast")
 )
 
 // Not-found errors.
@@ -147,10 +219,54 @@ var inputErrors = []error{
 	ErrRelayScopeRejected,
 	ErrPrecompileValidation,
 	ErrLogRangeTooWide,
+	ErrLogRangeInvalid,
 	ErrEmptyMetadataObject,
 	ErrInvalidMatchMode,
 	ErrInvalidFilterCombination,
 	ErrMatchWithoutName,
+	ErrInvalidCursor,
+	ErrInvalidHexData,
+	ErrInvalidRole,
+	ErrBlockBeyondHead,
+	ErrCallReverted,
+	ErrRelayValueRejected,
+	ErrTxNonceConflict,
+	ErrTxAlreadyKnown,
+	ErrTxChainIDMismatch,
+	ErrInsufficientFunds,
+}
+
+// curatedError pairs a client-safe sentinel with the raw upstream cause. Its
+// text is the sentinel's text only, so SafeForClient (which returns input-
+// class errors verbatim) never leaks the raw node output; the raw cause stays
+// reachable through errors.Is and RawCause for operator-facing audit logs.
+type curatedError struct {
+	safe error
+	raw  error
+}
+
+func (e *curatedError) Error() string   { return e.safe.Error() }
+func (e *curatedError) Unwrap() []error { return []error{e.safe, e.raw} }
+
+// Curate returns an error that reads as safe (and classifies as safe under
+// errors.Is / SafeForClient) while retaining raw for diagnostics. A nil raw
+// returns safe unchanged.
+func Curate(safe, raw error) error {
+	if raw == nil {
+		return safe
+	}
+	return &curatedError{safe: safe, raw: raw}
+}
+
+// RawCause returns the raw upstream cause behind a curated error, or err
+// itself when no curated wrapper is present. Intended for operator logs and
+// audit rows, never for client-facing messages.
+func RawCause(err error) error {
+	var ce *curatedError
+	if errors.As(err, &ce) {
+		return ce.raw
+	}
+	return err
 }
 
 // IsInputError returns true if the error is an input validation error.

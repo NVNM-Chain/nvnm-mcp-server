@@ -75,11 +75,12 @@ type registriesOutput struct {
 	// an incomplete match set, rather than silently returning a partial result
 	// indistinguishable from a complete one.
 	NameMatchTruncated bool `json:"name_match_truncated,omitempty"`
-	// TotalIsLowerBound is true when the full-table scan was truncated by the
-	// client-side page cap or an ID-gap heuristic before reaching the natural
-	// end of the registry table. In that case pagination.total is the number
-	// of rows actually scanned -- a floor, not an exact count. Absent (false)
-	// means the scan completed normally and total is exact.
+	// TotalIsLowerBound is true when pagination.total is a floor, not an
+	// exact count. Unfiltered listing: the chain reported no count and the
+	// reverse peek for the highest ID failed, so total is only the rows
+	// confirmed so far. Name filter: the client-side scan was cut short by
+	// its page cap or an ID-gap heuristic before the end of the table.
+	// Absent (false) means total is exact.
 	TotalIsLowerBound bool         `json:"total_is_lower_bound,omitempty"`
 	NextActions       []NextAction `json:"next_actions,omitempty"`
 }

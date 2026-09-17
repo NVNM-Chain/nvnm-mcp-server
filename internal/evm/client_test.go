@@ -75,9 +75,16 @@ func (s *stubRPCClient) SendRawTransaction(context.Context, []byte) (*defitypes.
 // as a nil *big.Int) is converted to an error rather than crashing the process
 // with a nil-pointer panic. On the stdio transport an unrecovered panic here is
 // a denial of service triggerable by a hostile or MITM'd RPC node (EV-2).
+//
+// The fixture carries a non-zero hash so it reads as a present-but-malformed
+// block: an all-zero block is a JSON-RPC null (block not found), which
+// BlockByNumber now reports as ErrBlockNotFound before normalization runs.
 func TestClient_BlockByNumber_HostileNilNumberReturnsError(t *testing.T) {
 	c := &client{
-		rpc:     &stubRPCClient{block: &defitypes.Block{ /* Number: nil */ }},
+		rpc: &stubRPCClient{block: &defitypes.Block{
+			Hash: defitypes.MustHashFromHex("0x0000000000000000000000000000000000000000000000000000000000000001", defitypes.PadNone),
+			/* Number: nil */
+		}},
 		timeout: time.Second,
 	}
 
@@ -114,6 +121,32 @@ func TestClient_FilterLogs_RangeCapErrorCurated(t *testing.T) {
 	}
 	if !apperrors.IsInputError(err) {
 		t.Fatalf("range-cap error must classify as input error, got %v", err)
+	}
+}
+
+// TestClient_FilterLogs_InvalidRangeErrorCurated verifies that the node's
+// rejection of a block range past the chain head (observed live 2026-09-10
+// as "RPC error: -32000 invalid block range params" for to_block=9999999)
+// is converted to its own curated input-class sentinel -- previously it fell
+// through to "upstream operation failed" and read like a node outage.
+func TestClient_FilterLogs_InvalidRangeErrorCurated(t *testing.T) {
+	c := &client{
+		rpc: &stubRPCClient{
+			getLogsErr: errors.New("RPC error: -32000 invalid block range params"),
+		},
+		timeout: time.Second,
+	}
+
+	_, err := c.FilterLogs(context.Background(), defitypes.FilterLogsQuery{})
+
+	if !errors.Is(err, apperrors.ErrLogRangeInvalid) {
+		t.Fatalf("expected ErrLogRangeInvalid, got %v", err)
+	}
+	if errors.Is(err, apperrors.ErrLogRangeTooWide) {
+		t.Fatal("past-head rejection must not be reported as a width problem")
+	}
+	if !apperrors.IsInputError(err) {
+		t.Fatalf("invalid-range error must classify as input error, got %v", err)
 	}
 }
 

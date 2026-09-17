@@ -28,16 +28,22 @@ const (
 	defaultCredentialsPath = "../../.chain_credentials.txt" //nolint:gosec
 
 	HTTPTimeout = 30 * time.Second
-	// RegistriesTimeout covers anchor_get_registries listing: the server
+	// RegistriesTimeout covers anchor_get_registries by name: the server
 	// pages the full registry table over RPC and paginates in memory, which
-	// commonly takes 20-30s on a populated chain.
+	// commonly takes 20-30s on a populated chain. (The unfiltered listing
+	// is a direct chain page fetch and does not need this budget.)
 	RegistriesTimeout = 90 * time.Second
 	// RegistriesLatencyBudget is how long a successful by-name listing may
 	// take before the hot path treats the scan as degraded. The HTTP wait
 	// stays RegistriesTimeout so a slow-but-healthy scan still completes.
 	RegistriesLatencyBudget = 60 * time.Second
-	receiptTimeout          = 90 * time.Second
-	receiptPollInterval     = 2 * time.Second
+	// ListingLatencyBudget bounds the unfiltered anchor_get_registries page
+	// (rc21 P2): one or two chain round-trips, no table walk. Live it is
+	// ~0.5s; 10s leaves room for a slow RPC while still failing loudly if
+	// the listing ever regresses to a full scan (20-30s).
+	ListingLatencyBudget = 10 * time.Second
+	receiptTimeout       = 90 * time.Second
+	receiptPollInterval  = 2 * time.Second
 )
 
 // Flow is the shared state for TestE2E_HotPath_AnchorDocument.
@@ -223,6 +229,10 @@ func AssertUnsignedTxShape(t *testing.T, f *Flow, utx *UnsignedTx) {
 	}
 	if w.ChainID != hexQuantityInt64(utx.ChainID) {
 		t.Errorf("wallet_tx_request.chainId = %q, want hex of chain_id %d", w.ChainID, utx.ChainID)
+	}
+	if w.Nonce != hexQuantityUint(utx.Nonce) {
+		t.Errorf("wallet_tx_request.nonce = %q, want %s (hex of nonce %d); a headless signer "+
+			"passing this object to sign_transaction needs it", w.Nonce, hexQuantityUint(utx.Nonce), utx.Nonce)
 	}
 	if w.MaxFeePerGas != hexQuantityDecimal(t, utx.MaxFeePerGas) {
 		t.Errorf("wallet_tx_request.maxFeePerGas = %q, want hex of %s", w.MaxFeePerGas, utx.MaxFeePerGas)

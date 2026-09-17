@@ -175,12 +175,28 @@ func (c *client) BlockByNumber(ctx context.Context, number *big.Int, fullTx bool
 	err := guardNodeDecode("get block by number", func() error {
 		block, err := c.rpc.BlockByNumber(ctx, blockNumOrLatest(number), fullTx)
 		if err != nil {
+			if curated := classifyNodeRPCError(err); curated != nil {
+				return curated
+			}
 			return fmt.Errorf("failed to get block by number: %w", err)
+		}
+		if isMissingBlock(block) {
+			return apperrors.ErrBlockNotFound
 		}
 		out = normalizeBlock(block, fullTx)
 		return nil
 	})
 	return out, err
+}
+
+// isMissingBlock reports whether a decoded block stands for a JSON-RPC
+// null result. defiweb/go-eth decodes `null` into a zero-value Block (a
+// non-nil pointer with no hash), so a nil check alone is not enough; a real
+// block -- including the genesis block -- always carries a non-zero hash.
+// Without this check a non-existent block number surfaced as a fabricated
+// all-zero block with isError=false (directory review 2026-09-15, H-1).
+func isMissingBlock(block *defitypes.Block) bool {
+	return block == nil || block.Hash == (defitypes.Hash{})
 }
 
 // BlockByHash returns a normalized block by hash.
@@ -191,7 +207,13 @@ func (c *client) BlockByHash(ctx context.Context, hash defitypes.Hash, fullTx bo
 	err := guardNodeDecode("get block by hash", func() error {
 		block, err := c.rpc.BlockByHash(ctx, hash, fullTx)
 		if err != nil {
+			if curated := classifyNodeRPCError(err); curated != nil {
+				return curated
+			}
 			return fmt.Errorf("failed to get block by hash: %w", err)
+		}
+		if isMissingBlock(block) {
+			return apperrors.ErrBlockNotFound
 		}
 		out = normalizeBlock(block, fullTx)
 		return nil
@@ -259,6 +281,9 @@ func (c *client) BalanceAt(ctx context.Context, address defitypes.Address, block
 	err := guardNodeDecode("get balance", func() error {
 		balance, err := c.rpc.GetBalance(ctx, address, blockNumOrLatest(block))
 		if err != nil {
+			if curated := classifyNodeRPCError(err); curated != nil {
+				return curated
+			}
 			return fmt.Errorf("failed to get balance: %w", err)
 		}
 		out = normalizeBalance(address, balance)
@@ -273,6 +298,9 @@ func (c *client) CodeAt(ctx context.Context, address defitypes.Address, block *b
 	defer cancel()
 	code, err := c.rpc.GetCode(ctx, address, blockNumOrLatest(block))
 	if err != nil {
+		if curated := classifyNodeRPCError(err); curated != nil {
+			return nil, curated
+		}
 		return nil, fmt.Errorf("failed to get code: %w", err)
 	}
 	return &CodeResult{
@@ -380,6 +408,14 @@ func (c *client) SendRawTransaction(ctx context.Context, signedTxHex string) (st
 
 	hashPtr, err := c.rpc.SendRawTransaction(ctx, txBytes)
 	if err != nil {
+		// Nonce conflicts, mempool duplicates, wrong-chain signatures and
+		// unfunded signers are the broadcast failures an agent can act on;
+		// surface the curated sentinel instead of the generic collapse. The
+		// raw node text stays attached (apperrors.Curate) so the write-audit
+		// line can still record it via apperrors.RawCause.
+		if curated := classifyNodeRPCError(err); curated != nil {
+			return "", fmt.Errorf("send transaction: %w", apperrors.Curate(curated, err))
+		}
 		return "", fmt.Errorf("send transaction: %w", err)
 	}
 	if hashPtr == nil {

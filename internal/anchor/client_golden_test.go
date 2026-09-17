@@ -56,7 +56,7 @@ func TestGolden_Registry(t *testing.T) {
 		Description: "A test registry for golden file validation",
 		Creator:     "nvnm139t3cwka9ps4sm5dtnuv2kf28t83n065s57gcm",
 		CreatorEVM:  "0x89571c3add2861586e8d5cf8c5592a3acf19bf54",
-		CreatedAt:   "2026-03-01 12:00:00.000000000 +0000 UTC",
+		CreatedAt:   normalizeChainTime("2026-03-01 12:00:00.000000000 +0000 UTC"),
 		Metadata:    "{\"env\":\"test\"}",
 	}
 	assertGolden(t, "registry", reg)
@@ -72,7 +72,7 @@ func TestGolden_Record(t *testing.T) {
 		URI:          "https://qa8-api.inveniam.io/dataroom/2/103402411912619200",
 		Status:       "Active",
 		IsLatest:     true,
-		Timestamp:    "2026-03-01 14:30:00.000000000 +0000 UTC",
+		Timestamp:    normalizeChainTime("2026-03-01 14:30:00.000000000 +0000 UTC"),
 		Metadata:     "{\"taxonomyId\":\"abc-123\",\"fileId\":\"def-456\"}",
 	}
 	assertGolden(t, "record", rec)
@@ -87,7 +87,7 @@ func TestGolden_GetRegistriesResponse(t *testing.T) {
 				Description: "29466bfd-8ec8-446c-9e7d-a1fe2f91e81f",
 				Creator:     "nvnm12r28dewjcpzfnrkpshvx5rh4eve086858qcn7n",
 				CreatorEVM:  "0x50d476e5d2c044998ec185d86a0ef5cb32f3e8f4",
-				CreatedAt:   "2026-02-27 13:57:03.626641324 +0000 UTC",
+				CreatedAt:   normalizeChainTime("2026-02-27 13:57:03.626641324 +0000 UTC"),
 			},
 			{
 				ID:          2,
@@ -95,7 +95,7 @@ func TestGolden_GetRegistriesResponse(t *testing.T) {
 				Description: "1281d520-c91c-4d60-aa25-7f7b79fc4f80",
 				Creator:     "nvnm12r28dewjcpzfnrkpshvx5rh4eve086858qcn7n",
 				CreatorEVM:  "0x50d476e5d2c044998ec185d86a0ef5cb32f3e8f4",
-				CreatedAt:   "2026-02-27 18:28:54.56053554 +0000 UTC",
+				CreatedAt:   normalizeChainTime("2026-02-27 18:28:54.56053554 +0000 UTC"),
 			},
 		},
 		Pagination: &PageResponse{Total: 138},
@@ -115,7 +115,7 @@ func TestGolden_GetRecordsResponse(t *testing.T) {
 				URI:          "ipfs://Qm123",
 				Status:       "ACTIVE",
 				IsLatest:     true,
-				Timestamp:    "2026-02-27 14:00:25.684724306 +0000 UTC",
+				Timestamp:    normalizeChainTime("2026-02-27 14:00:25.684724306 +0000 UTC"),
 				Metadata:     "{\"key\": \"value\"}",
 			},
 		},
@@ -185,6 +185,7 @@ func TestGolden_UnsignedTransactionEIP1559(t *testing.T) {
 			Value:                "0x0",
 			ChainID:              "0xe607",
 			Gas:                  "0x1d4c0",
+			Nonce:                "0x64",
 			MaxFeePerGas:         "0xba43b7400",
 			MaxPriorityFeePerGas: "0x77359400",
 		},

@@ -60,11 +60,10 @@ func normalizeBlock(block *defitypes.Block, fullTx bool) *NormalizedBlock {
 		Miner:            AddressHex(block.Miner),
 		TransactionCount: len(block.Transactions) + len(block.TransactionHashes),
 	}
-	// defiweb does not surface a typed BaseFeePerGas yet; the field is
-	// available on EIP-1559 blocks via the underlying JSON map but is
-	// not exposed on Block. Leave BaseFeePerGas nil for now; callers
-	// that need it should query the block by hash from a node that
-	// supports the field and decode it directly.
+	// base_fee_per_gas is deliberately absent: defiweb's Block does not
+	// surface the field, and advertising a documented-but-never-populated
+	// field misled callers (directory review 2026-09-15, M-7). Re-add it
+	// only together with a decoder that actually fills it.
 	if fullTx && len(block.Transactions) > 0 {
 		nb.Transactions = make([]NormalizedTxSummary, len(block.Transactions))
 		for i := range block.Transactions {
@@ -74,6 +73,11 @@ func normalizeBlock(block *defitypes.Block, fullTx bool) *NormalizedBlock {
 			}
 			if tx.Hash != nil {
 				summary.Hash = tx.Hash.String()
+			}
+			// The node returns the recovered sender on every included tx;
+			// it was never mapped here, so `from` was always empty (M-7).
+			if tx.From != nil {
+				summary.From = AddressHex(*tx.From)
 			}
 			if tx.Value != nil {
 				summary.Value = tx.Value.String()
