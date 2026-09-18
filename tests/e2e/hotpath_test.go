@@ -30,9 +30,6 @@ func TestE2E_HotPath_AnchorDocument(t *testing.T) {
 	e2e.PreflightChainLive(t, f)
 
 	if !f.WriteToolsAvailable {
-		if f.MainnetReadOnly {
-			t.Skip("mainnet: hot path skipped (read-only smoke)")
-		}
 		e2e.SkipOrFail(t, "hot path requires write tools")
 	}
 	if !f.WalletFunded {

@@ -70,9 +70,7 @@ func SetupDiscovery(t *testing.T, f *Flow) {
 	f.ChainID = overview.ChainID
 	f.AnchorAddress = overview.AnchorPrecompile
 	if strings.EqualFold(overview.ChainEnvironment, "mainnet") {
-		t.Log("chain_environment=mainnet: write path skipped (read-only smoke)")
-		f.WriteToolsAvailable = false
-		f.MainnetReadOnly = true
+		t.Log("chain_environment=mainnet: write path will broadcast; created registries and records are real")
 	}
 	t.Logf("chain=%s env=%s chain_id=%d precompile=%s",
 		overview.ChainName, overview.ChainEnvironment, f.ChainID, f.AnchorAddress)
