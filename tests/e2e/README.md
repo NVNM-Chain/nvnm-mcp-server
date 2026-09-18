@@ -28,6 +28,7 @@ This is **not** a pull-request gate.
 
 ```bash
 NVNM_MCP_TEST_SERVER_URL=https://mcp-testnet.nvnmchain.io make test-e2e
+NVNM_MCP_TEST_SERVER_URL=https://mcp.nvnmchain.io make test-e2e
 ```
 
 Local in-process fallback (needs `NVNM_EVM_RPC_URL` and a funded key):
@@ -70,8 +71,10 @@ Set `NVNM_E2E_REQUIRE_CHAIN=1` to turn that skip into a failure.
 
 If the deployment enforces auth, the key needs the `writer` role.
 
-A `mainnet` `chain_environment` from `nvnm_overview` skips writes so the
-same journey can smoke production read-only.
+Writes run on **testnet and mainnet**. `chain_environment` from
+`nvnm_overview` only labels the chain; it does not skip broadcast. On
+mainnet the journey creates a real registry and anchors a real document
+— use a funded wallet you intend to spend from.
 
 ## Layout
 

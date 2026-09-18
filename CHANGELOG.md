@@ -9,6 +9,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Deployment hot-path e2e runs writes on mainnet as well as testnet.**
+  `chain_environment=mainnet` from `nvnm_overview` used to force a
+  read-only skip even with a funded wallet. `make test-e2e` now walks
+  the same prepare → sign → broadcast → confirm journey on whichever
+  chain the target server is pinned to, still gated on advertised write
+  tools and a funded signing wallet. Mainnet writes create a real
+  registry and record.
+
+## [1.0.0-rc21] - 2026-09-17
+
 ### Fixed (connector-directory review 2026-09-15, High items H-1/H-2/H-3, M-1)
 
 Findings and evidence: `docs/ANTHROPIC_DIRECTORY_REVIEW_2026-09-15.md`.

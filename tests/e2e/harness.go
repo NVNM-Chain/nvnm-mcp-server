@@ -66,7 +66,6 @@ type Flow struct {
 	WriteToolsAvailable     bool
 	LifecycleToolsAvailable bool
 	WalletFunded            bool
-	MainnetReadOnly         bool
 }
 
 func NewFlow(t *testing.T) *Flow {

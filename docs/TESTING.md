@@ -5,14 +5,14 @@ This document describes the testing strategy and framework for the NVNM Chain MC
 ## Overview
 
 The project uses three chain-facing layers with **distinct claims**. Live
-client tests and e2e both mine testnet transactions; that overlap is the
+client tests and e2e both mine real-chain transactions; that overlap is the
 fixture (you cannot prove a write lands with a mock), not a duplicate suite.
 
 | Layer | Question it answers | Entry point | Chain | When |
 |---|---|---|---|---|
 | **Hermetic MCP integration** | Is the advertised MCP surface still the contract we publish? | MCP SDK → in-process HTTP → **mock** chain | No | Every PR (`go test ./...`; first half of `make test-integration`) |
 | **Client live tests** | Will this Go client method pack calldata the precompile mines? | `anchor.Client` / `evm.Client` directly | Testnet | `make test-integration` (tagged `*_integration_test.go`) |
-| **Deployment e2e** | Does the operator journey still work on the server we shipped? | MCP SDK → **running server** → real chain | Testnet | `make test-e2e` locally; a dedicated CI job is later work |
+| **Deployment e2e** | Does the operator journey still work on the server we shipped? | MCP SDK → **running server** → real chain | The server's pinned chain (testnet or mainnet) | `make test-e2e` locally; a dedicated CI job is later work |
 
 `TestMCP_Tools` is the MCP tool-regression net
 (all 23 tools, mocks). Do not name it `TestE2E_*` and do not put
