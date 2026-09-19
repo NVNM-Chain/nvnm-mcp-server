@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"net/url"
 	"reflect"
-	"time"
+	"strings"
 
 	"github.com/defiweb/go-eth/hexutil"
 	"github.com/defiweb/go-eth/types"
@@ -51,6 +50,22 @@ type TupleValueElem struct {
 	// Value is the value of the tuple element. It is used to encode and decode
 	// the ABI data.
 	Value Value
+}
+
+// Text returns a human-readable representation of the tuple value.
+func (t *TupleValue) Text() string {
+	var sb strings.Builder
+	sb.WriteString("(")
+	for i, elem := range *t {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(elem.Name)
+		sb.WriteString("=")
+		writeValue(&sb, elem.Value)
+	}
+	sb.WriteString(")")
+	return sb.String()
 }
 
 // IsDynamic implements the Value interface.
@@ -116,6 +131,20 @@ type ArrayValue struct {
 	Type  Type
 }
 
+// Text returns a human-readable representation of the array value.
+func (a *ArrayValue) Text() string {
+	var sb strings.Builder
+	sb.WriteString("[")
+	for i, elem := range a.Elems {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		writeValue(&sb, elem)
+	}
+	sb.WriteString("]")
+	return sb.String()
+}
+
 // IsDynamic implements the Value interface.
 func (a *ArrayValue) IsDynamic() bool {
 	return true
@@ -164,6 +193,20 @@ func (a *ArrayValue) MapTo(m Mapper, dst any) error {
 // same size.
 type FixedArrayValue []Value
 
+// Text returns a human-readable representation of the fixed array value.
+func (a FixedArrayValue) Text() string {
+	var sb strings.Builder
+	sb.WriteString("[")
+	for i, elem := range a {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		writeValue(&sb, elem)
+	}
+	sb.WriteString("]")
+	return sb.String()
+}
+
 // IsDynamic implements the Value interface.
 func (a FixedArrayValue) IsDynamic() bool {
 	return false
@@ -207,6 +250,11 @@ func (a FixedArrayValue) MapTo(m Mapper, dst any) error {
 // During encoding ad decoding, the BytesValue can be mapped using the slice
 // rules described in the documentation of anymapper package.
 type BytesValue []byte
+
+// Text returns a human-readable representation of the BytesValue.
+func (b *BytesValue) String() string {
+	return hexutil.BytesToHex(*b)
+}
 
 // Bytes returns the value of the BytesValue.
 func (b *BytesValue) Bytes() []byte {
@@ -283,6 +331,11 @@ func (b *BytesValue) MapTo(m Mapper, dst any) error {
 // rules described in the documentation of anymapper package.
 type StringValue string
 
+// Text returns a human-readable representation of the StringValue.
+func (s *StringValue) Text() string {
+	return string(*s)
+}
+
 // String returns the value of the StringValue.
 func (s *StringValue) String() string {
 	return string(*s)
@@ -306,11 +359,12 @@ func (s *StringValue) EncodeABI() (Words, error) {
 // DecodeABI implements the Value interface.
 func (s *StringValue) DecodeABI(data Words) (int, error) {
 	var b []byte
-	if _, err := decodeBytes(&b, data); err != nil {
+	n, err := decodeBytes(&b, data)
+	if err != nil {
 		return 0, err
 	}
 	*s = StringValue(b)
-	return 1, nil
+	return n, nil
 }
 
 // MapFrom implements the anymapper.MapFrom interface.
@@ -327,13 +381,7 @@ func (s *StringValue) MapFrom(m Mapper, src any) error {
 	case reflect.String:
 		*s = StringValue(srcRef.String())
 	default:
-		switch srcTyp := srcRef.Interface().(type) {
-		case url.URL:
-			*s = StringValue(srcTyp.String())
-			return nil
-		default:
-			return fmt.Errorf("abi: cannot map %s to string", srcRef.Type())
-		}
+		return fmt.Errorf("abi: cannot map %s to string", srcRef.Type())
 	}
 	return nil
 }
@@ -354,16 +402,7 @@ func (s *StringValue) MapTo(m Mapper, dst any) error {
 	case reflect.Interface:
 		dstRef.Set(reflect.ValueOf(string(*s)))
 	default:
-		switch dstRef.Interface().(type) {
-		case url.URL:
-			u, err := url.Parse(string(*s))
-			if err != nil {
-				return fmt.Errorf("abi: cannot map string to %s: %v", dstRef.Type(), err)
-			}
-			dstRef.Set(reflect.ValueOf(*u))
-		default:
-			return fmt.Errorf("abi: cannot map string to %s", dstRef.Type())
-		}
+		return fmt.Errorf("abi: cannot map string to %s", dstRef.Type())
 	}
 	return nil
 }
@@ -375,6 +414,11 @@ func (s *StringValue) MapTo(m Mapper, dst any) error {
 // rules described in the documentation of anymapper package. Both values must
 // have the same size.
 type FixedBytesValue []byte
+
+// Text returns a human-readable representation of the FixedBytesValue.
+func (b *FixedBytesValue) Text() string {
+	return hexutil.BytesToHex(*b)
+}
 
 // Bytes returns the value of the FixedBytesValue.
 func (b *FixedBytesValue) Bytes() []byte {
@@ -572,8 +616,8 @@ func (b FixedBytesValue) MapTo(_ Mapper, dst any) error {
 		}
 		dstRef.SetInt(i64)
 	case reflect.Interface:
-		v := reflect.New(reflect.ArrayOf(len(b), reflect.TypeOf(byte(0))))
-		for i := 0; i < len(b); i++ {
+		v := reflect.New(reflect.ArrayOf(len(b), reflect.TypeFor[byte]()))
+		for i := range b {
 			v.Elem().Index(i).SetUint(uint64(b[i]))
 		}
 		dstRef.Set(v.Elem())
@@ -623,6 +667,11 @@ func (b FixedBytesValue) MapTo(_ Mapper, dst any) error {
 type UintValue struct {
 	big.Int
 	Size int
+}
+
+// Text returns a human-readable representation of the UintValue.
+func (u *UintValue) Text() string {
+	return u.Int.String()
 }
 
 // IsDynamic implements the Value interface.
@@ -704,15 +753,6 @@ func (u *UintValue) MapFrom(_ Mapper, src any) error {
 				return fmt.Errorf("abi: cannot map %s to uint%d: value too large", srcRef.Type(), u.Size)
 			}
 			u.Int = *bn
-		case time.Time:
-			bn := new(big.Int).SetInt64(srcTyp.Unix())
-			if bn.Sign() < 0 {
-				return fmt.Errorf("abi: cannot map %s to uint%d: negative value", srcRef.Type(), u.Size)
-			}
-			if bn.BitLen() > u.Size {
-				return fmt.Errorf("abi: cannot map %s to uint%d: value too large", srcRef.Type(), u.Size)
-			}
-			u.Int = *bn
 		default:
 			return fmt.Errorf("abi: cannot map %s to uint%d", srcRef.Type(), u.Size)
 		}
@@ -740,8 +780,6 @@ func (u *UintValue) MapTo(_ Mapper, dst any) error {
 		dstRef.Set(reflect.ValueOf(&u.Int))
 	default:
 		switch dstRef.Interface().(type) {
-		case time.Time:
-			dstRef.Set(reflect.ValueOf(time.Unix(u.Int.Int64(), 0)))
 		case big.Int:
 			dstRef.Set(reflect.ValueOf(u.Int))
 		case types.Number:
@@ -765,6 +803,11 @@ func (u *UintValue) MapTo(_ Mapper, dst any) error {
 type IntValue struct {
 	big.Int
 	Size int
+}
+
+// Text returns a human-readable representation of the IntValue.
+func (i *IntValue) Text() string {
+	return i.Int.String()
 }
 
 // IsDynamic implements the Value interface.
@@ -837,12 +880,6 @@ func (i *IntValue) MapFrom(_ Mapper, src any) error {
 				return fmt.Errorf("abi: cannot map %s to uint%d: value too large", srcRef.Type(), i.Size)
 			}
 			i.Int = *bn
-		case time.Time:
-			bn := new(big.Int).SetInt64(srcTyp.Unix())
-			if signedBitLen(bn) > i.Size {
-				return fmt.Errorf("abi: cannot map %s to uint%d: value too large", srcRef.Type(), i.Size)
-			}
-			i.Int = *bn
 		default:
 			return fmt.Errorf("abi: cannot map %s to uint%d", srcRef.Type(), i.Size)
 		}
@@ -873,8 +910,6 @@ func (i *IntValue) MapTo(_ Mapper, dst any) error {
 		dstRef.Set(reflect.ValueOf(&i.Int))
 	default:
 		switch dstRef.Interface().(type) {
-		case time.Time:
-			dstRef.Set(reflect.ValueOf(time.Unix(i.Int.Int64(), 0)))
 		case big.Int:
 			dstRef.Set(reflect.ValueOf(i.Int))
 		case types.Number:
@@ -896,6 +931,16 @@ func (i *IntValue) MapTo(_ Mapper, dst any) error {
 // During encoding and decoding, the BoolValue is mapped using the bool rules
 // described in the documentation of anymapper package.
 type BoolValue bool
+
+// Text returns a human-readable representation of the BoolValue.
+func (b *BoolValue) Text() string {
+	switch *b {
+	case true:
+		return "true"
+	default:
+		return "false"
+	}
+}
 
 // SetBool sets the value of the BoolValue.
 func (b *BoolValue) SetBool(v bool) {
@@ -949,6 +994,11 @@ func (b *BoolValue) MapTo(_ Mapper, dst any) error {
 // string as a hex-encoded address. For other types, the rules for []byte slice
 // described in the documentation of anymapper package are used.
 type AddressValue types.Address
+
+// Text returns a human-readable representation of the AddressValue.
+func (a *AddressValue) Text() string {
+	return types.Address(*a).String()
+}
 
 // Address returns the address value.
 func (a *AddressValue) Address() types.Address {
@@ -1024,7 +1074,7 @@ func (a *AddressValue) MapTo(_ Mapper, dst any) error {
 		for i := 0; i < dstRef.Len()-types.AddressLength; i++ {
 			dstRef.Index(i).SetUint(0)
 		}
-		for i := 0; i < types.AddressLength; i++ {
+		for i := range types.AddressLength {
 			dstRef.Index(dstRef.Len() - types.AddressLength + i).SetUint(uint64((*a)[i]))
 		}
 	case reflect.Interface:
@@ -1033,4 +1083,13 @@ func (a *AddressValue) MapTo(_ Mapper, dst any) error {
 		return fmt.Errorf("abi: cannot map address to %s", dstRef.Type())
 	}
 	return nil
+}
+
+func writeValue(msg *strings.Builder, v Value) {
+	switch v := v.(type) {
+	case interface{ Text() string }:
+		msg.WriteString(v.Text())
+	default:
+		_, _ = fmt.Fprintf(msg, "%v", v)
+	}
 }

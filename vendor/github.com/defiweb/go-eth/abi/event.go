@@ -163,8 +163,6 @@ func (e *Event) DecodeValues(topics []types.Hash, data []byte, vals ...any) erro
 			dataVals = append(dataVals, vals[i])
 		}
 	}
-	// The anymapper package does not zero out values before decoding into
-	// it, therefore we can decode topics and data into the same value.
 	if len(topics) > 1 {
 		if err := e.abi.DecodeValues(e.inputs.TopicsTuple(), hashSliceToBytes(topics[1:]), indexedVals...); err != nil {
 			return err
@@ -186,6 +184,69 @@ func (e *Event) MustDecodeValues(topics []types.Hash, data []byte, vals ...any) 
 	}
 }
 
+// Text returns a human-readable representation of the event, including the
+// values of the event arguments.
+//
+// The topics must include topic0 for non-anonymous events.
+func (e *Event) Text(topics []types.Hash, data []byte) string {
+	msg := strings.Builder{}
+	msg.WriteString("event ")
+	msg.WriteString(e.Name())
+	topicsData := topics
+	if !e.anonymous {
+		if len(topics) == 0 || topics[0] != e.topic0 {
+			msg.WriteString("(topic0 mismatch)")
+			return msg.String()
+		}
+		topicsData = topics[1:]
+	}
+	topicsVal := e.inputs.TopicsTuple().Value().(*TupleValue)
+	if len(topicsData) > 0 {
+		if _, err := topicsVal.DecodeABI(BytesToWords(hashSliceToBytes(topicsData))); err != nil {
+			msg.WriteString("(")
+			msg.WriteString(err.Error())
+			msg.WriteString(")")
+			return msg.String()
+		}
+	}
+	dataVal := e.inputs.DataTuple().Value().(*TupleValue)
+	if len(data) > 0 {
+		if _, err := dataVal.DecodeABI(BytesToWords(data)); err != nil {
+			msg.WriteString("(")
+			msg.WriteString(err.Error())
+			msg.WriteString(")")
+			return msg.String()
+		}
+	}
+	msg.WriteString("(")
+	topicIdx, dataIdx := 0, 0
+	for i, elem := range e.inputs.Elements() {
+		if i > 0 {
+			msg.WriteString(", ")
+		}
+		name := elem.Name
+		if elem.Indexed {
+			if name == "" {
+				name = fmt.Sprintf("topic%d", topicIdx+1)
+			}
+			msg.WriteString(name)
+			msg.WriteString("[indexed]=")
+			writeValue(&msg, (*topicsVal)[topicIdx].Value)
+			topicIdx++
+		} else {
+			if name == "" {
+				name = fmt.Sprintf("data%d", dataIdx)
+			}
+			msg.WriteString(name)
+			msg.WriteString("=")
+			writeValue(&msg, (*dataVal)[dataIdx].Value)
+			dataIdx++
+		}
+	}
+	msg.WriteString(")")
+	return msg.String()
+}
+
 // String returns the human-readable signature of the event.
 func (e *Event) String() string {
 	var buf strings.Builder
@@ -199,7 +260,7 @@ func (e *Event) String() string {
 }
 
 func (e *Event) calculateTopic0() {
-	e.topic0 = crypto.Keccak256([]byte(e.signature))
+	e.topic0 = types.Hash(crypto.Keccak256([]byte(e.signature)))
 }
 
 func (e *Event) generateSignature() {
