@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -20,7 +21,7 @@ type Contract struct {
 	MethodsBySignature map[string]*Method
 	Events             map[string]*Event
 	Errors             map[string]*Error
-	Types              map[string]Type // Types defined in the ABI (structs, enums and user-defined Value Types)
+	Types              map[string]Type // Types defined in the ABI (structs, enums, and user-defined Value Types)
 }
 
 // IsError returns true if the given error data, returned by a contract call,
@@ -82,9 +83,7 @@ func (c *Contract) HandleError(err error) error {
 //
 // If the type name already exists, it will be overwritten.
 func (c *Contract) RegisterTypes(a *ABI) {
-	for n, t := range c.Types {
-		a.Types[n] = t
-	}
+	maps.Copy(a.Types, c.Types)
 }
 
 // LoadJSON loads the ABI from the given JSON file and returns a Contract

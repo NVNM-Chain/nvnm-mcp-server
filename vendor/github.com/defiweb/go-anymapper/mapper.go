@@ -105,7 +105,7 @@ func (c *Context) WithCustom(custom any) *Context {
 	return &cpy
 }
 
-// Mapper hold the mapper configuration.
+// Mapper holds the mapper configuration.
 type Mapper struct {
 	// Context is the default context used by the mapper.
 	Context *Context
@@ -125,7 +125,7 @@ type Mapper struct {
 	Hooks Hooks
 
 	// Cache:
-	cacheMu  sync.Mutex
+	cacheMu  sync.RWMutex
 	cacheMap map[typePair]*typeMapper
 }
 
@@ -234,6 +234,15 @@ func (m *Mapper) MapReflContext(ctx *Context, src, dst reflect.Value) error {
 	return m.mapperFor(ctx, srcVal.Type(), dstVal.Type()).mapRefl(m, ctx, srcVal, dstVal)
 }
 
+// ClearCache removes all cached type mappers. Call this after changing
+// Mapper.Hooks or Mapper.Mappers so that the new configuration takes effect
+// for type pairs that were already mapped.
+func (m *Mapper) ClearCache() {
+	m.cacheMu.Lock()
+	m.cacheMap = make(map[typePair]*typeMapper, 0)
+	m.cacheMu.Unlock()
+}
+
 // Copy creates a copy of the current Mapper with the same configuration.
 func (m *Mapper) Copy() *Mapper {
 	cpy := &Mapper{
@@ -259,20 +268,30 @@ func (m *Mapper) Copy() *Mapper {
 
 // mapperFor returns the typeMapper that can map values of the given types.
 // If mapping is not possible, the returned typeMapper has a nil MapFunc.
-func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) (tm *typeMapper) {
+func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) *typeMapper {
+	key := typePair{src: src, dst: dst}
 	if !ctx.DisableCache {
-		m.cacheMu.Lock()
-		if v, ok := m.cacheMap[typePair{src: src, dst: dst}]; ok {
-			m.cacheMu.Unlock()
+		m.cacheMu.RLock()
+		v, ok := m.cacheMap[key]
+		m.cacheMu.RUnlock()
+		if ok {
 			return v
 		}
-		defer func() {
-			m.cacheMap[typePair{src: src, dst: dst}] = tm
-			m.cacheMu.Unlock()
-		}()
 	}
+	tm := m.buildMapper(src, dst)
+	if !ctx.DisableCache {
+		m.cacheMu.Lock()
+		if _, ok := m.cacheMap[key]; !ok {
+			m.cacheMap[key] = tm
+		}
+		m.cacheMu.Unlock()
+	}
+	return tm
+}
 
-	tm = &typeMapper{
+// buildMapper constructs a typeMapper for the given src and dst types.
+func (m *Mapper) buildMapper(src, dst reflect.Type) *typeMapper {
+	tm := &typeMapper{
 		SrcType: src,
 		DstType: dst,
 	}
@@ -281,7 +300,7 @@ func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) (tm *typeMapper)
 	if m.Hooks.MapFuncHook != nil {
 		if fn := m.Hooks.MapFuncHook(m, src, dst); fn != nil {
 			tm.MapFunc = fn
-			return
+			return tm
 		}
 	}
 
@@ -299,7 +318,7 @@ func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) (tm *typeMapper)
 	// using reflect.Set.
 	if sameTypes && isSrcSimple {
 		tm.MapFunc = mapDirect
-		return
+		return tm
 	}
 
 	// Try to find a mapper using mapper providers. It looks for providers
@@ -314,7 +333,7 @@ func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) (tm *typeMapper)
 	if hasSrcMapper {
 		tm.MapFunc = srcMapper(m, src, dst)
 		if tm.MapFunc != nil {
-			return
+			return tm
 		}
 	}
 	if !sameTypes && !isDstSimple {
@@ -323,11 +342,11 @@ func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) (tm *typeMapper)
 	if hasDstMapper {
 		tm.MapFunc = dstMapper(m, src, dst)
 		if tm.MapFunc != nil {
-			return
+			return tm
 		}
 	}
 	if hasSrcMapper || hasDstMapper {
-		return
+		return tm
 	}
 
 	// If destination type is an any interface, map the value directly using
@@ -335,12 +354,12 @@ func (m *Mapper) mapperFor(ctx *Context, src, dst reflect.Type) (tm *typeMapper)
 	// to the same type as the value in the interface.
 	if dst == anyTy {
 		tm.MapFunc = mapAny
-		return
+		return tm
 	}
 
 	// If there are no custom mappers and hooks, use the default mappers.
 	tm.MapFunc = builtInTypesMapper(m, src, dst)
-	return
+	return tm
 }
 
 // srcValue unpacks values from pointers and interfaces until it reaches a
@@ -378,6 +397,10 @@ func (m *Mapper) dstValue(v reflect.Value) reflect.Value {
 		}
 	}
 	if v.Kind() != reflect.Interface && v.Kind() != reflect.Pointer && v.CanSet() {
+		// The value can be a nil map or a nil slice, e.g. a field of a
+		// structure. It must be initialized, because the mapping functions
+		// write to it.
+		m.initValue(v)
 		return v
 	}
 	settable := reflect.Value{}
@@ -389,7 +412,7 @@ func (m *Mapper) dstValue(v reflect.Value) reflect.Value {
 		if v.CanSet() && isSimpleType(v.Type()) {
 			return v
 		}
-		if m.Mappers[v.Type()] != nil {
+		if v.CanSet() && m.Mappers[v.Type()] != nil {
 			return v
 		}
 		if v.Kind() == reflect.Map && !v.IsNil() {
@@ -406,18 +429,21 @@ func (m *Mapper) dstValue(v reflect.Value) reflect.Value {
 	return settable
 }
 
-// initValue initializes a value if it is a pointer, map or slice.
+// initValue initializes a value if it is a pointer, map, or slice.
 func (m *Mapper) initValue(v reflect.Value) {
-	if v.Kind() < reflect.Map || v.Kind() > reflect.Slice || !v.IsNil() || !v.CanSet() {
-		return
-	}
-	switch {
-	case v.Kind() == reflect.Pointer:
-		v.Set(reflect.New(v.Type().Elem()))
-	case v.Kind() == reflect.Map:
-		v.Set(reflect.MakeMap(v.Type()))
-	case v.Kind() == reflect.Slice:
-		v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() && v.CanSet() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+	case reflect.Map:
+		if v.IsNil() && v.CanSet() {
+			v.Set(reflect.MakeMap(v.Type()))
+		}
+	case reflect.Slice:
+		if v.IsNil() && v.CanSet() {
+			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+		}
 	}
 }
 
@@ -433,6 +459,12 @@ func (m *Mapper) parseTag(ctx *Context, f reflect.StructField) (fields string, s
 		}
 	}
 	if tag == "-" {
+		return "", true
+	}
+	if i := strings.IndexByte(tag, ','); i >= 0 {
+		tag = tag[:i]
+	}
+	if tag == "" {
 		return "", true
 	}
 	return tag, false
@@ -476,17 +508,17 @@ func isSimpleType(p reflect.Type) bool {
 	case reflect.String:
 		return p == stringTy
 	case reflect.Slice:
-		return strings.HasPrefix(p.String(), "[") && isSimpleType(p.Elem())
+		return p.PkgPath() == "" && isSimpleType(p.Elem())
 	case reflect.Array:
-		return strings.HasPrefix(p.String(), "[") && isSimpleType(p.Elem())
+		return p.PkgPath() == "" && isSimpleType(p.Elem())
 	case reflect.Map:
-		return strings.HasPrefix(p.String(), "map[") && isSimpleType(p.Elem()) && isSimpleType(p.Key())
+		return p.PkgPath() == "" && isSimpleType(p.Elem()) && isSimpleType(p.Key())
 	}
 	return false
 }
 
 // mapAny map src to dst assuming dst is an empty interface.
-func mapAny(m *Mapper, _ *Context, src, dst reflect.Value) error {
+func mapAny(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 	if !dst.IsNil() && !dst.Elem().CanSet() {
 		// Mapper always tries to reuse the destination value if possible, but
 		// if destination value is not settable, we need to cheat a little and
@@ -494,8 +526,8 @@ func mapAny(m *Mapper, _ *Context, src, dst reflect.Value) error {
 		// destination.
 		auxVal := reflect.New(dst.Elem().Type())
 		auxDst := m.dstValue(auxVal)
-		if err := m.MapRefl(src, auxDst); err != nil {
-			return NewInvalidMappingError(src.Type(), dst.Type(), "")
+		if err := m.MapReflContext(ctx, src, auxDst); err != nil {
+			return err
 		}
 		dst.Set(auxVal.Elem())
 		return nil

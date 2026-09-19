@@ -3,6 +3,7 @@ package abi
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/defiweb/go-eth/crypto"
 )
@@ -10,12 +11,28 @@ import (
 // CustomError represents a custom error returned by a contract call.
 type CustomError struct {
 	Type *Error // The error type.
-	Data []byte // The error data returned by the contract call.
+	Data []byte // The error data returned by the contract call (including the 4-byte selector).
+}
+
+// Values decodes the error data into a map of argument names to values.
+// If decoding fails, it returns nil.
+func (e CustomError) Values() map[string]any {
+	if e.Type == nil || len(e.Data) == 0 {
+		return nil
+	}
+	res := make(map[string]any)
+	if err := e.Type.DecodeValue(e.Data, res); err != nil {
+		return nil
+	}
+	return res
 }
 
 // Error implements the error interface.
 func (e CustomError) Error() string {
-	return fmt.Sprintf("error: %s", e.Type.Name())
+	if e.Type == nil {
+		return "unknown error"
+	}
+	return e.Type.Text(e.Data)
 }
 
 // Error represents an error in an ABI. The error can be used to decode errors
@@ -120,7 +137,7 @@ func (e *Error) Is(data []byte) bool {
 // DecodeValue decodes the error into a map or structure. If a structure is
 // given, it must have fields with the same names as error arguments.
 func (e *Error) DecodeValue(data []byte, val any) error {
-	if e.fourBytes.Match(data) {
+	if !e.fourBytes.Match(data) {
 		return fmt.Errorf("abi: selector mismatch for error %s", e.name)
 	}
 	return e.abi.DecodeValue(e.inputs, data[4:], val)
@@ -137,7 +154,7 @@ func (e *Error) MustDecodeValue(data []byte, val any) {
 // DecodeValues decodes the error into a map or structure. If a structure is
 // given, it must have fields with the same names as error arguments.
 func (e *Error) DecodeValues(data []byte, vals ...any) error {
-	if e.fourBytes.Match(data) {
+	if !e.fourBytes.Match(data) {
 		return fmt.Errorf("abi: selector mismatch for error %s", e.name)
 	}
 	return e.abi.DecodeValues(e.inputs, data[4:], vals...)
@@ -159,12 +176,12 @@ func (e *Error) ToError(data []byte) error {
 	}
 	return CustomError{
 		Type: e,
-		Data: data[4:],
+		Data: data,
 	}
 }
 
 // HandleError converts an error returned by a contract call to a custom error
-// if possible. If provider error is nil, it returns nil.
+// if possible. If the provided error is nil, it returns nil.
 func (e *Error) HandleError(err error) error {
 	if err == nil {
 		return nil
@@ -181,6 +198,33 @@ func (e *Error) HandleError(err error) error {
 		return err
 	}
 	return err
+}
+
+// Text returns a human-readable representation of the error, including the
+// values of the error arguments.
+//
+// The data must be the ABI-encoded error data returned by a contract call;
+// the 4-byte selector is optional.
+func (e *Error) Text(data []byte) string {
+	msg := strings.Builder{}
+	msg.WriteString("error ")
+	msg.WriteString(e.Name())
+	if len(data)%32 == 4 {
+		if !e.fourBytes.Match(data) {
+			msg.WriteString("(selector mismatch)")
+			return msg.String()
+		}
+		data = data[4:]
+	}
+	v := e.inputs.Value().(*TupleValue)
+	if _, err := v.DecodeABI(BytesToWords(data)); err != nil {
+		msg.WriteString("(")
+		msg.WriteString(err.Error())
+		msg.WriteString(")")
+		return msg.String()
+	}
+	writeValue(&msg, v)
+	return msg.String()
 }
 
 // String returns the human-readable signature of the error.

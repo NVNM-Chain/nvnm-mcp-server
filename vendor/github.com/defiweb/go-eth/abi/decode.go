@@ -136,7 +136,7 @@ func decodeArray(a *[]Value, w Words, t Type) (int, error) {
 		return 0, fmt.Errorf("abi: cannot decode array, size exceeds data length")
 	}
 	*a = make([]Value, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		(*a)[i] = t.Value()
 	}
 	if _, err := decodeTuple(a, w[1:]); err != nil {
@@ -172,7 +172,7 @@ func decodeBytes(b *[]byte, w Words) (int, error) {
 		return 0, fmt.Errorf("abi: cannot decode bytes, size exceeds data length")
 	}
 	*b = w[1 : l+1].Bytes()[0:size]
-	return size + 1, nil
+	return l + 1, nil
 }
 
 // decodeFixedBytes decodes a fixed byte of the given size from the given words

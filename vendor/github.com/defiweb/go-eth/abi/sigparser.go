@@ -2,6 +2,7 @@ package abi
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/defiweb/go-sigparser"
 )
@@ -113,9 +114,6 @@ func newErrorFromSig(abi *ABI, extraTypes map[string]Type, s sigparser.Signature
 // The extraTypes map is used to resolve types that are not part of the ABI.
 func newEventFromSig(abi *ABI, extraTypes map[string]Type, s sigparser.Signature) (*Event, error) {
 	var in []EventTupleElem
-	if len(s.Inputs) == 0 {
-		return nil, fmt.Errorf("abi: event %q has no inputs", s.Name)
-	}
 	for _, param := range s.Inputs {
 		typ, err := newTypeFromSig(abi, extraTypes, param)
 		if err != nil {
@@ -127,13 +125,7 @@ func newEventFromSig(abi *ABI, extraTypes map[string]Type, s sigparser.Signature
 			Type:    typ,
 		})
 	}
-	anonymous := false
-	for _, param := range s.Modifiers {
-		if param == "anonymous" {
-			anonymous = true
-			break
-		}
-	}
+	anonymous := slices.Contains(s.Modifiers, "anonymous")
 	return abi.NewEvent(s.Name, NewEventTupleType(in...), anonymous), nil
 }
 

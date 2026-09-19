@@ -109,9 +109,9 @@ func builtInTypesMapper(_ *Mapper, src, dst reflect.Type) MapFunc {
 				return mapByteSliceToString
 			}
 		case reflect.Slice:
-			return mapSliceToSlice
+			return mapListToSlice
 		case reflect.Array:
-			return mapSliceToArray
+			return mapListToArray
 		}
 	case reflect.Array:
 		switch dst.Kind() {
@@ -126,16 +126,18 @@ func builtInTypesMapper(_ *Mapper, src, dst reflect.Type) MapFunc {
 				return mapByteArrayToString
 			}
 		case reflect.Slice:
-			return mapArrayToSlice
+			return mapListToSlice
 		case reflect.Array:
-			return mapArrayToArray
+			return mapListToArray
 		}
 	case reflect.Map:
 		switch dst.Kind() {
 		case reflect.Map:
 			return mapMapToMap
 		case reflect.Struct:
-			return mapMapToStruct
+			if src.Key().Kind() == reflect.String {
+				return mapMapToStruct
+			}
 		}
 	case reflect.Struct:
 		switch dst.Kind() {
@@ -158,7 +160,7 @@ func builtInTypesMapper(_ *Mapper, src, dst reflect.Type) MapFunc {
 }
 
 func mapBoolToBool(_ *Mapper, ctx *Context, src, dst reflect.Value) error {
-	if ctx.StrictTypes {
+	if ctx.StrictTypes && src.Type() != dst.Type() {
 		return NewStrictMappingError(src.Type(), dst.Type())
 	}
 	dst.SetBool(src.Bool())
@@ -337,13 +339,17 @@ func mapFloatToInt(_ *Mapper, ctx *Context, src, dst reflect.Value) error {
 	if ctx.StrictTypes {
 		return NewStrictMappingError(src.Type(), dst.Type())
 	}
-	if src.Float() > math.MaxInt64 || src.Float() < math.MinInt64 {
+	f := src.Float()
+	if math.IsNaN(f) {
+		return NewInvalidMappingError(src.Type(), dst.Type(), "NaN")
+	}
+	if f >= math.MaxInt64+1 || f < math.MinInt64 {
 		return NewInvalidMappingError(src.Type(), dst.Type(), "overflow")
 	}
-	if dst.OverflowInt(int64(src.Float())) {
+	if dst.OverflowInt(int64(f)) {
 		return NewInvalidMappingError(src.Type(), dst.Type(), "overflow")
 	}
-	dst.SetInt(int64(src.Float()))
+	dst.SetInt(int64(f))
 	return nil
 }
 
@@ -351,13 +357,17 @@ func mapFloatToUint(_ *Mapper, ctx *Context, src, dst reflect.Value) error {
 	if ctx.StrictTypes {
 		return NewStrictMappingError(src.Type(), dst.Type())
 	}
-	if src.Float() < 0 || src.Float() > math.MaxUint64 {
+	f := src.Float()
+	if math.IsNaN(f) {
+		return NewInvalidMappingError(src.Type(), dst.Type(), "NaN")
+	}
+	if f < 0 || f >= math.MaxUint64+1 {
 		return NewInvalidMappingError(src.Type(), dst.Type(), "overflow")
 	}
-	if dst.OverflowUint(uint64(src.Float())) {
+	if dst.OverflowUint(uint64(f)) {
 		return NewInvalidMappingError(src.Type(), dst.Type(), "overflow")
 	}
-	dst.SetUint(uint64(src.Float()))
+	dst.SetUint(uint64(f))
 	return nil
 }
 
@@ -448,7 +458,7 @@ func mapStringToFloat(_ *Mapper, ctx *Context, src, dst reflect.Value) error {
 }
 
 func mapStringToString(_ *Mapper, ctx *Context, src, dst reflect.Value) error {
-	if ctx.StrictTypes {
+	if ctx.StrictTypes && src.Type() != dst.Type() {
 		return NewStrictMappingError(src.Type(), dst.Type())
 	}
 	dst.SetString(src.String())
@@ -515,28 +525,72 @@ func mapByteArrayToString(_ *Mapper, ctx *Context, src, dst reflect.Value) error
 	return nil
 }
 
-func mapSliceToSlice(m *Mapper, ctx *Context, src, dst reflect.Value) error {
+func mapListToSlice(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 	if ctx.StrictTypes && src.Type() != dst.Type() {
 		return NewStrictMappingError(src.Type(), dst.Type())
 	}
-	mapper := m.mapperFor(ctx, src.Type().Elem(), dst.Type().Elem())
-	if src.Type() == dst.Type() && dst.CanSet() {
-		dst.Set(src)
+	if src.Kind() == reflect.Slice && src.IsNil() && dst.CanSet() {
+		// A nil source.
+		dst.Set(reflect.Zero(dst.Type()))
 		return nil
 	}
-	if src.Len() > dst.Len() {
-		if dst.Cap() >= src.Len() {
-			dst.SetLen(src.Len())
-		} else {
-			dst.Set(reflect.AppendSlice(
-				dst,
-				reflect.MakeSlice(dst.Type(), src.Len()-dst.Len(), src.Len()-dst.Len())),
+	var (
+		srcTyp = src.Type().Elem()
+		dstTyp = dst.Type().Elem()
+		srcLen = src.Len()
+		dstLen = dst.Len()
+	)
+	// The destination slice must have the same length as the source slice.
+	// Elements that exist in both slices are reused.
+	if srcLen != dstLen {
+		if !dst.CanSet() {
+			return NewInvalidMappingError(
+				src.Type(),
+				dst.Type(),
+				fmt.Sprintf("length mismatch: %d != %d", srcLen, dstLen),
 			)
 		}
+		zero := reflect.Zero(dstTyp)
+		switch {
+		case srcLen < dstLen:
+			// Set the removed elements to zero to release the references to
+			// the values that the slice no longer uses.
+			for i := srcLen; i < dstLen; i++ {
+				dst.Index(i).Set(zero)
+			}
+			dst.SetLen(srcLen)
+		case srcLen <= dst.Cap():
+			// Reuse the free capacity of the slice, but set the new elements
+			// to zero because they can contain values from an earlier use.
+			dst.SetLen(srcLen)
+			for i := dstLen; i < srcLen; i++ {
+				dst.Index(i).Set(zero)
+			}
+		default:
+			aux := reflect.MakeSlice(dst.Type(), srcLen, srcLen)
+			reflect.Copy(aux, dst)
+			dst.Set(aux)
+		}
 	}
-	for i := 0; i < src.Len(); i++ {
+	// If both slices have the same element type, copy the elements directly.
+	if srcTyp == dstTyp && dstTyp != anyTy && dst.CanSet() {
+		reflect.Copy(dst, src)
+		return nil
+	}
+	mapper := m.mapperFor(ctx, srcTyp, dstTyp)
+	for i := 0; i < srcLen; i++ {
+		dstIdx := dst.Index(i)
 		srcVal := m.srcValue(src.Index(i))
-		dstVal := m.dstValue(dst.Index(i))
+		if !srcVal.IsValid() {
+			// If the source element is a nil pointer or a nil interface, set
+			// the destination element to zero.
+			dstIdx.Set(reflect.Zero(dstTyp))
+			continue
+		}
+		dstVal := m.dstValue(dstIdx)
+		if !dstVal.IsValid() {
+			return InvalidDstErr
+		}
 		srcValTyp := srcVal.Type()
 		dstValTyp := dstVal.Type()
 		if !mapper.match(srcValTyp, dstValTyp) {
@@ -549,100 +603,45 @@ func mapSliceToSlice(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 	return nil
 }
 
-func mapSliceToArray(m *Mapper, ctx *Context, src, dst reflect.Value) error {
+func mapListToArray(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 	if ctx.StrictTypes && src.Type() != dst.Type() {
 		return NewStrictMappingError(src.Type(), dst.Type())
 	}
-	if src.Len() != dst.Len() {
+	var (
+		srcTyp = src.Type().Elem()
+		dstTyp = dst.Type().Elem()
+		srcLen = src.Len()
+		dstLen = dst.Len()
+	)
+	if srcLen != dstLen {
 		return NewInvalidMappingError(
 			src.Type(),
 			dst.Type(),
-			fmt.Sprintf("length mismatch: %d != %d", src.Len(), dst.Len()),
+			fmt.Sprintf("length mismatch: %d != %d", srcLen, dstLen),
 		)
 	}
-	srcTyp := src.Type().Elem()
-	dstTyp := dst.Type().Elem()
-	mapper := m.mapperFor(ctx, srcTyp, dstTyp)
-	if srcTyp == dstTyp && dst.CanSet() {
+	// If both values have the same element type, copy the elements directly.
+	if srcTyp == dstTyp && dstTyp != anyTy && dst.CanSet() {
 		reflect.Copy(dst, src)
 		return nil
 	}
-	for i := 0; i < src.Len(); i++ {
-		srcVal := m.srcValue(src.Index(i))
-		dstVal := m.dstValue(dst.Index(i))
-		srcValTyp := srcVal.Type()
-		dstValTyp := dstVal.Type()
-		if !mapper.match(srcValTyp, dstValTyp) {
-			mapper = m.mapperFor(ctx, srcValTyp, dstValTyp)
-		}
-		if err := mapper.mapRefl(m, ctx, m.srcValue(src.Index(i)), m.dstValue(dst.Index(i))); err != nil {
-			return err
-		}
-	}
-	for i := src.Len(); i < dst.Len(); i++ {
-		dst.Index(i).Set(reflect.Zero(dst.Type().Elem()))
-	}
-	return nil
-}
-
-func mapArrayToSlice(m *Mapper, ctx *Context, src, dst reflect.Value) error {
-	if ctx.StrictTypes && src.Type() != dst.Type() {
-		return NewStrictMappingError(src.Type(), dst.Type())
-	}
-	srcTyp := src.Type().Elem()
-	dstTyp := dst.Type().Elem()
 	mapper := m.mapperFor(ctx, srcTyp, dstTyp)
-	if srcTyp == dstTyp && dst.CanSet() {
-		dst.Set(reflect.MakeSlice(dst.Type(), src.Len(), src.Len()))
-		reflect.Copy(dst, src)
-	} else {
-		if src.Len() > dst.Len() {
-			if dst.Cap() >= src.Len() {
-				dst.SetLen(src.Len())
-			} else {
-				dst.Set(reflect.AppendSlice(
-					dst,
-					reflect.MakeSlice(dst.Type(), src.Len()-dst.Len(), src.Len()-dst.Len())),
-				)
-			}
-		}
-		for i := 0; i < src.Len(); i++ {
-			srcVal := m.srcValue(src.Index(i))
-			dstVal := m.dstValue(dst.Index(i))
-			srcValTyp := srcVal.Type()
-			dstValTyp := dstVal.Type()
-			if !mapper.match(srcValTyp, dstValTyp) {
-				mapper = m.mapperFor(ctx, srcValTyp, dstValTyp)
-			}
-			if err := mapper.mapRefl(m, ctx, srcVal, dstVal); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func mapArrayToArray(m *Mapper, ctx *Context, src, dst reflect.Value) error {
-	if ctx.StrictTypes && src.Type() != dst.Type() {
-		return NewStrictMappingError(src.Type(), dst.Type())
-	}
-	if src.Len() != dst.Len() {
-		return NewInvalidMappingError(
-			src.Type(),
-			dst.Type(),
-			fmt.Sprintf("length mismatch: %d != %d", src.Len(), dst.Len()),
-		)
-	}
-	srcTyp := src.Type().Elem()
-	dstTyp := dst.Type().Elem()
-	mapper := m.mapperFor(ctx, srcTyp, dstTyp)
-	if srcTyp == dstTyp && dst.CanSet() {
-		reflect.Copy(dst, src)
-		return nil
-	}
-	for i := 0; i < src.Len(); i++ {
+	for i := 0; i < srcLen; i++ {
+		dstIdx := dst.Index(i)
 		srcVal := m.srcValue(src.Index(i))
-		dstVal := m.dstValue(dst.Index(i))
+		if !srcVal.IsValid() {
+			// If the source element is a nil pointer or a nil interface, set
+			// the destination element to zero.
+			if !dstIdx.CanSet() {
+				return InvalidDstErr
+			}
+			dstIdx.Set(reflect.Zero(dstTyp))
+			continue
+		}
+		dstVal := m.dstValue(dstIdx)
+		if !dstVal.IsValid() {
+			return InvalidDstErr
+		}
 		srcValTyp := srcVal.Type()
 		dstValTyp := dstVal.Type()
 		if !mapper.match(srcValTyp, dstValTyp) {
@@ -657,6 +656,7 @@ func mapArrayToArray(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 
 func mapMapToStruct(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 	mapper := &typeMapper{}
+	srcKeyTyp := src.Type().Key()
 	dstNum := dst.Type().NumField()
 	for i := 0; i < dstNum; i++ {
 		dstFld := dst.Type().Field(i)
@@ -669,9 +669,18 @@ func mapMapToStruct(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 			continue
 		}
 		srcKey := reflect.ValueOf(tag)
-		srcVal := m.srcValue(src.MapIndex(srcKey))
+		if srcKeyTyp != stringTy {
+			srcKey = srcKey.Convert(srcKeyTyp)
+		}
+		srcVal := src.MapIndex(srcKey)
 		if !srcVal.IsValid() {
 			// If the source map doesn't have a value for the key, skip it.
+			continue
+		}
+		if srcVal = m.srcValue(srcVal); !srcVal.IsValid() {
+			// A nil source.
+			dstFld := dst.Field(i)
+			dstFld.Set(reflect.Zero(dstFld.Type()))
 			continue
 		}
 		dstVal := m.dstValue(dst.Field(i))
@@ -688,6 +697,11 @@ func mapMapToStruct(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 }
 
 func mapMapToMap(m *Mapper, ctx *Context, src, dst reflect.Value) error {
+	if src.IsNil() && dst.CanSet() {
+		// A nil source.
+		dst.Set(reflect.Zero(dst.Type()))
+		return nil
+	}
 	var (
 		srcKeyTyp  = src.Type().Key()
 		dstKeyTyp  = dst.Type().Key()
@@ -706,6 +720,11 @@ func mapMapToMap(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 			}
 		}
 		srcVal := m.srcValue(src.MapIndex(srcKey))
+		if !srcVal.IsValid() {
+			// A nil source.
+			dst.SetMapIndex(dstKey, reflect.Zero(dstElemTyp))
+			continue
+		}
 		dstVal := m.dstValue(dst.MapIndex(dstKey))
 		if dstVal.IsValid() {
 			// If the destination map already has a value for the key.
@@ -754,6 +773,13 @@ func mapStructsOfSameType(m *Mapper, ctx *Context, src, dst reflect.Value) error
 			continue
 		}
 		srcVal := m.srcValue(src.Field(i))
+		if !srcVal.IsValid() {
+			// If the source field is a nil pointer or a nil interface, set
+			// the destination field to its zero value.
+			dstFld := dst.Field(i)
+			dstFld.Set(reflect.Zero(dstFld.Type()))
+			continue
+		}
 		dstVal := m.dstValue(dst.Field(i))
 		srcValTyp := srcVal.Type()
 		dstValTyp := dstVal.Type()
@@ -807,6 +833,12 @@ func mapStructsOfDifferentTypes(m *Mapper, ctx *Context, src, dst reflect.Value)
 			// If the source struct doesn't have a value for the key, skip it.
 			continue
 		}
+		if !srcVal.IsValid() {
+			// A nil source.
+			dstFld := dst.Field(i)
+			dstFld.Set(reflect.Zero(dstFld.Type()))
+			continue
+		}
 		dstVal := m.dstValue(dst.Field(i))
 		srcValTyp := srcVal.Type()
 		dstValTyp := dstVal.Type()
@@ -824,6 +856,7 @@ func mapStructToMap(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 	var (
 		mapper     = &typeMapper{}
 		srcNum     = src.Type().NumField()
+		dstKeyTyp  = dst.Type().Key()
 		dstElemTyp = dst.Type().Elem()
 	)
 	for i := 0; i < srcNum; i++ {
@@ -837,7 +870,16 @@ func mapStructToMap(m *Mapper, ctx *Context, src, dst reflect.Value) error {
 			continue
 		}
 		dstKey := reflect.ValueOf(tag)
+		if dstKeyTyp != stringTy {
+			// The key type of the map can be a named string type.
+			dstKey = dstKey.Convert(dstKeyTyp)
+		}
 		srcVal := m.srcValue(src.Field(i))
+		if !srcVal.IsValid() {
+			// A nil source.
+			dst.SetMapIndex(dstKey, reflect.Zero(dstElemTyp))
+			continue
+		}
 		dstVal := m.dstValue(dst.MapIndex(dstKey))
 		if dstVal.IsValid() {
 			// If the destination map already has a value for the key.
@@ -905,9 +947,13 @@ func numberToBytes(ctx *Context, src, dst reflect.Value) error {
 	return nil
 }
 
-// numberFromBytes converts a byte slice to an int ot uint using binary.Read.
+// numberFromBytes converts a byte slice to an int or uint using binary.Read.
 func numberFromBytes(ctx *Context, src []byte, dst reflect.Value) error {
-	if len(src) != int(dst.Type().Size()) {
+	size := int(dst.Type().Size())
+	if dst.Kind() == reflect.Int || dst.Kind() == reflect.Uint {
+		size = 8
+	}
+	if len(src) != size {
 		return NewInvalidMappingError(reflect.TypeOf(src), dst.Type(), "invalid byte slice length")
 	}
 	switch dst.Kind() {

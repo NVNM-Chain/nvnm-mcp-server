@@ -7,49 +7,63 @@ github.com/MicahParks/keyfunc/v3
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
-# github.com/btcsuite/btcd v0.24.2
-## explicit; go 1.17
-github.com/btcsuite/btcd/chaincfg
-github.com/btcsuite/btcd/wire
-# github.com/btcsuite/btcd/btcec/v2 v2.3.2
-## explicit; go 1.17
-github.com/btcsuite/btcd/btcec/v2
-github.com/btcsuite/btcd/btcec/v2/ecdsa
+# github.com/bits-and-blooms/bitset v1.25.0
+## explicit; go 1.16
+github.com/bits-and-blooms/bitset
 # github.com/btcsuite/btcd/btcutil v1.1.5
 ## explicit; go 1.16
-github.com/btcsuite/btcd/btcutil
-github.com/btcsuite/btcd/btcutil/base58
 github.com/btcsuite/btcd/btcutil/bech32
-github.com/btcsuite/btcd/btcutil/hdkeychain
-# github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
-## explicit; go 1.17
-github.com/btcsuite/btcd/chaincfg/chainhash
 # github.com/cenkalti/backoff/v5 v5.0.3
 ## explicit; go 1.23
 github.com/cenkalti/backoff/v5
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
-# github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
+# github.com/consensys/gnark-crypto v0.21.0
+## explicit; go 1.25.7
+github.com/consensys/gnark-crypto/ecc
+github.com/consensys/gnark-crypto/ecc/bls12-381
+github.com/consensys/gnark-crypto/ecc/bls12-381/fp
+github.com/consensys/gnark-crypto/ecc/bls12-381/fr
+github.com/consensys/gnark-crypto/ecc/bls12-381/hash_to_curve
+github.com/consensys/gnark-crypto/ecc/bls12-381/internal/fptower
+github.com/consensys/gnark-crypto/field/asm/element_4w
+github.com/consensys/gnark-crypto/field/asm/element_6w
+github.com/consensys/gnark-crypto/field/hash
+github.com/consensys/gnark-crypto/field/pool
+github.com/consensys/gnark-crypto/parallel
+github.com/consensys/gnark-crypto/utils/cpu
+# github.com/crate-crypto/go-kzg-4844 v1.1.0
+## explicit; go 1.20
+github.com/crate-crypto/go-kzg-4844
+github.com/crate-crypto/go-kzg-4844/internal/kzg
+github.com/crate-crypto/go-kzg-4844/internal/multiexp
+github.com/crate-crypto/go-kzg-4844/internal/utils
+# github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 ## explicit; go 1.17
 github.com/decred/dcrd/dcrec/secp256k1/v4
 github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa
-# github.com/defiweb/go-anymapper v0.3.0
+# github.com/defiweb/go-anymapper v0.4.0
 ## explicit; go 1.18
 github.com/defiweb/go-anymapper
-# github.com/defiweb/go-eth v0.7.0
-## explicit; go 1.18
+# github.com/defiweb/go-eth v0.8.3
+## explicit; go 1.26.0
 github.com/defiweb/go-eth/abi
 github.com/defiweb/go-eth/crypto
+github.com/defiweb/go-eth/crypto/ecdsa
+github.com/defiweb/go-eth/crypto/keccak
+github.com/defiweb/go-eth/crypto/kzg4844
+github.com/defiweb/go-eth/crypto/primitives
+github.com/defiweb/go-eth/crypto/txsign
 github.com/defiweb/go-eth/hexutil
 github.com/defiweb/go-eth/rpc
 github.com/defiweb/go-eth/rpc/transport
 github.com/defiweb/go-eth/types
 github.com/defiweb/go-eth/wallet
-# github.com/defiweb/go-rlp v0.3.0
+# github.com/defiweb/go-rlp v0.6.1
 ## explicit; go 1.18
 github.com/defiweb/go-rlp
-# github.com/defiweb/go-sigparser v0.6.0
+# github.com/defiweb/go-sigparser v0.7.2
 ## explicit; go 1.18
 github.com/defiweb/go-sigparser
 # github.com/go-logr/logr v1.4.4
@@ -68,6 +82,9 @@ github.com/google/jsonschema-go/jsonschema
 # github.com/google/uuid v1.6.0
 ## explicit
 github.com/google/uuid
+# github.com/gorilla/websocket v1.5.3
+## explicit; go 1.12
+github.com/gorilla/websocket
 # github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 ## explicit; go 1.25.0
 github.com/grpc-ecosystem/grpc-gateway/v2/internal/httprule
@@ -287,10 +304,9 @@ go.opentelemetry.io/proto/otlp/trace/v1
 # go.uber.org/multierr v1.11.0
 ## explicit; go 1.19
 go.uber.org/multierr
-# golang.org/x/crypto v0.56.0
+# golang.org/x/crypto v0.57.0
 ## explicit; go 1.26.0
 golang.org/x/crypto/pbkdf2
-golang.org/x/crypto/ripemd160
 golang.org/x/crypto/scrypt
 golang.org/x/crypto/sha3
 # golang.org/x/net v0.58.0
@@ -307,18 +323,18 @@ golang.org/x/net/trace
 ## explicit; go 1.25.0
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sync v0.22.0
-## explicit; go 1.25.0
+# golang.org/x/sync v0.23.0
+## explicit; go 1.26.0
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-# golang.org/x/sys v0.47.0
-## explicit; go 1.25.0
+# golang.org/x/sys v0.48.0
+## explicit; go 1.26.0
 golang.org/x/sys/cpu
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
-# golang.org/x/text v0.41.0
-## explicit; go 1.25.0
+# golang.org/x/text v0.42.0
+## explicit; go 1.26.0
 golang.org/x/text/cases
 golang.org/x/text/internal
 golang.org/x/text/internal/language
@@ -449,12 +465,3 @@ google.golang.org/protobuf/types/known/fieldmaskpb
 google.golang.org/protobuf/types/known/structpb
 google.golang.org/protobuf/types/known/timestamppb
 google.golang.org/protobuf/types/known/wrapperspb
-# nhooyr.io/websocket v1.8.10
-## explicit; go 1.19
-nhooyr.io/websocket
-nhooyr.io/websocket/internal/bpool
-nhooyr.io/websocket/internal/errd
-nhooyr.io/websocket/internal/util
-nhooyr.io/websocket/internal/wsjs
-nhooyr.io/websocket/internal/xsync
-nhooyr.io/websocket/wsjson
