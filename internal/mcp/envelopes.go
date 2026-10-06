@@ -69,18 +69,15 @@ type registryOutput struct {
 type registriesOutput struct {
 	anchor.GetRegistriesResponse
 	ContentTrust string `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
-	// NameMatchTruncated is true when a name-filtered scan hit the client-side
-	// page cap before reaching the end of the registry table (see
-	// maxNameScanPages in tools_anchor.go). It signals that Registries may be
-	// an incomplete match set, rather than silently returning a partial result
-	// indistinguishable from a complete one.
+	// NameMatchTruncated mirrors TotalIsLowerBound on a name-filtered page:
+	// more matches may follow this one. Kept for callers that read it.
 	NameMatchTruncated bool `json:"name_match_truncated,omitempty"`
 	// TotalIsLowerBound is true when pagination.total is a floor, not an
 	// exact count. Unfiltered listing: the chain reported no count and the
 	// reverse peek for the highest ID failed, so total is only the rows
-	// confirmed so far. Name filter: the client-side scan was cut short by
-	// its page cap or an ID-gap heuristic before the end of the table.
-	// Absent (false) means total is exact.
+	// confirmed so far. Name filter: the page came back full (or an offset
+	// landed past the end), and the chain reports no match count, so more
+	// matches may exist. Absent (false) means total is exact.
 	TotalIsLowerBound bool         `json:"total_is_lower_bound,omitempty"`
 	NextActions       []NextAction `json:"next_actions,omitempty"`
 }

@@ -39,6 +39,7 @@ type Client interface {
 	// Read methods
 	GetRegistry(ctx context.Context, req GetRegistryRequest) (*Registry, error)
 	GetRegistries(ctx context.Context, req GetRegistriesRequest) (*GetRegistriesResponse, error)
+	GetRegistriesByName(ctx context.Context, req GetRegistriesByNameRequest) (*GetRegistriesResponse, error)
 	GetRecords(ctx context.Context, req GetRecordsRequest) (*GetRecordsResponse, error)
 
 	// Write preparation (prepare-sign-submit pattern)
@@ -265,6 +266,56 @@ func (c *client) GetRegistries(
 		return c.parsedABI.Methods["registries"].DecodeValues(output, &rows, &page)
 	}); err != nil {
 		return nil, fmt.Errorf("unpack registries response: %w", err)
+	}
+
+	return &GetRegistriesResponse{
+		Registries: toRegistries(rows),
+		Pagination: &PageResponse{Total: page.Total, NextKey: EncodeCursor(page.NextKey)},
+	}, nil
+}
+
+// GetRegistriesByName fetches one offset/limit page of the registries whose
+// name matches req.Name under req.Match, via the precompile's on-chain name
+// index (registriesByName). A node whose precompile predates the method
+// answers "unknown method id", reported as ErrRegistriesByNameUnsupported.
+func (c *client) GetRegistriesByName(
+	ctx context.Context,
+	req GetRegistriesByNameRequest,
+) (*GetRegistriesResponse, error) {
+	if err := c.requireABI(); err != nil {
+		return nil, err
+	}
+	if req.Name == "" {
+		return nil, fmt.Errorf("registry name: %w", apperrors.ErrMissingRequired)
+	}
+	switch req.Match {
+	case RegistryNameExact, RegistryNamePrefix, RegistryNameSuffix, RegistryNameContains:
+	default:
+		return nil, apperrors.ErrInvalidMatchMode
+	}
+
+	pagination := abiPaginationInput{Key: []byte{}, Limit: 100}
+	if req.Pagination != nil {
+		pagination.Offset = req.Pagination.Offset
+		if req.Pagination.Limit > 0 {
+			pagination.Limit = req.Pagination.Limit
+		}
+	}
+
+	output, err := c.callPrecompile(ctx, "registriesByName", req.Name, uint8(req.Match), pagination)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unknown method id") {
+			return nil, apperrors.Curate(apperrors.ErrRegistriesByNameUnsupported, err)
+		}
+		return nil, err
+	}
+
+	var rows []abiRegistryRow
+	var page abiPaginationOutput
+	if err := guardABIDecode(func() error {
+		return c.parsedABI.Methods["registriesByName"].DecodeValues(output, &rows, &page)
+	}); err != nil {
+		return nil, fmt.Errorf("unpack registriesByName response: %w", err)
 	}
 
 	return &GetRegistriesResponse{

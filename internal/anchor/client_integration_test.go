@@ -7,6 +7,7 @@ package anchor_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
@@ -177,8 +179,8 @@ func TestIntegration_Info(t *testing.T) {
 	if !info.ABILoaded {
 		t.Error("ABILoaded should be true")
 	}
-	if info.MethodCount != 7 {
-		t.Errorf("MethodCount = %d, want 7", info.MethodCount)
+	if info.MethodCount != 8 {
+		t.Errorf("MethodCount = %d, want 8", info.MethodCount)
 	}
 }
 
@@ -228,6 +230,58 @@ func TestIntegration_GetRegistries_OffsetWindow(t *testing.T) {
 	if len(past.Registries) != 0 || (past.Pagination != nil && past.Pagination.NextKey != "") {
 		t.Fatalf("offset past the end must yield no rows and no cursor; got %d rows, cursor %q",
 			len(past.Registries), past.Pagination.NextKey)
+	}
+}
+
+// TestIntegration_GetRegistriesByName pins the live registriesByName behavior
+// the name-filtered anchor_get_registries path depends on: a known registry
+// is found by its exact name in any case, and an offset past the matches
+// yields no rows. Skips on a node whose precompile predates the method.
+func TestIntegration_GetRegistriesByName(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), findRegistryPageTimeout)
+	defer cancel()
+	noID := uint64(0)
+
+	seed, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		RegistryID: &noID, Pagination: &anchor.PageRequest{Limit: 1},
+	})
+	if err != nil || len(seed.Registries) == 0 {
+		t.Fatalf("GetRegistries(limit=1) = %v, %v; need one registry to look up", seed, err)
+	}
+	want := seed.Registries[0]
+
+	resp, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name:       strings.ToUpper(want.Name),
+		Match:      anchor.RegistryNameExact,
+		Pagination: &anchor.PageRequest{Limit: 200},
+	})
+	if errors.Is(err, apperrors.ErrRegistriesByNameUnsupported) {
+		t.Skip("node precompile predates registriesByName")
+	}
+	if err != nil {
+		t.Fatalf("GetRegistriesByName(%q): %v", want.Name, err)
+	}
+	found := false
+	for _, r := range resp.Registries {
+		found = found || r.ID == want.ID
+		if !strings.EqualFold(r.Name, want.Name) {
+			t.Errorf("exact match returned %q for %q", r.Name, want.Name)
+		}
+	}
+	if !found {
+		t.Fatalf("registry %d (%q) missing from its own exact-name lookup: %+v", want.ID, want.Name, resp.Registries)
+	}
+
+	past, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name: want.Name, Match: anchor.RegistryNameExact,
+		Pagination: &anchor.PageRequest{Offset: 1 << 40, Limit: 3},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistriesByName(offset past end): %v", err)
+	}
+	if len(past.Registries) != 0 {
+		t.Fatalf("offset past the matches returned %d rows", len(past.Registries))
 	}
 }
 
