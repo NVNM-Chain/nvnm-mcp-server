@@ -11,6 +11,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Live integration tests and `cmd/seed-test-data` no longer hardcode the
+  testnet.** The RPC endpoint and chain ID come from `NVNM_EVM_RPC_URL` /
+  `NVNM_CHAIN_ID` (testnet defaults when unset) via the live-test
+  settings in `internal/config/testenv_config.go`, so the same suites run
+  against any chain.
+  `seed-test-data` also refuses to run when the RPC's chain ID differs
+  from the expected one. Tests that read a historical tx use
+  `NVNM_TEST_TX_HASH` / `NVNM_TEST_TX_SENDER` and skip on chains without
+  a fixture.
 - **Deployment hot-path e2e runs writes on mainnet as well as testnet.**
   `chain_environment=mainnet` from `nvnm_overview` used to force a
   read-only skip even with a funded wallet. `make test-e2e` now walks
@@ -18,6 +27,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   chain the target server is pinned to, still gated on advertised write
   tools and a funded signing wallet. Mainnet writes create a real
   registry and record.
+- **`anchor_get_registries` name filter uses the on-chain name index.**
+  A `name` (+ `match`) call now asks the precompile's `registriesByName`
+  for the `offset`/`limit` window of matches -- one RPC call for a page of
+  up to 200 rows -- instead of scanning the whole registry table
+  client-side (20-30s on a populated chain). All four match modes stay
+  case-insensitive. The chain reports no match count, so
+  `pagination.total` is now `offset` + rows returned, with
+  `total_is_lower_bound` (and `name_match_truncated`) set when the page
+  came back full; page at `offset + limit` until a short page. **Requires
+  a node whose precompile implements `registriesByName`**: an older node
+  fails the call with `registry name lookup unavailable`, with no fallback
+  to the scan. `abi/anchoring.json` gains the method (8 methods). The
+  unfiltered listing is unchanged.
 
 ## [1.0.0-rc21] - 2026-09-17
 

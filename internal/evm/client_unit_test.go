@@ -435,6 +435,20 @@ func TestClient_TransactionReceipt_NilResultIsNotFound(t *testing.T) {
 	}
 }
 
+func TestClient_TransactionReceipt_ZeroStructIsNotFound(t *testing.T) {
+	// Some nodes answer a missing receipt with null that decodes to a
+	// non-nil zero-value struct; the zero tx hash must map to not-found
+	// rather than a bogus "unknown"-status receipt.
+	c := newFakeClient(&fakeRPC{receipt: &defitypes.TransactionReceipt{}})
+	nr, err := c.TransactionReceipt(context.Background(), defitypes.Hash{})
+	if !errors.Is(err, apperrors.ErrTxNotFound) {
+		t.Errorf("error = %v, want ErrTxNotFound", err)
+	}
+	if nr != nil {
+		t.Errorf("receipt = %+v, want nil", nr)
+	}
+}
+
 func TestClient_TransactionReceipt_Error(t *testing.T) {
 	c := newFakeClient(&fakeRPC{receiptErr: errRPCDown})
 	_, err := c.TransactionReceipt(context.Background(), defitypes.Hash{})

@@ -224,7 +224,26 @@ resolved environment-first then file: `NVNM_TEST_PRIVATE_KEY` (optional
 are absent. The wallet must be funded: these tests broadcast real
 transactions and wait for receipts.
 
-The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh testnet before running the anchor integration suite.
+**Target chain.** The live tests do not hardcode a network. They read the
+same variables as the server, through `internal/config/testenv_config.go`: `NVNM_EVM_RPC_URL`
+(default `https://evm.testnet.nvnmchain.io`) and `NVNM_CHAIN_ID` (default
+`787111`). `NVNM_CHAIN_ENVIRONMENT` is used by the `wallet_status` test (else
+inferred from the chain ID; an unknown chain ID without it is an error). A
+set-but-invalid value fails the run immediately. To run against another
+chain, e.g. the dev chain:
+
+```sh
+NVNM_EVM_RPC_URL=<rpc> NVNM_CHAIN_ID=<id> NVNM_CHAIN_ENVIRONMENT=testnet \
+  go test -mod=vendor -tags integration -count=1 ./internal/anchor
+```
+
+The signing wallet must be funded on that chain. `internal/evm` tests that
+read a known historical transaction use `NVNM_TEST_TX_HASH` and
+`NVNM_TEST_TX_SENDER` (a mined tx and its sender on the target chain); without
+them the built-in testnet fixture is used on testnet and those tests skip on
+other chains.
+
+The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh chain before running the anchor integration suite; it honors the same `NVNM_EVM_RPC_URL` / `NVNM_CHAIN_ID` variables and refuses to run if the RPC's chain ID does not match.
 
 Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-test-data` resolves `mcp-test-data` to its `registry_id` by scanning `GetRegistries` for an exact name match client-side (there is no on-chain by-name lookup); it reuses the existing registry if that scan finds one, otherwise it creates a new one. Every downstream call in the script, and in the anchor read tests, then operates on that numeric ID.
 

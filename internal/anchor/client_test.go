@@ -172,8 +172,8 @@ func TestNewClient_WithABI(t *testing.T) {
 	if !info.ABILoaded {
 		t.Error("ABILoaded should be true")
 	}
-	if info.MethodCount != 7 {
-		t.Errorf("MethodCount = %d, want 7", info.MethodCount)
+	if info.MethodCount != 8 {
+		t.Errorf("MethodCount = %d, want 8", info.MethodCount)
 	}
 }
 
@@ -238,12 +238,13 @@ func TestLoadABI_RawArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadABI failed: %v", err)
 	}
-	if len(parsed.Methods) != 7 {
-		t.Errorf("method count = %d, want 7", len(parsed.Methods))
+	if len(parsed.Methods) != 8 {
+		t.Errorf("method count = %d, want 8", len(parsed.Methods))
 	}
 
 	expectedMethods := []string{
-		"addRecord", "addRegistry", "updateRecordStatus", "grantRole", "revokeRole", "records", "registries",
+		"addRecord", "addRegistry", "updateRecordStatus", "grantRole", "revokeRole",
+		"records", "registries", "registriesByName",
 	}
 	for _, name := range expectedMethods {
 		if _, ok := parsed.Methods[name]; !ok {
@@ -279,8 +280,8 @@ func TestLoadABI_WrappedObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadABI with wrapper failed: %v", err)
 	}
-	if len(parsed.Methods) != 7 {
-		t.Errorf("method count = %d, want 7", len(parsed.Methods))
+	if len(parsed.Methods) != 8 {
+		t.Errorf("method count = %d, want 8", len(parsed.Methods))
 	}
 }
 

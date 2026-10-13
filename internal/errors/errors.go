@@ -168,6 +168,14 @@ var (
 	ErrWriteDisabled          = errors.New("write tools are not enabled")
 	ErrPermissionDenied       = errors.New("permission denied")
 	ErrAuthRequired           = errors.New("authentication required")
+	// ErrRegistriesByNameUnsupported marks a name-filtered registry lookup
+	// against a node whose anchoring precompile predates registriesByName
+	// (it answers the selector with "unknown method id"). The message is
+	// the client-facing text, surfaced verbatim.
+	ErrRegistriesByNameUnsupported = errors.New(
+		"registry name lookup unavailable: the connected chain's anchoring " +
+			"precompile does not implement registriesByName; omit name for a " +
+			"paged listing, or fetch a known registry with anchor_get_registry")
 )
 
 // Upstream errors.
@@ -304,7 +312,8 @@ func SafeForClient(err error) error {
 	if IsInputError(err) || IsNotFound(err) {
 		return err
 	}
-	if errors.Is(err, ErrAnchorABIMissing) || errors.Is(err, ErrWriteDisabled) {
+	if errors.Is(err, ErrAnchorABIMissing) || errors.Is(err, ErrWriteDisabled) ||
+		errors.Is(err, ErrRegistriesByNameUnsupported) {
 		return err
 	}
 	if errors.Is(err, ErrPermissionDenied) {

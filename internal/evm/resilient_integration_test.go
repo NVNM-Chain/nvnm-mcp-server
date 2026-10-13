@@ -9,13 +9,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 	"testing"
 	"time"
 
 	defitypes "github.com/defiweb/go-eth/types"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
@@ -36,15 +36,12 @@ func newIntegrationMetrics(t *testing.T) *telemetry.Metrics {
 
 func newResilientTestClient(t *testing.T) Client {
 	t.Helper()
-	rpcURL := os.Getenv("NVNM_EVM_RPC_URL")
-	if rpcURL == "" {
-		rpcURL = "https://evm.testnet.nvnmchain.io"
-	}
+	target := config.MustLiveTarget()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	raw, err := NewClient(ctx, rpcURL, 15*time.Second)
+	raw, err := NewClient(ctx, target.RPCURL, 15*time.Second)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -72,8 +69,8 @@ func TestResilientIntegration_ChainID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChainID: %v", err)
 	}
-	if chainID.Int64() != 787111 {
-		t.Errorf("ChainID = %d, want 787111", chainID.Int64())
+	if want := config.MustLiveTarget().ChainID; chainID.Int64() != want {
+		t.Errorf("ChainID = %d, want %d", chainID.Int64(), want)
 	}
 }
 
@@ -85,8 +82,8 @@ func TestResilientIntegration_GetChainInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChainInfo: %v", err)
 	}
-	if info.ChainID != 787111 {
-		t.Errorf("ChainID = %d, want 787111", info.ChainID)
+	if want := config.MustLiveTarget().ChainID; info.ChainID != want {
+		t.Errorf("ChainID = %d, want %d", info.ChainID, want)
 	}
 	if info.LatestBlockNumber == 0 {
 		t.Error("LatestBlockNumber should be > 0")
