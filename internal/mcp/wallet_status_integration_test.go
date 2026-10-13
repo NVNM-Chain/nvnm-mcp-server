@@ -8,6 +8,7 @@ package mcp
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -24,8 +25,6 @@ import (
 )
 
 const (
-	rtRPCURL          = "https://evm.testnet.nvnmchain.io"
-	rtChainID         = 787111
 	rtABIPath         = "../../abi/anchoring.json"
 	rtCredentialsPath = "../../.chain_credentials.txt"
 	// rtReceiptTimeout bounds the receipt poll. The testnet RPC can
@@ -33,6 +32,14 @@ const (
 	// comet-side indexing on busy blocks); 90s covers the observed
 	// worst case with margin.
 	rtReceiptTimeout = 90 * time.Second
+)
+
+// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (testnet
+// defaults when unset); see internal/config/testenv_config.go.
+var (
+	rtTarget  = config.MustLiveTarget()
+	rtRPCURL  = rtTarget.RPCURL
+	rtChainID = rtTarget.ChainID
 )
 
 // TestIntegration_EthAccountRoundTrip exercises the full eth_account
@@ -61,7 +68,17 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 
 	// Minimal config: makeWalletStatusHandler only reads ChainID (for
 	// the output) and ChainEnvironment (for env-aware token naming).
-	cfg := &config.Config{ChainID: rtChainID, ChainEnvironment: config.EnvTestnet}
+	// The environment is NVNM_CHAIN_ENVIRONMENT or inferred from the chain ID.
+	chainEnv, err := config.LiveEnvironment(os.Getenv, rtChainID)
+	if errors.Is(err, config.ErrLiveUnknownEnvironment) {
+		// The token-naming assertions need the environment; a fork chain ID
+		// is not guessable, so require it explicitly rather than assuming one.
+		t.Skipf("%v", err)
+	}
+	if err != nil {
+		t.Fatalf("chain environment: %v", err)
+	}
+	cfg := &config.Config{ChainID: rtChainID, ChainEnvironment: chainEnv}
 	walletStatus := makeWalletStatusHandler(evmClient, cfg)
 
 	// --- wallet_status BEFORE ---
@@ -123,7 +140,7 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 	if after.Status != WalletStatusFundedActive {
 		t.Errorf("status = %q after broadcast, want %q", after.Status, WalletStatusFundedActive)
 	}
-	wantToken := config.NamingFor(config.EnvTestnet).Wrapped
+	wantToken := config.NamingFor(chainEnv).Wrapped
 	if !strings.HasSuffix(after.BalanceHuman, wantToken) {
 		t.Errorf("balance_human = %q, want suffix %q", after.BalanceHuman, wantToken)
 	}

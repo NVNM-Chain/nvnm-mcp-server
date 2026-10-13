@@ -17,6 +17,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
@@ -24,10 +25,16 @@ import (
 )
 
 const (
-	testRPCURL         = "https://evm.testnet.nvnmchain.io"
-	testChainID        = int64(787111)
 	testABIRelPath     = "../../abi/anchoring.json"
 	testConnectTimeout = 15 * time.Second
+)
+
+// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (testnet
+// defaults when unset); see internal/config/testenv_config.go.
+var (
+	testTarget  = config.MustLiveTarget()
+	testRPCURL  = testTarget.RPCURL
+	testChainID = testTarget.ChainID
 )
 
 func integrationClient(t *testing.T) anchor.Client {
