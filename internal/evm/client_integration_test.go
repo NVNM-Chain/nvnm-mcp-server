@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,17 +19,40 @@ import (
 	defitypes "github.com/defiweb/go-eth/types"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 const (
-	testRPCURL         = "https://evm.testnet.nvnmchain.io"
-	testChainID        = 787111
 	testPrecompileAddr = "0x0000000000000000000000000000000000000A00"
 	testConnectTimeout = 15 * time.Second
 )
+
+// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (testnet
+// defaults when unset); see internal/config/testenv_config.go.
+var (
+	testTarget  = config.MustLiveTarget()
+	testRPCURL  = testTarget.RPCURL
+	testChainID = testTarget.ChainID
+)
+
+// minedTxFixture returns a known mined tx and its sender on the target
+// chain (NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER, or the built-in testnet
+// fixture) and skips the test when none is available for this chain.
+func minedTxFixture(t *testing.T) config.LiveTxFixture {
+	t.Helper()
+	fx, ok, err := config.LiveMinedTx(os.Getenv, testChainID)
+	if err != nil {
+		t.Fatalf("tx fixture: %v", err)
+	}
+	if !ok {
+		t.Skipf("no mined-tx fixture for chain %d: set %s and %s",
+			testChainID, config.LiveEnvTxHash, config.LiveEnvTxSender)
+	}
+	return fx
+}
 
 func mustHashFromHex(s string) defitypes.Hash {
 	h, err := defitypes.HashFromHex(s, defitypes.PadNone)
@@ -238,10 +262,8 @@ func TestIntegration_TransactionByHash_PopulatesFrom(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	// Permanent testnet tx: addRecord into ElicitTest-rc6 (registry 741),
-	// sent by the funded test wallet below.
-	const txHash = "0x7e0b28b30916a3dcc14c4ffe9a5ed6be06acd3d4f4c618161fbb1e6c1acf2188"
-	const sender = "0x9f8a6425F7AD925701fE1CdF85fd883340b2A9CD"
+	fx := minedTxFixture(t)
+	txHash, sender := fx.Hash, fx.Sender
 
 	tx, err := c.TransactionByHash(ctx, mustHashFromHex(txHash))
 	if err != nil {
@@ -279,7 +301,7 @@ func TestIntegration_TransactionReceipt_MinedTx(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()
 
-	const txHash = "0x7e0b28b30916a3dcc14c4ffe9a5ed6be06acd3d4f4c618161fbb1e6c1acf2188"
+	txHash := minedTxFixture(t).Hash
 	receipt, err := c.TransactionReceipt(ctx, mustHashFromHex(txHash))
 	if err != nil {
 		t.Fatalf("TransactionReceipt: %v", err)

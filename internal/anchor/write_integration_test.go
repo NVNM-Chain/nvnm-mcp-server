@@ -21,13 +21,17 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
+// credentialsPath is the fallback signing-key file used when
+// NVNM_TEST_PRIVATE_KEY is unset. The target chain itself comes from
+// NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (see client_integration_test.go); the
+// key must be funded on that chain.
 const credentialsPath = "../../.chain_credentials.txt"
 
 // receiptPollTimeout bounds how long each test waits for a receipt
-// to appear. The testnet RPC occasionally takes >30s to surface a
+// to appear. The RPC (observed on testnet) occasionally takes >30s to surface a
 // receipt for a tx we know is on-chain (slow comet-side indexing on
 // busy blocks); 60s covers the observed worst case with margin.
-const receiptPollTimeout = 60 * time.Second
+const receiptPollTimeout = 90 * time.Second
 
 type testCredentials struct {
 	Address    string

@@ -11,6 +11,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Live integration tests and `cmd/seed-test-data` no longer hardcode the
+  testnet.** The RPC endpoint and chain ID come from `NVNM_EVM_RPC_URL` /
+  `NVNM_CHAIN_ID` (testnet defaults when unset) via the live-test
+  settings in `internal/config/testenv_config.go`, so the same suites run
+  against any chain.
+  `seed-test-data` also refuses to run when the RPC's chain ID differs
+  from the expected one. Tests that read a historical tx use
+  `NVNM_TEST_TX_HASH` / `NVNM_TEST_TX_SENDER` and skip on chains without
+  a fixture.
 - **Deployment hot-path e2e runs writes on mainnet as well as testnet.**
   `chain_environment=mainnet` from `nvnm_overview` used to force a
   read-only skip even with a funded wallet. `make test-e2e` now walks
