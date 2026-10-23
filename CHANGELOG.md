@@ -24,9 +24,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   up to 200 rows -- instead of scanning the whole registry table
   client-side (20-30s on a populated chain). All four match modes stay
   case-insensitive. The chain reports no match count, so
-  `pagination.total` is now `offset` + rows returned, with
-  `total_is_lower_bound` (and `name_match_truncated`) set when the page
-  came back full; page at `offset + limit` until a short page. **Requires
+  `pagination.total` is now `offset` + rows returned.
+  `total_is_lower_bound` (and `name_match_truncated`) is only the
+  last-page check: set when the page came back full, so that page is not
+  the last one even though `offset + limit` equals `total`; absent on
+  the last page, which came back short and whose `total` is exact.
+  **Requires
   a node whose precompile implements `registriesByName`**: an older node
   fails the call with `registry name lookup unavailable`, with no fallback
   to the scan. `abi/anchoring.json` gains the method (8 methods). The

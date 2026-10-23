@@ -53,11 +53,13 @@ func registerAnchorTools(
 			"the rows confirmed so far. " +
 			"With name (+ optional match): the chain's by-name index serves the " +
 			"offset/limit window of the matches directly. The chain reports no match " +
-			"count, so pagination.total is offset + rows returned: exact when the page " +
-			"came back short, otherwise total_is_lower_bound=true (mirrored by " +
-			"name_match_truncated) -- more matches may follow; request the next page " +
-			"at offset + limit until a page comes back short. No next_key is returned " +
-			"for a name filter. " +
+			"count, so pagination.total is offset + rows returned. " +
+			"total_is_lower_bound (mirrored by name_match_truncated) is only the " +
+			"last-page check: true means this page is full and is not the last " +
+			"page, so request the next page at offset + limit even though that " +
+			"equals total. The flag is absent on the last page, which came back " +
+			"short, and total is then exact. No next_key is returned for a name " +
+			"filter. " +
 			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
