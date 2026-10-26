@@ -34,6 +34,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fails the call with `registry name lookup unavailable`, with no fallback
   to the scan. `abi/anchoring.json` gains the method (8 methods). The
   unfiltered listing is unchanged.
+- **`anchor_get_registries` name filter pages with `pagination.next_key`.**
+  Testnet `registriesByName` now returns the cursor it previously left
+  empty. The tool passes that cursor through, and `key` resumes a
+  name-filtered page the same way it resumes an unfiltered one. A cursor
+  client, on either listing, keeps requesting with `next_key` as `key`
+  until `next_key` is empty. Offset paging is unchanged.
 
 ## [1.0.0-rc21] - 2026-09-17
 

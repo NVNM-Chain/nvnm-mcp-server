@@ -156,14 +156,62 @@ func TestE2E_CallTool_AnchorGetRegistries_ByName(t *testing.T) {
 		t.Fatalf("marshal structured content: %v", err)
 	}
 	var out registriesOutput
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err = json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("decode structured content: %v", err)
 	}
 	if len(out.Registries) != 2 {
 		t.Fatalf("Registries = %+v, want 2 matches (both fund-documents)", out.Registries)
 	}
-	if out.Pagination == nil || out.Pagination.Total != 2 {
-		t.Errorf("Pagination = %+v, want Total = 2 (the match count)", out.Pagination)
+	if out.Pagination == nil || out.Pagination.Total != 2 || out.Pagination.NextKey != "" {
+		t.Errorf("Pagination = %+v, want Total = 2 and no next_key (both matches fit)", out.Pagination)
+	}
+
+	// limit=1 leaves a cursor. Passing it back as key returns the other match.
+	paged, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "anchor_get_registries",
+		Arguments: map[string]any{"name": "fund-documents", "limit": 1},
+	})
+	if err != nil {
+		t.Fatalf("CallTool (limit 1): %v", err)
+	}
+	if paged.IsError {
+		t.Fatalf("tool returned error (limit 1): %v", paged.Content)
+	}
+	raw, err = json.Marshal(paged.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal paged content: %v", err)
+	}
+	if err = json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode paged content: %v", err)
+	}
+	if len(out.Registries) != 1 || out.Registries[0].ID != 1 || out.Pagination == nil || out.Pagination.NextKey == "" {
+		t.Fatalf("paged = %+v pagination %+v, want id 1 and a next_key", out.Registries, out.Pagination)
+	}
+	followed, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "anchor_get_registries",
+		Arguments: map[string]any{
+			"name": "fund-documents", "key": out.Pagination.NextKey, "limit": 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool (key): %v", err)
+	}
+	if followed.IsError {
+		t.Fatalf("tool returned error (key): %v", followed.Content)
+	}
+	raw, err = json.Marshal(followed.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal cursor content: %v", err)
+	}
+	out = registriesOutput{}
+	if err = json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode cursor content: %v", err)
+	}
+	if len(out.Registries) != 1 || out.Registries[0].ID != 57 {
+		t.Fatalf("cursor page = %+v pagination %+v, want id 57", out.Registries, out.Pagination)
+	}
+	if out.Pagination == nil || out.Pagination.NextKey != "" {
+		t.Errorf("cursor pagination = %+v, want an empty next_key (last match)", out.Pagination)
 	}
 }
 
@@ -300,7 +348,7 @@ func TestE2E_CallTool_AnchorGetRegistries_ModeViolationsRejected(t *testing.T) {
 		{"registry_id with key", map[string]any{"registry_id": 1, "key": chainCursor(2)}},
 		{"match without name", map[string]any{"match": "prefix"}},
 		{"key with non-zero offset", map[string]any{"key": chainCursor(2), "offset": 10}},
-		{"key with name", map[string]any{"key": chainCursor(2), "name": "anything"}},
+		{"key with name and non-zero offset", map[string]any{"key": chainCursor(2), "name": "anything", "offset": 10}},
 		{"key not base64", map[string]any{"key": "not!base64"}},
 	}
 	for _, tc := range tests {

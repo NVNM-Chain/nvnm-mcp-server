@@ -300,6 +300,9 @@ func (c *client) GetRegistriesByName(
 		if req.Pagination.Limit > 0 {
 			pagination.Limit = req.Pagination.Limit
 		}
+		if len(req.Pagination.Key) > 0 {
+			pagination.Key = req.Pagination.Key
+		}
 	}
 
 	output, err := c.callPrecompile(ctx, "registriesByName", req.Name, uint8(req.Match), pagination)

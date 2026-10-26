@@ -77,7 +77,8 @@ type registriesOutput struct {
 	// reverse peek for the highest ID failed, so total is only the rows
 	// confirmed so far. Name filter: the page came back full (or an offset
 	// landed past the end), and the chain reports no match count, so more
-	// matches may exist. Absent (false) means total is exact.
+	// matches may exist. A cursor client ignores this and pages until
+	// pagination.next_key is empty. Absent (false) means total is exact.
 	TotalIsLowerBound bool         `json:"total_is_lower_bound,omitempty"`
 	NextActions       []NextAction `json:"next_actions,omitempty"`
 }

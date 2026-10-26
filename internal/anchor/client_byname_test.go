@@ -4,6 +4,7 @@
 package anchor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/big"
@@ -62,6 +63,34 @@ func TestGetRegistriesByName_Success(t *testing.T) {
 	}
 	if page.Offset != 3 || page.Limit != 9 || page.Reverse || len(page.Key) != 0 {
 		t.Errorf("pagination = %+v, want offset=3 limit=9, no key, forward", page)
+	}
+}
+
+func TestGetRegistriesByName_ForwardsCursor(t *testing.T) {
+	cursor := []byte{0, 0, 0, 0, 0, 0, 0, 46}
+	next := []byte{0, 0, 0, 0, 0, 0, 0, 93}
+	var gotInput []byte
+	mock := &mockEVMClient{
+		callContractFn: func(_ context.Context, msg defitypes.Call, _ *big.Int) ([]byte, error) {
+			gotInput = msg.Input
+			return encodeRegistriesOutput(t, sampleRegistryRows()[:1], abiPaginationOutput{NextKey: next}), nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
+
+	resp, err := c.GetRegistriesByName(context.Background(), GetRegistriesByNameRequest{
+		Name: "a", Match: RegistryNamePrefix,
+		Pagination: &PageRequest{Key: cursor, Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistriesByName: %v", err)
+	}
+	if resp.Pagination == nil || resp.Pagination.NextKey != EncodeCursor(next) || resp.Pagination.Total != 0 {
+		t.Fatalf("pagination = %+v, want next_key of the chain cursor and total 0", resp.Pagination)
+	}
+	_, _, page := decodeByNameInput(t, gotInput)
+	if !bytes.Equal(page.Key, cursor) || page.Limit != 2 || page.Offset != 0 {
+		t.Errorf("pagination = %+v, want key forwarded, limit 2, offset 0", page)
 	}
 }
 

@@ -191,9 +191,10 @@ func (m *mockAnchor) GetRegistriesByName(
 }
 
 // chainByName answers a registriesByName request over regs the way the live
-// precompile does (probed 2026-10-06, chain 262144): case-insensitive match,
-// Offset/Limit window over the matches, at most registriesChainPageSize rows
-// per call, and an empty pagination (no cursor, no count).
+// precompile does (probed 2026-10-26, testnet 787111): case-insensitive
+// match, Offset or Key positions the page, Limit bounds it (capped at
+// registriesChainPageSize), and next_key is the 8-byte big-endian id of the
+// next match, empty when the match set ended. pagination.total stays 0.
 func chainByName(regs []anchor.Registry, req anchor.GetRegistriesByNameRequest) *anchor.GetRegistriesResponse {
 	target := strings.ToLower(req.Name)
 	var matches []anchor.Registry
@@ -220,14 +221,30 @@ func chainByName(regs []anchor.Registry, req anchor.GetRegistriesByNameRequest) 
 		if p.Limit > 0 {
 			limit = min(p.Limit, registriesChainPageSize)
 		}
+		if len(p.Key) == registryCursorLen {
+			// The live cursor is the id of the next match, not an index
+			// into the match set. Seek the first match at or after it.
+			id := binary.BigEndian.Uint64(p.Key)
+			offset = uint64(len(matches))
+			for i, m := range matches {
+				if m.ID >= id {
+					offset = uint64(i)
+					break
+				}
+			}
+		}
 	}
 	n := uint64(len(matches))
 	start := min(offset, n)
 	end := min(start+limit, n)
-	return &anchor.GetRegistriesResponse{
+	resp := &anchor.GetRegistriesResponse{
 		Registries: matches[start:end],
 		Pagination: &anchor.PageResponse{},
 	}
+	if end < n {
+		resp.Pagination.NextKey = chainCursor(matches[end].ID)
+	}
+	return resp
 }
 
 // newChainMock returns a mockAnchor that serves regs the way the live
@@ -975,7 +992,8 @@ func TestHandler_GetRegistries_CursorLastPage(t *testing.T) {
 
 // TestHandler_GetRegistries_CursorRejections covers every way a key can be
 // unusable: combined with a non-zero offset (the SDK rejects both), with a
-// name filter (different table), with registry_id, or not base64. All are
+// with registry_id, or not base64. A key with a name filter is a
+// by-name cursor and is not rejected here. All listed cases are
 // rejected before any chain call.
 func TestHandler_GetRegistries_CursorRejections(t *testing.T) {
 	offset := uint64(3)
@@ -989,7 +1007,8 @@ func TestHandler_GetRegistries_CursorRejections(t *testing.T) {
 		want  error
 	}{
 		{"key with non-zero offset", getRegistriesInput{Key: chainCursor(4), Offset: &offset}, apperrors.ErrInvalidCursor},
-		{"key with name", getRegistriesInput{Key: chainCursor(4), Name: &name}, apperrors.ErrInvalidCursor},
+		{"key with name and non-zero offset", getRegistriesInput{Key: chainCursor(4), Name: &name, Offset: &offset},
+			apperrors.ErrInvalidCursor},
 		{"key with registry_id", getRegistriesInput{Key: chainCursor(4), RegistryID: &regID},
 			apperrors.ErrInvalidFilterCombination},
 		{"key not base64", getRegistriesInput{Key: garbage}, apperrors.ErrInvalidCursor},
@@ -1364,13 +1383,14 @@ func TestHandler_GetRegistries_ByName_PagesOverMatchSet(t *testing.T) {
 		limit          uint64
 		wantIDs        []uint64
 		wantTotal      uint64
+		wantNextKey    string
 		wantLowerBound bool
 	}{
-		{"full first page", 0, 2, []uint64{1, 3}, 2, true},
-		{"short second page", 2, 2, []uint64{4}, 3, false},
-		{"limit past the end", 0, 100, []uint64{1, 3, 4}, 3, false},
-		{"exactly full last page", 1, 2, []uint64{3, 4}, 3, true},
-		{"offset past the end", 3, 2, nil, 0, true},
+		{"full first page", 0, 2, []uint64{1, 3}, 2, chainCursor(4), true},
+		{"short second page", 2, 2, []uint64{4}, 3, "", false},
+		{"limit past the end", 0, 100, []uint64{1, 3, 4}, 3, "", false},
+		{"exactly full last page", 1, 2, []uint64{3, 4}, 3, "", true},
+		{"offset past the end", 3, 2, nil, 0, "", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1395,8 +1415,9 @@ func TestHandler_GetRegistries_ByName_PagesOverMatchSet(t *testing.T) {
 					t.Errorf("Registries[%d].ID = %d, want %d", i, out.Registries[i].ID, id)
 				}
 			}
-			if out.Pagination == nil || out.Pagination.Total != tc.wantTotal || out.Pagination.NextKey != "" {
-				t.Errorf("Pagination = %+v, want Total = %d and no next_key", out.Pagination, tc.wantTotal)
+			if out.Pagination == nil || out.Pagination.Total != tc.wantTotal || out.Pagination.NextKey != tc.wantNextKey {
+				t.Errorf("Pagination = %+v, want Total = %d next_key = %q",
+					out.Pagination, tc.wantTotal, tc.wantNextKey)
 			}
 			if out.TotalIsLowerBound != tc.wantLowerBound || out.NameMatchTruncated != tc.wantLowerBound {
 				t.Errorf("TotalIsLowerBound/NameMatchTruncated = %v/%v, want %v",
@@ -1483,8 +1504,8 @@ func TestHandler_GetRegistries_ByName_ForwardsToChain(t *testing.T) {
 }
 
 // TestHandler_GetRegistries_ByName_ChainsFetchesPastPageCap proves a limit
-// above the chain's per-call cap is served by consecutive offset-positioned
-// fetches, stopping at the first short one.
+// above the chain's per-call cap continues from the chain's next_key, and
+// stops when a fetch comes back short.
 func TestHandler_GetRegistries_ByName_ChainsFetchesPastPageCap(t *testing.T) {
 	regs := make([]anchor.Registry, registriesChainPageSize+30)
 	for i := range regs {
@@ -1511,8 +1532,11 @@ func TestHandler_GetRegistries_ByName_ChainsFetchesPastPageCap(t *testing.T) {
 		t.Fatalf("by-name calls = %d, want 2", len(m.byNameReqs))
 	}
 	second := m.byNameReqs[1].Pagination
-	if second.Offset != 5+registriesChainPageSize || second.Limit != 100 {
-		t.Errorf("second fetch = %+v, want offset %d limit 100", second, 5+registriesChainPageSize)
+	// The first page ended on registry id 206 (offset 5, then 200 rows:
+	// ids 6..205). The chain's next_key resumes there; offset stays 0.
+	wantKey := mustCursorBytes(t, chainCursor(206))
+	if second.Offset != 0 || second.Limit != 100 || !bytes.Equal(second.Key, wantKey) {
+		t.Errorf("second fetch = %+v, want key=cursor(206) offset 0 limit 100", second)
 	}
 }
 
@@ -1557,19 +1581,105 @@ func TestHandler_GetRegistries_ByName_PropagatesError(t *testing.T) {
 	}
 }
 
-// TestHandler_GetRegistries_ByName_RejectsKey proves the unfiltered
-// listing's cursor is refused alongside a name filter, before any chain call.
-func TestHandler_GetRegistries_ByName_RejectsKey(t *testing.T) {
-	m := &mockAnchor{}
+// TestHandler_GetRegistries_ByName_ByCursor proves key resumes a name
+// filter at the chain's next match, and the returned next_key is what a
+// cursor client passes back until it comes back empty.
+func TestHandler_GetRegistries_ByName_ByCursor(t *testing.T) {
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{
+		Registries: []anchor.Registry{
+			{ID: 1, Name: "fund-documents"},
+			{ID: 3, Name: "fund-documents"},
+			{ID: 4, Name: "fund-documents"},
+		},
+	}}
 	handler := makeGetRegistriesHandler(m)
 
 	name := "fund-documents"
-	_, _, err := handler(ctx, nil, getRegistriesInput{Name: &name, Key: chainCursor(1)})
-	if !errors.Is(err, apperrors.ErrInvalidCursor) {
-		t.Fatalf("err = %v, want ErrInvalidCursor", err)
+	limit := uint64(1)
+	_, first, err := handler(ctx, nil, getRegistriesInput{Name: &name, Limit: &limit})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
 	}
-	if len(m.byNameReqs) != 0 {
-		t.Errorf("by-name calls = %d, want 0", len(m.byNameReqs))
+	if len(first.Registries) != 1 || first.Registries[0].ID != 1 {
+		t.Fatalf("first page = %+v, want id 1", first.Registries)
+	}
+	if first.Pagination == nil || first.Pagination.NextKey != chainCursor(3) || !first.TotalIsLowerBound {
+		t.Fatalf("first pagination = %+v lower=%v, want next_key=%q and a lower bound",
+			first.Pagination, first.TotalIsLowerBound, chainCursor(3))
+	}
+
+	_, second, err := handler(ctx, nil, getRegistriesInput{Name: &name, Key: first.Pagination.NextKey, Limit: &limit})
+	if err != nil {
+		t.Fatalf("cursor page: %v", err)
+	}
+	if len(second.Registries) != 1 || second.Registries[0].ID != 3 {
+		t.Fatalf("cursor page = %+v, want id 3", second.Registries)
+	}
+	if second.Pagination == nil || second.Pagination.NextKey != chainCursor(4) {
+		t.Fatalf("cursor pagination = %+v, want next_key=%q", second.Pagination, chainCursor(4))
+	}
+	got := m.byNameReqs[1].Pagination
+	wantKey := mustCursorBytes(t, chainCursor(3))
+	if got == nil || got.Offset != 0 || !bytes.Equal(got.Key, wantKey) {
+		t.Errorf("second request pagination = %+v, want key=cursor(3) offset 0", got)
+	}
+
+	_, last, err := handler(ctx, nil, getRegistriesInput{
+		Name: &name, Key: second.Pagination.NextKey, Limit: &limit,
+	})
+	if err != nil {
+		t.Fatalf("last page: %v", err)
+	}
+	if len(last.Registries) != 1 || last.Registries[0].ID != 4 {
+		t.Fatalf("last page = %+v, want id 4", last.Registries)
+	}
+	// limit equals the one remaining row, so the page is full and the offset
+	// heuristic still flags a lower bound. The cursor is the end signal:
+	// next_key is empty, so a cursor client stops.
+	if last.Pagination == nil || last.Pagination.NextKey != "" {
+		t.Fatalf("last pagination = %+v, want an empty next_key", last.Pagination)
+	}
+}
+
+// TestHandler_GetRegistries_ByName_CursorWalkDoesNotRestartAtOffset proves a
+// cursor page whose next_key is empty is the end of that walk, even when
+// the caller asked for more rows than the chain page holds. Resuming at
+// offset would restart at the beginning of the match set, because a key
+// is only accepted with offset 0.
+func TestHandler_GetRegistries_ByName_CursorWalkDoesNotRestartAtOffset(t *testing.T) {
+	const before = 50
+	n := registriesChainPageSize + before
+	regs := make([]anchor.Registry, n)
+	for i := range regs {
+		regs[i] = anchor.Registry{ID: uint64(i + 1), Name: "fund-documents"}
+	}
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{Registries: regs}}
+	handler := makeGetRegistriesHandler(m)
+
+	name := "fund-documents"
+	limit := uint64(n)
+	key := chainCursor(uint64(before + 1))
+	_, out, err := handler(ctx, nil, getRegistriesInput{Name: &name, Key: key, Limit: &limit})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(m.byNameReqs) != 1 {
+		t.Fatalf("by-name calls = %d, want 1 (empty next_key must not resume at offset)", len(m.byNameReqs))
+	}
+	if len(out.Registries) != registriesChainPageSize || out.Registries[0].ID != uint64(before+1) {
+		t.Fatalf("got %d rows starting at %d, want %d starting at %d",
+			len(out.Registries), out.Registries[0].ID, registriesChainPageSize, before+1)
+	}
+	seen := make(map[uint64]bool, len(out.Registries))
+	for _, r := range out.Registries {
+		if seen[r.ID] {
+			t.Fatalf("duplicate registry %d", r.ID)
+		}
+		seen[r.ID] = true
+	}
+	if out.Pagination == nil || out.Pagination.NextKey != "" || !out.TotalIsLowerBound {
+		t.Fatalf("pagination = %+v lower=%v, want an empty next_key and a lower bound",
+			out.Pagination, out.TotalIsLowerBound)
 	}
 }
 

@@ -141,10 +141,11 @@ const (
 )
 
 // GetRegistriesByNameRequest specifies a name-filtered registry page.
-// Only Pagination.Offset and Pagination.Limit are honored: the chain never
-// returns a cursor or a count for this query and ignores Reverse (probed
-// live 2026-10-06, chain 262144), so the response's Pagination is always
-// empty and callers page by offset.
+// Pagination.Offset and Pagination.Limit select the window. Pagination.Key
+// resumes from a prior response's NextKey (probed live 2026-10-26, testnet
+// 787111): an 8-byte big-endian registry id, empty when the match set
+// ended. The chain still reports Total 0 and rejects Key together with a
+// non-zero Offset. Reverse is ignored.
 type GetRegistriesByNameRequest struct {
 	Name       string            `json:"name"`
 	Match      RegistryNameMatch `json:"match"`

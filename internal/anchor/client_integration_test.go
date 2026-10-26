@@ -285,6 +285,57 @@ func TestIntegration_GetRegistriesByName(t *testing.T) {
 	}
 }
 
+// TestIntegration_GetRegistriesByName_Cursor pages a prefix with the
+// chain's next_key. Testnet 787111 started returning that cursor on
+// 2026-10-26; a full page must carry one, and passing it back must not
+// repeat the previous page. The cursor is empty on the last page.
+func TestIntegration_GetRegistriesByName_Cursor(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), findRegistryPageTimeout)
+	defer cancel()
+
+	first, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name: "a", Match: anchor.RegistryNamePrefix,
+		Pagination: &anchor.PageRequest{Limit: 2},
+	})
+	if errors.Is(err, apperrors.ErrRegistriesByNameUnsupported) {
+		t.Skip("node precompile predates registriesByName")
+	}
+	if err != nil {
+		t.Fatalf("GetRegistriesByName: %v", err)
+	}
+	if len(first.Registries) < 2 {
+		t.Skipf("prefix %q has %d matches; need a full page to observe next_key", "a", len(first.Registries))
+	}
+	if first.Pagination == nil || first.Pagination.NextKey == "" {
+		t.Fatal("a full by-name page returned no next_key")
+	}
+
+	key, err := first.Pagination.CursorBytes()
+	if err != nil {
+		t.Fatalf("decode next_key: %v", err)
+	}
+	second, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name: "a", Match: anchor.RegistryNamePrefix,
+		Pagination: &anchor.PageRequest{Key: key, Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistriesByName(key): %v", err)
+	}
+	if len(second.Registries) == 0 {
+		t.Fatal("cursor page was empty")
+	}
+	seen := map[uint64]bool{}
+	for _, r := range first.Registries {
+		seen[r.ID] = true
+	}
+	for _, r := range second.Registries {
+		if seen[r.ID] {
+			t.Errorf("cursor page repeated registry %d", r.ID)
+		}
+	}
+}
+
 func TestIntegration_GetRegistries(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()

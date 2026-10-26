@@ -48,18 +48,20 @@ func registerAnchorTools(
 			"from one cheap reverse peek), so a next page exists while " +
 			"offset + limit < total. pagination.next_key is the chain's cursor for the " +
 			"row after this page and is absent when the table ended; pass it back as " +
-			"key (with limit, offset omitted) to continue -- cheaper on the chain than " +
-			"offset. total_is_lower_bound=true means the peek failed and total is only " +
-			"the rows confirmed so far. " +
+			"key (with limit, offset omitted) and keep requesting until next_key is " +
+			"empty -- cheaper on the chain than offset. total_is_lower_bound=true " +
+			"means the peek failed and total is only the rows confirmed so far. " +
 			"With name (+ optional match): the chain's by-name index serves the " +
 			"offset/limit window of the matches directly. The chain reports no match " +
 			"count, so pagination.total is offset + rows returned. " +
-			"total_is_lower_bound (mirrored by name_match_truncated) is only the " +
-			"last-page check: true means this page is full and is not the last " +
-			"page, so request the next page at offset + limit even though that " +
-			"equals total. The flag is absent on the last page, which came back " +
-			"short, and total is then exact. No next_key is returned for a name " +
-			"filter. " +
+			"pagination.next_key is the chain's cursor for the next match; pass " +
+			"it back as key (same name and match, offset omitted) and keep " +
+			"requesting until next_key is empty. " +
+			"total_is_lower_bound (mirrored by name_match_truncated) is the " +
+			"offset-paging last-page check: true means this page is full and is " +
+			"not the last page, so request the next page at offset + limit even " +
+			"though that equals total. The flag is absent on the short page that " +
+			"ends the matches, and total is then exact. " +
 			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
@@ -106,7 +108,7 @@ type getRegistriesInput struct {
 	//nolint:lll // descriptive prose for agents
 	RegistryID *uint64 `json:"registry_id,omitempty" jsonschema:"DEPRECATED -- use anchor_get_registry instead. Returns the single registry with this ID and cannot be combined with name, match, offset, limit, or key. Omit it (or pass 0) to list registries."`
 	//nolint:lll // descriptive prose for agents
-	Name *string `json:"name,omitempty" jsonschema:"Filter the listing by registry name, served by the chain's by-name index; offset/limit page the matches. Cannot be combined with registry_id or key. Omit for an unfiltered listing."`
+	Name *string `json:"name,omitempty" jsonschema:"Filter the listing by registry name, served by the chain's by-name index. Page with offset/limit, or pass pagination.next_key back as key until next_key is empty. Cannot be combined with registry_id. Omit for an unfiltered listing."`
 	//nolint:lll // descriptive prose for agents
 	Match string `json:"match,omitempty" jsonschema:"Match mode for name: exact (default), prefix, suffix, or contains. Case-insensitive. Requires name."`
 	//nolint:lll // descriptive prose for agents
@@ -114,7 +116,7 @@ type getRegistriesInput struct {
 	//nolint:lll // descriptive prose for agents
 	Limit *uint64 `json:"limit,omitempty" jsonschema:"Page size for a listing (default 100; 0 also means the default). Must be omitted or 0 alongside registry_id. Any value works: the server asks the chain for exactly this many rows (in 200-row fetches when larger)."`
 	//nolint:lll // descriptive prose for agents
-	Key string `json:"key,omitempty" jsonschema:"Cursor for an unfiltered listing: pass the pagination.next_key from the previous page to continue where it left off. Cheaper on the chain than offset. Cannot be combined with a non-zero offset, name, match, or registry_id."`
+	Key string `json:"key,omitempty" jsonschema:"Cursor for a listing, with or without a name filter: pass pagination.next_key from the previous page and keep requesting until next_key is empty. Cheaper on the chain than offset. Cannot be combined with a non-zero offset or registry_id."`
 }
 
 type getRecordsInput struct {
@@ -198,13 +200,11 @@ func makeGetRegistriesHandler(
 		// chain's by-name index (handleRegistriesNameLookup), an unfiltered
 		// listing pages the registry table (handleRegistriesListing).
 		if input.Name != nil && *input.Name != "" {
-			if input.Key != "" {
-				// The cursor names a position in the unfiltered table; the
-				// by-name query has no cursor of its own. No position in one
-				// is meaningful in the other.
-				return nil, registriesOutput{}, apperrors.ErrInvalidCursor
+			cursor, err := listingCursor(input.Key, offset)
+			if err != nil {
+				return nil, registriesOutput{}, err
 			}
-			out, err := handleRegistriesNameLookup(ctx, c, *input.Name, input.Match, offset, limit)
+			out, err := handleRegistriesNameLookup(ctx, c, *input.Name, input.Match, cursor, offset, limit)
 			return nil, out, err
 		}
 
@@ -400,40 +400,63 @@ func handleRegistriesByID(
 
 // handleRegistriesNameLookup services the name-filtered branch of
 // anchor_get_registries through the precompile's on-chain name index
-// (registriesByName), asking for the caller's offset/limit window directly.
-// A limit above the chain's per-call cap chains offset-positioned fetches
-// until the window is filled or a fetch comes back short.
+// (registriesByName). The first fetch is positioned by the caller's cursor
+// (key) when given, else by offset. A limit above the chain's per-call cap
+// continues from the chain's next_key when it returned one. An
+// offset-positioned request whose node left next_key empty continues from
+// the next offset, so an older node can still fill that limit. A
+// caller-supplied key does not: an empty next_key ends that walk, and
+// resuming at offset would restart at the beginning of the match set.
 //
-// The chain reports neither a cursor nor a count for this query (probed
-// live 2026-10-06), so the end of the match set is known only from a short
-// fetch. pagination.total is therefore offset + rows: exact when the last
-// fetch was short, a lower bound (TotalIsLowerBound, mirrored by
-// NameMatchTruncated) when it was full and more matches may follow. A page
-// emptied by an offset past the end says nothing about the matches before
-// it, so it reports total 0 as a lower bound rather than echoing offset.
+// The chain reports no match count (total stays 0; probed live 2026-10-26,
+// testnet 787111). pagination.total is therefore offset + rows: exact when
+// the last fetch was short, a lower bound (TotalIsLowerBound, mirrored by
+// NameMatchTruncated) when it was full and more matches may follow.
+// pagination.next_key is the chain's cursor for the match after this page,
+// empty when the match set ended; a cursor client passes it back as key
+// until it is empty. A page emptied by an offset past the end, or by a
+// cursor past the last match, says nothing about the matches before it, so
+// it reports total 0 as a lower bound rather than echoing offset.
 func handleRegistriesNameLookup(
-	ctx context.Context, c anchor.Client, name, match string, offset, limit uint64,
+	ctx context.Context, c anchor.Client, name, match string, cursor []byte, offset, limit uint64,
 ) (registriesOutput, error) {
 	mode, err := registryNameMatch(match)
 	if err != nil {
 		return registriesOutput{}, err
 	}
+	fromCursor := len(cursor) > 0
 	// Non-nil so an empty page serializes as [] rather than null (L-3).
 	rows := make([]anchor.Registry, 0, min(limit, registriesChainPageSize))
 	lastFull := false
+	var next []byte
 	for page := 0; page < maxRegistriesChainPages && uint64(len(rows)) < limit; page++ {
 		want := min(limit-uint64(len(rows)), registriesChainPageSize)
+		req := &anchor.PageRequest{Limit: want}
+		if len(cursor) > 0 {
+			req.Key = cursor
+		} else {
+			req.Offset = offset + uint64(len(rows))
+		}
 		resp, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
 			Name:       name,
 			Match:      mode,
-			Pagination: &anchor.PageRequest{Offset: offset + uint64(len(rows)), Limit: want},
+			Pagination: req,
 		})
 		if err != nil {
 			return registriesOutput{}, err
 		}
 		rows = append(rows, resp.Registries...)
 		lastFull = uint64(len(resp.Registries)) >= want
-		if !lastFull {
+		if resp.Pagination != nil {
+			next, err = resp.Pagination.CursorBytes()
+			if err != nil {
+				return registriesOutput{}, err
+			}
+		} else {
+			next = nil
+		}
+		cursor = next
+		if nameLookupDone(lastFull, fromCursor, next) {
 			break
 		}
 	}
@@ -442,22 +465,36 @@ func handleRegistriesNameLookup(
 	}
 
 	total, lowerBound := offset+uint64(len(rows)), lastFull
-	pastEnd := len(rows) == 0 && offset > 0
-	if pastEnd {
+	// An empty page past the matches -- by offset or by cursor -- does not
+	// reveal how many matches came before it.
+	if len(rows) == 0 && (offset > 0 || fromCursor) {
 		total, lowerBound = 0, true
 	}
 	return registriesOutput{
 		GetRegistriesResponse: anchor.GetRegistriesResponse{
 			Registries: rows,
-			Pagination: &anchor.PageResponse{Total: total},
+			Pagination: &anchor.PageResponse{Total: total, NextKey: anchor.EncodeCursor(next)},
 		},
 		ContentTrust:       contentTrustNotice,
 		NameMatchTruncated: lowerBound,
 		TotalIsLowerBound:  lowerBound,
-		// Only an empty first page proves nothing matches; an offset past
+		// Only an empty first page proves nothing matches; a window past
 		// the end must not advise creating a registry that already exists.
-		NextActions: anchorGetRegistriesNext(len(rows) == 0 && offset == 0),
+		NextActions: anchorGetRegistriesNext(len(rows) == 0 && offset == 0 && !fromCursor),
 	}, nil
+}
+
+// nameLookupDone reports that a registriesByName walk should stop. A short
+// page always stops. A caller-supplied key also stops when the chain
+// returned no next_key: the caller's offset is 0 whenever a key was
+// supplied, so resuming there would restart at the beginning of the match
+// set. An offset-positioned request whose node left next_key empty keeps
+// going, which is how an older node fills a limit above its page cap.
+func nameLookupDone(lastFull, fromCursor bool, next []byte) bool {
+	if !lastFull {
+		return true
+	}
+	return fromCursor && len(next) == 0
 }
 
 // registryNameMatch maps the tool's match parameter onto the precompile's

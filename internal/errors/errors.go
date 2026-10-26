@@ -84,15 +84,15 @@ var (
 		"match requires name: the match mode only applies to a name lookup; " +
 			"supply name, or omit match for a paged listing")
 	// ErrInvalidCursor marks an anchor_get_registries call whose key
-	// (pagination cursor) cannot be used: it is not valid base64, or it was
-	// combined with a non-zero offset, a name filter, or registry_id. The
-	// cursor names a position in the unfiltered registry table, so it
-	// cannot be mixed with the other ways of naming one. The message is the
-	// client-facing text, surfaced verbatim (input class).
+	// (pagination cursor) cannot be used: it is not valid base64, it
+	// decodes to the wrong length, or it was combined with a non-zero
+	// offset. Key and offset name the same position. A name filter accepts
+	// the same cursor. The message is the client-facing text, surfaced
+	// verbatim (input class).
 	ErrInvalidCursor = errors.New(
-		"key must be the next_key from a previous unfiltered listing and " +
-			"cannot be combined with a non-zero offset, name, match, or " +
-			"registry_id: page with either key or offset, not both")
+		"key must be the next_key from a previous page of the same listing " +
+			"and cannot be combined with a non-zero offset: " +
+			"page with either key or offset, not both")
 	// ErrInvalidHexData marks calldata (or similar free-form hex input) that
 	// is not valid hex. Input class so the caller learns it is their bytes,
 	// not the node, that failed.
