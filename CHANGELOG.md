@@ -37,9 +37,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`anchor_get_registries` name filter pages with `pagination.next_key`.**
   Testnet `registriesByName` now returns the cursor it previously left
   empty. The tool passes that cursor through, and `key` resumes a
-  name-filtered page the same way it resumes an unfiltered one. A cursor
-  client, on either listing, keeps requesting with `next_key` as `key`
-  until `next_key` is empty. Offset paging is unchanged.
+  name-filtered page the same way it resumes an unfiltered one.
+  `pagination.next_key` is included only when the page filled `limit`
+  and another row exists, and is omitted on the last page. Passing that
+  cursor back can itself return the last page, which has no `next_key`.
+  Repeat `key` with the same `limit` and stop when `next_key` is absent.
+  Offset paging is unchanged.
 
 ## [1.0.0-rc21] - 2026-09-17
 
