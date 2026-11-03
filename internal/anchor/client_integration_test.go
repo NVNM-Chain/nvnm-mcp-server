@@ -308,7 +308,20 @@ func TestIntegration_GetRegistriesByName_Cursor(t *testing.T) {
 		t.Skipf("prefix %q has %d matches; need a full page to observe next_key", "a", len(first.Registries))
 	}
 	if first.Pagination == nil || first.Pagination.NextKey == "" {
-		t.Fatal("a full by-name page returned no next_key")
+		// A full page that is also the last page omits next_key. Two matches
+		// with limit 2 is that page; only a further match makes a missing
+		// cursor a failure.
+		probe, probeErr := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+			Name: "a", Match: anchor.RegistryNamePrefix,
+			Pagination: &anchor.PageRequest{Offset: 2, Limit: 1},
+		})
+		if probeErr != nil {
+			t.Fatalf("GetRegistriesByName(offset 2): %v", probeErr)
+		}
+		if len(probe.Registries) == 0 {
+			t.Skip("prefix \"a\" has exactly 2 matches; a full terminal page omits next_key")
+		}
+		t.Fatal("a full by-name page returned no next_key but another match exists")
 	}
 
 	key, err := first.Pagination.CursorBytes()

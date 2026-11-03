@@ -1683,6 +1683,76 @@ func TestHandler_GetRegistries_ByName_CursorWalkDoesNotRestartAtOffset(t *testin
 	}
 }
 
+// TestHandler_GetRegistries_ByName_ExactFullThenEmpty proves an offset
+// client stops on the empty page after a page that filled limit exactly.
+// That empty page keeps total_is_lower_bound, because total 0 is not the
+// match count, and registries being empty is the stop.
+func TestHandler_GetRegistries_ByName_ExactFullThenEmpty(t *testing.T) {
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{Registries: []anchor.Registry{
+		{ID: 1, Name: "fund-documents"},
+		{ID: 3, Name: "fund-documents"},
+	}}}
+	handler := makeGetRegistriesHandler(m)
+	name := "fund-documents"
+	limit := uint64(2)
+
+	_, full, err := handler(ctx, nil, getRegistriesInput{Name: &name, Limit: &limit})
+	if err != nil {
+		t.Fatalf("full page: %v", err)
+	}
+	if len(full.Registries) != 2 || full.Pagination == nil || full.Pagination.NextKey != "" || !full.TotalIsLowerBound {
+		t.Fatalf("full page = %+v pagination %+v lower=%v, want 2 rows, no next_key, lower bound",
+			full.Registries, full.Pagination, full.TotalIsLowerBound)
+	}
+
+	offset := uint64(2)
+	_, empty, err := handler(ctx, nil, getRegistriesInput{Name: &name, Offset: &offset, Limit: &limit})
+	if err != nil {
+		t.Fatalf("empty page: %v", err)
+	}
+	if len(empty.Registries) != 0 || empty.Pagination == nil || empty.Pagination.Total != 0 || !empty.TotalIsLowerBound {
+		t.Fatalf("empty page = %+v pagination %+v lower=%v, want no rows, total 0, lower bound",
+			empty.Registries, empty.Pagination, empty.TotalIsLowerBound)
+	}
+}
+
+// TestHandler_GetRegistries_ByName_ShortCursorPageKeepsLowerBound proves a
+// short page reached by key does not claim an exact match count. Three
+// matches and limit 2: the cursor page is the one remaining row, total is
+// that one row, and total_is_lower_bound stays set. next_key is empty.
+func TestHandler_GetRegistries_ByName_ShortCursorPageKeepsLowerBound(t *testing.T) {
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{Registries: []anchor.Registry{
+		{ID: 1, Name: "fund-documents"},
+		{ID: 3, Name: "fund-documents"},
+		{ID: 4, Name: "fund-documents"},
+	}}}
+	handler := makeGetRegistriesHandler(m)
+	name := "fund-documents"
+	limit := uint64(2)
+
+	_, first, err := handler(ctx, nil, getRegistriesInput{Name: &name, Limit: &limit})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if first.Pagination == nil || first.Pagination.NextKey == "" {
+		t.Fatalf("first pagination = %+v, want a next_key", first.Pagination)
+	}
+
+	_, last, err := handler(ctx, nil, getRegistriesInput{
+		Name: &name, Key: first.Pagination.NextKey, Limit: &limit,
+	})
+	if err != nil {
+		t.Fatalf("cursor page: %v", err)
+	}
+	if len(last.Registries) != 1 || last.Registries[0].ID != 4 {
+		t.Fatalf("cursor page = %+v, want id 4", last.Registries)
+	}
+	if last.Pagination == nil || last.Pagination.Total != 1 || last.Pagination.NextKey != "" || !last.TotalIsLowerBound {
+		t.Fatalf("cursor pagination = %+v lower=%v, want total 1, empty next_key, lower bound",
+			last.Pagination, last.TotalIsLowerBound)
+	}
+}
+
 func TestHandler_GetRegistries_ByName_InvalidMatchMode(t *testing.T) {
 	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{}}
 	handler := makeGetRegistriesHandler(m)

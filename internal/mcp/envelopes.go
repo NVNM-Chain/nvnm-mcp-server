@@ -69,15 +69,20 @@ type registryOutput struct {
 type registriesOutput struct {
 	anchor.GetRegistriesResponse
 	ContentTrust string `json:"content_trust" jsonschema:"Which fields are untrusted user content"`
-	// NameMatchTruncated mirrors TotalIsLowerBound on a name-filtered page:
-	// more matches may follow this one. Kept for callers that read it.
+	// NameMatchTruncated mirrors TotalIsLowerBound on a name-filtered page.
+	// On an offset page with rows, more matches may follow. An empty page
+	// still sets it and ends the walk. A cursor page sets it because total
+	// is only that page; next_key says whether to continue. Kept for
+	// callers that read it.
 	NameMatchTruncated bool `json:"name_match_truncated,omitempty"`
 	// TotalIsLowerBound is true when pagination.total is a floor, not an
 	// exact count. Unfiltered listing: the chain reported no count and the
 	// reverse peek for the highest ID failed, so total is only the rows
 	// confirmed so far. Name filter: the page came back full (or an offset
-	// landed past the end), and the chain reports no match count, so more
-	// matches may exist. A cursor client ignores this and stops when
+	// landed past the end), a cursor-positioned page (total is only this
+	// page's rows), or the chain reports no match count. An offset client
+	// continues only while the page has rows. An empty page ends that walk
+	// even though the flag stays set. A cursor client stops when
 	// pagination.next_key is absent. Absent (false) means total is exact.
 	TotalIsLowerBound bool         `json:"total_is_lower_bound,omitempty"`
 	NextActions       []NextAction `json:"next_actions,omitempty"`

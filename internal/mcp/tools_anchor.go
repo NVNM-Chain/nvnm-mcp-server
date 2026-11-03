@@ -60,11 +60,15 @@ func registerAnchorTools(
 			"back as key (same name, match, and limit; offset omitted). That " +
 			"next page may itself be the last one and then omits next_key; " +
 			"stop when next_key is absent. " +
-			"total_is_lower_bound (mirrored by name_match_truncated) is the " +
-			"offset-paging last-page check: true means this page is full and is " +
-			"not the last page, so request the next page at offset + limit even " +
-			"though that equals total. The flag is absent on the short page that " +
-			"ends the matches, and total is then exact. " +
+			"total_is_lower_bound (mirrored by name_match_truncated) means " +
+			"pagination.total is not the match count. On an offset page, true " +
+			"with rows in the page means request the next page at offset + limit " +
+			"even though that equals total. Stop when the page comes back empty, " +
+			"even if the flag is still true: that empty page ends the walk and " +
+			"its total is not the match count. The flag is absent on a short " +
+			"non-empty offset page, and total is then exact. A cursor page keeps " +
+			"the flag, including a short final page, because total counts only " +
+			"that page; stop when next_key is absent. " +
 			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
@@ -421,7 +425,11 @@ func handleRegistriesByID(
 // Passing it back can return that last page. A page emptied by an offset
 // past the end, or by a cursor past the last match, says nothing about
 // the matches before it, so it reports total 0 as a lower bound rather
-// than echoing offset.
+// than echoing offset. An offset client stops on that empty page; the
+// flag is not a request to continue. A cursor page that does return rows
+// also keeps the lower bound: offset is 0, so a short page's total is
+// only this response, not the match count. next_key is the completion
+// signal for that walk.
 func handleRegistriesNameLookup(
 	ctx context.Context, c anchor.Client, name, match string, cursor []byte, offset, limit uint64,
 ) (registriesOutput, error) {
@@ -469,12 +477,7 @@ func handleRegistriesNameLookup(
 		capRegistryFields(&rows[i])
 	}
 
-	total, lowerBound := offset+uint64(len(rows)), lastFull
-	// An empty page past the matches -- by offset or by cursor -- does not
-	// reveal how many matches came before it.
-	if len(rows) == 0 && (offset > 0 || fromCursor) {
-		total, lowerBound = 0, true
-	}
+	total, lowerBound := namePageTotal(offset, uint64(len(rows)), lastFull, fromCursor)
 	return registriesOutput{
 		GetRegistriesResponse: anchor.GetRegistriesResponse{
 			Registries: rows,
@@ -487,6 +490,23 @@ func handleRegistriesNameLookup(
 		// the end must not advise creating a registry that already exists.
 		NextActions: anchorGetRegistriesNext(len(rows) == 0 && offset == 0 && !fromCursor),
 	}, nil
+}
+
+// namePageTotal is pagination.total and total_is_lower_bound for one
+// name-filtered page. A full offset page is a lower bound. A short
+// non-empty offset page is exact. An empty page past the start does not
+// know the match count, so total is 0 and the flag stays set; the empty
+// page is still where an offset client stops. A cursor page that returns
+// rows keeps the flag, because total is only this response.
+func namePageTotal(offset, rows uint64, lastFull, fromCursor bool) (total uint64, lowerBound bool) {
+	total, lowerBound = offset+rows, lastFull
+	if fromCursor && rows > 0 {
+		lowerBound = true
+	}
+	if rows == 0 && (offset > 0 || fromCursor) {
+		return 0, true
+	}
+	return total, lowerBound
 }
 
 // nameLookupDone reports that a registriesByName walk should stop. A short

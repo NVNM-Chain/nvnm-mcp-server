@@ -43,6 +43,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cursor back can itself return the last page, which has no `next_key`.
   Repeat `key` with the same `limit` and stop when `next_key` is absent.
   Offset paging is unchanged.
+- **Name-filter page completion.** An offset client stops when a page
+  comes back empty, even though `total_is_lower_bound` stays set: an
+  exactly-full last page is followed by that empty page, and `total` 0
+  there is not the match count. A cursor page keeps the flag, including
+  a short final page, because `total` counts only that page. `next_key`
+  is what says the cursor walk is finished.
 
 ## [1.0.0-rc21] - 2026-09-17
 
