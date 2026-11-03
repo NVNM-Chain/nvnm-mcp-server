@@ -1,4 +1,4 @@
-FROM golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS builder
+FROM golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS builder
 
 ARG TARGETARCH
 
@@ -13,7 +13,7 @@ ARG VERSION=dev
 # Pin the toolchain to the version in go.mod for reproducible builds.
 # Without this, GOTOOLCHAIN=auto would silently download whatever
 # point release happens to be current at build time.
-ENV GOTOOLCHAIN=go1.26.6
+ENV GOTOOLCHAIN=go1.26.10
 
 WORKDIR /build
 

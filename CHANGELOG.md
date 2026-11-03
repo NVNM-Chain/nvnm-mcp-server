@@ -9,6 +9,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Bumped the Go toolchain to 1.26.10 (`go.mod` directive, Dockerfile base
+  image `golang:1.26.10-alpine` + digest, and `GOTOOLCHAIN`),
+  `golang.org/x/net` to v0.60.0, and the OpenTelemetry modules to
+  v1.45.0. `govulncheck` on Go 1.26.6 reported reachable advisories:
+  `GO-2026-6809` (crypto/x509), `GO-2026-6613` (net/http CONNECT
+  desynchronization), `GO-2026-6617` / `GO-2026-6612` (HTTP/2 server, in
+  both the standard library and `golang.org/x/net` v0.58.0), and
+  `GO-2026-6505` (OTLP trace exporter config logging, fixed in
+  OpenTelemetry v1.45.0). No application code changes.
+
 ### Changed
 
 - **Deployment hot-path e2e runs writes on mainnet as well as testnet.**
