@@ -245,7 +245,7 @@ other chains.
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh chain before running the anchor integration suite; it honors the same `NVNM_EVM_RPC_URL` / `NVNM_CHAIN_ID` variables and refuses to run if the RPC's chain ID does not match.
 
-Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-test-data` resolves `mcp-test-data` to its `registry_id` by scanning `GetRegistries` for an exact name match client-side (there is no on-chain by-name lookup); it reuses the existing registry if that scan finds one, otherwise it creates a new one. Every downstream call in the script, and in the anchor read tests, then operates on that numeric ID.
+Since the anchoring precompile keys registries by numeric ID only, `cmd/seed-test-data` resolves `mcp-test-data` to its `registry_id` by scanning `GetRegistries` for an exact name match client-side (the script predates the on-chain `registriesByName` index and still works on a node without it); it reuses the existing registry if that scan finds one, otherwise it creates a new one. Every downstream call in the script, and in the anchor read tests, then operates on that numeric ID.
 
 **`count_total` behavioral note.** The `nvnm-testnet-1` anchor precompile
 returns `pagination.total = 0` for `registries` and `records` queries even
