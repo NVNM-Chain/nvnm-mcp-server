@@ -220,6 +220,32 @@ func TestClassifyPrecompileRevert_Sentinels(t *testing.T) {
 			errors.New("desc = name exceeds max length: got=200 max=128"),
 			apperrors.ErrPrecompileValidation,
 		},
+		// The L1 contract's wording, verbatim from chain 787222 (2026-11-11).
+		{
+			"L1 registry miss classifies as registry not found",
+			errors.New("registries call failed: RPC error: 3 execution reverted: registry does not exist"),
+			apperrors.ErrRegistryNotFound,
+		},
+		{
+			"L1 record miss classifies as record not found",
+			errors.New("records call failed: RPC error: 3 execution reverted: record does not exist"),
+			apperrors.ErrRecordNotFound,
+		},
+		{
+			"L1 record miss scoped to a registry is still a record miss",
+			errors.New("estimate gas: RPC error: 3 execution reverted: record does not exist in registry"),
+			apperrors.ErrRecordNotFound,
+		},
+		{
+			"L1 empty uri classifies as input validation",
+			errors.New("estimate gas: RPC error: 3 execution reverted: uri cannot be empty"),
+			apperrors.ErrPrecompileValidation,
+		},
+		{
+			"L1 last-admin revoke classifies as input validation",
+			errors.New("estimate gas: RPC error: 3 execution reverted: cannot revoke the last registry admin"),
+			apperrors.ErrPrecompileValidation,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -301,6 +327,52 @@ func TestCallPrecompile_SurfacesCuratedReadReverts(t *testing.T) {
 		}
 		if !strings.Contains(apperrors.SafeForClient(err).Error(), "pass registry_id together with record_id") {
 			t.Errorf("client message lacks the remediation: %v", apperrors.SafeForClient(err))
+		}
+	})
+	// The L1 contract (chain 787222) reverts with its own wording for the
+	// same two misses. Each must reach the caller as the same clean
+	// not-found the L2 gives, on every path that can hit it.
+	const l1NoRegistry = "RPC error: 3 execution reverted: registry does not exist"
+	const l1NoRecord = "RPC error: 3 execution reverted: record does not exist"
+	t.Run("L1 missing registry is registry not found", func(t *testing.T) {
+		_, err := newClient(errors.New(l1NoRegistry)).GetRegistry(context.Background(), GetRegistryRequest{ID: 99999999})
+		if !errors.Is(err, apperrors.ErrRegistryNotFound) {
+			t.Fatalf("err = %v, want ErrRegistryNotFound", err)
+		}
+		if got := apperrors.SafeForClient(err).Error(); !strings.Contains(got, "registry not found") ||
+			strings.Contains(got, "execution reverted") {
+			t.Errorf("client sees %q", got)
+		}
+	})
+	t.Run("L1 missing registry on the deprecated by-id listing", func(t *testing.T) {
+		missing := uint64(99999999)
+		_, err := newClient(errors.New(l1NoRegistry)).GetRegistries(context.Background(),
+			GetRegistriesRequest{RegistryID: &missing})
+		if !errors.Is(err, apperrors.ErrRegistryNotFound) {
+			t.Fatalf("err = %v, want ErrRegistryNotFound", err)
+		}
+	})
+	t.Run("L1 missing record is record not found", func(t *testing.T) {
+		_, err := newClient(errors.New(l1NoRecord)).GetRecords(context.Background(),
+			GetRecordsRequest{RegistryID: &registryID, RecordID: &recordID})
+		if !errors.Is(err, apperrors.ErrRecordNotFound) {
+			t.Fatalf("err = %v, want ErrRecordNotFound", err)
+		}
+		if got := apperrors.SafeForClient(err).Error(); got != "record not found" {
+			t.Errorf("client sees %q, want %q", got, "record not found")
+		}
+	})
+	t.Run("L1 missing record while resolving the version to update", func(t *testing.T) {
+		_, err := newClient(errors.New(l1NoRecord)).PrepareUpdateRecordStatus(context.Background(),
+			PrepareUpdateRecordStatusRequest{
+				From: "0x1234567890abcdef1234567890abcdef12345678", RegistryID: registryID,
+				RecordID: recordID, Status: "Archived",
+			})
+		if !errors.Is(err, apperrors.ErrRecordNotFound) {
+			t.Fatalf("err = %v, want ErrRecordNotFound", err)
+		}
+		if got := apperrors.SafeForClient(err).Error(); got == "upstream operation failed" {
+			t.Error("missing record collapsed to the generic upstream failure")
 		}
 	})
 	t.Run("unrecognized RPC failure still collapses", func(t *testing.T) {

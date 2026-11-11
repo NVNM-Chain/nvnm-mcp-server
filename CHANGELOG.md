@@ -62,12 +62,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   returned page starts before the registry ID the cursor names. Page name
   matches with `offset` there. L2 behavior is unchanged: its name index
   honors both.
+- **Missing registries and records on the L1 are reported as not
+  found.** The L1 contract reverts with `registry does not exist` and
+  `record does not exist` where the L2 precompile says
+  `collections: not found`. `anchor_get_registry`, `anchor_get_records`,
+  and the prepare tools returned `upstream operation failed` for them;
+  they now return `registry not found` / `record not found`, as on the
+  L2. `uri cannot be empty` and `cannot revoke the last registry admin`
+  are surfaced as stated reasons.
 - **Prepared transactions use the node's priority fee when it is zero.**
   A zero `eth_maxPriorityFeePerGas` used to be replaced by a 1 gwei
   default. On the L1 that made every type-2 transaction pay 1.2 gwei
   against a 0.6 gwei base fee (observed on mined transactions). The tip is
   now the node's answer, including `0`; the default applies only when the
-  node gives no usable answer. The L2 testnet and mainnet report a
+  node gives no usable answer. Zero-tip type-2 transactions from this
+  server are mined on the L1 and pay the base fee exactly. The L2 testnet and mainnet report a
   non-zero tip and are unaffected.
 - **`evm_get_logs` range errors from a reth node are classified.**
   `query exceeds max block range …` and

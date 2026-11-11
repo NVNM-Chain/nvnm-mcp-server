@@ -8,8 +8,8 @@ The anchor contract is at `0x0000000000000000000000000000000000000A00`
 precompile 1.3.1.
 
 Send section 1 to the chain team. Section 2 is what this server does
-about each difference. Section 3 is what is still open before an L1
-deployment.
+about each difference. Section 3 is what was verified with a funded
+wallet and what is still open before an L1 deployment.
 
 ## 1. For the chain team
 
@@ -97,6 +97,7 @@ as a regression, including a mined type-2 write.
 | Exact-only name index (1.1) | `match=prefix/suffix/contains` returns `match mode not supported on this chain: its registry name index serves match=exact only; …`. It is not reported as a missing `registriesByName`, and no longer collapses to `upstream operation failed`. |
 | No name cursor (1.2) | Offset paging is unchanged and its stop rules hold. A `key` sent with `name` is rejected with `key is not supported with name on this chain: …`. Detection: the returned page starts below the registry id the cursor names. |
 | Zero priority fee | A prepared type-2 transaction takes the node's tip, including 0, with `max_fee_per_gas` at twice the gas price. Before, a 1 gwei default tip was added and mined L1 transactions paid 1.2 gwei on a 0.6 gwei base fee. `prefer_legacy_tx` still builds a type-0 transaction at the gas price. |
+| Not-found and validation wording | The L1 contract reverts with `registry does not exist`, `record does not exist`, `uri cannot be empty`, and `cannot revoke the last registry admin`. They map to the same `registry not found` / `record not found` answers the L2 gives, and to two stated validation reasons. Before, all four came back as `upstream operation failed`. |
 | reth log-range errors | `query exceeds max block range …` and `block range extends beyond current head block …` return the same two curated errors as on the L2. |
 | `anchor_get_registry` argument | `registry_id`, matching the other anchor tools. `id` still works. |
 | Live tests | Target chain from `NVNM_EVM_RPC_URL` / `NVNM_CHAIN_ID`. Built-in historical-tx fixture for `787222`. The prefix cursor test skips on an exact-only chain. Write tests skip, naming the wallet and the asset, when the signing wallet holds no fee asset. |
@@ -111,32 +112,33 @@ The other four `anchor_prepare_*` tools need a registry the signer
 administers, so on the L1 they are covered by the funded-wallet run in
 section 3.
 
-## 3. Still open
+## 3. Verification and what is still open
 
-### Needs a funded wallet
+### Verified with a funded wallet (2026-11-11)
 
-No transaction was broadcast on the L1 from this branch: the test
-wallet holds no pathUSD. What is established without one:
+The signing wallet was funded with 100 pathUSD and the three suites
+were run against the L1.
 
-- `eth_estimateGas` accepts the prepared call with
-  `maxPriorityFeePerGas` 0 and `maxFeePerGas` 1.2 gwei, and rejects a
-  fee cap below the base fee.
-- Type-2 transactions are mined on the L1 (35 of 41 sampled anchor
-  transactions), and type-0 transactions paying exactly the base fee
-  are mined, so a zero effective tip is included.
+- **Live integration suite** (`internal/evm`, `internal/anchor`,
+  `internal/mcp`, tag `integration`): every test passes. All five write
+  methods were mined: `addRegistry` (type-2 and type-0), `addRecord`,
+  `updateRecordStatus`, `grantRole`, `revokeRole` (registry-wide and
+  checksum-scoped). `TestIntegration_GetRegistriesByName_Cursor` skips
+  (exact-only name index).
+- **Deployment hot path** (`TestE2E_HotPath_AnchorDocument`, the test
+  `make test-e2e` runs, against a server built from this branch and
+  started with the two L1 variables): passes. Create a registry, anchor
+  a record, supersede it, read each back through MCP.
+- **Tool sweep** over the MCP endpoint: 87 checks across all 23 tools,
+  success and error paths, all pass.
 
-Not established: that a type-2 transaction with a zero tip from this
-server is mined. To close it, fund the signing wallet with pathUSD and
-run:
+A type-2 transaction with a zero tip is mined and pays exactly the base
+fee: the two hot-path transactions have `maxPriorityFeePerGas` 0 and
+`effectiveGasPrice` equal to the block's `baseFeePerGas` (0.6 gwei).
+Creating a registry costs about 0.0025 pathUSD.
 
-```sh
-NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev NVNM_CHAIN_ID=787222 \
-  make test-integration
-```
-
-then `make test-e2e` against a server started with the same two
-variables. If a zero-tip transaction is not included, `prefer_legacy_tx`
-is the working path today.
+The L2 testnet suite was re-run afterwards as the regression check and
+passes in full, writes included.
 
 ### Deployment
 
