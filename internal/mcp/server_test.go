@@ -307,6 +307,6 @@ func TestE2E_CallTool_MissingRegistryID(t *testing.T) {
 		t.Fatalf("CallTool: %v", err)
 	}
 	if !result.IsError {
-		t.Error("expected IsError=true when id is not provided")
+		t.Error("expected IsError=true when neither registry_id nor id is provided")
 	}
 }

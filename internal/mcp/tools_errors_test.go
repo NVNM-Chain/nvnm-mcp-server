@@ -177,7 +177,7 @@ func TestHandlers_ClientErrorsPropagate(t *testing.T) {
 			return err
 		}},
 		{"get_registry", func() error {
-			_, _, err := makeGetRegistryHandler(a)(ctx, nil, getRegistryInput{ID: regID})
+			_, _, err := makeGetRegistryHandler(a)(ctx, nil, getRegistryInput{RegistryID: &regID})
 			return err
 		}},
 		{"get_registries", func() error {

@@ -34,6 +34,38 @@ const (
 	rawReverted    = "RPC error: -32000 execution reverted: Ownable: caller is not the owner"
 )
 
+// reth's wording for the two eth_getLogs range rejections, verbatim from
+// chain 787222 (tempo/v1.16.0) on 2026-11-09.
+const (
+	rawRethRangeWide = "RPC error: -32602 query exceeds max block range 100000"
+	rawRethPastHead  = "RPC error: -32602 block range extends beyond current head block: requested 15608573, head 5608574"
+)
+
+func TestClassifyNodeRPCError_RethLogRangeRejections(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want error
+	}{
+		{"window wider than the node cap", rawRethRangeWide, apperrors.ErrLogRangeTooWide},
+		{"to_block past the head", rawRethPastHead, apperrors.ErrLogRangeInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyNodeRPCError(errors.New(tt.raw))
+			if !errors.Is(got, tt.want) {
+				t.Fatalf("classify(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+			msg := apperrors.SafeForClient(got).Error()
+			for _, leak := range []string{"100000", "15608573", "5608574", "-32602"} {
+				if strings.Contains(msg, leak) {
+					t.Errorf("client-facing message leaks node detail %q: %q", leak, msg)
+				}
+			}
+		})
+	}
+}
+
 // leakMarkers are fragments of raw node output that must never appear in a
 // curated, client-facing message.
 var leakMarkers = []string{"cosmossdk", "RPC error", "-32000", "got 286", "0x1111", "4005936", "3735928559", "Ownable"}

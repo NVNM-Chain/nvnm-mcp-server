@@ -449,10 +449,15 @@ func (c *client) buildLegacyUnsignedTx(
 }
 
 // buildDynamicFeeUnsignedTx constructs a type-2 DynamicFeeTx (EIP-1559).
-// Default since Phase 8.4. Fetches the miner tip via SuggestGasTipCap;
-// falls back to defaultPriorityFeeWei when the chain returns zero or
-// errors. MaxFeePerGas is computed as 2x SuggestGasPrice to give
-// headroom against base-fee inflation.
+// Default since Phase 8.4. Fetches the miner tip via SuggestGasTipCap.
+// MaxFeePerGas is computed as 2x SuggestGasPrice to give headroom against
+// base-fee inflation.
+//
+// The tip is the node's answer whenever it gives one, including zero: a
+// chain that charges no priority fee says so (observed 2026-11-09 on chain
+// 787222, where eth_maxPriorityFeePerGas is 0 and mined transactions pay
+// the base fee exactly), and adding a default tip there only overpays.
+// defaultPriorityFeeWei is the fallback for a node that does not answer.
 //
 // GasPrice in the response equals MaxFeePerGas so a legacy signer that
 // only knows about GasPrice still has a usable value to sign with.
@@ -464,7 +469,7 @@ func (c *client) buildDynamicFeeUnsignedTx(
 	dataHex, toHex, fromChecksummed string,
 ) (*UnsignedTransaction, error) {
 	tipCap, err := c.evmClient.SuggestGasTipCap(ctx)
-	if err != nil || tipCap == nil || tipCap.Sign() <= 0 {
+	if err != nil || tipCap == nil || tipCap.Sign() < 0 {
 		// Fall back rather than fail: a chain that doesn't implement
 		// eth_maxPriorityFeePerGas can still sign + broadcast type-2
 		// txs as long as the values we pick are above its minimum.

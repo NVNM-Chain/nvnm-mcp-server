@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,7 +29,8 @@ func registerAnchorTools(
 	addTool(srv, &mcp.Tool{
 		Name:  "anchor_get_registry",
 		Title: "Get Registry",
-		Description: "Fetch a single anchoring registry by its numeric ID. " +
+		Description: "Fetch a single anchoring registry by its numeric ID " +
+			"(registry_id; the older name id is still accepted). " +
 			"A registry is a logical container for anchored records. Registry " +
 			"names are not unique, so lookup here is by ID only -- to search by " +
 			"name, use anchor_get_registries with name=... " +
@@ -70,6 +72,10 @@ func registerAnchorTools(
 			"the flag, including a short final page, because total counts only " +
 			"that page; stop when next_key is absent. " +
 			"match is exact (default), prefix, suffix, or contains, all case-insensitive. " +
+			"A chain whose name index serves exact match only rejects the other " +
+			"three modes with an error saying so, and one whose name index has no " +
+			"cursor never returns next_key for a name filter and rejects key: " +
+			"page those name matches with offset. " +
 			"Registry names are caller-supplied, unverified, and not unique -- anyone " +
 			"can create a registry named identically to another, so a caller resolving " +
 			"by name must consider all matches (check creator/created_at to " +
@@ -101,8 +107,32 @@ func registerAnchorTools(
 
 type anchorInfoInput struct{}
 
+// getRegistryInput names the registry by registry_id, the parameter every
+// other anchor tool uses. id is the original name and still works. Both
+// are optional in the generated schema because the SDK cannot express
+// "exactly one of"; the handler enforces it.
 type getRegistryInput struct {
-	ID uint64 `json:"id" jsonschema:"Registry numeric ID"`
+	//nolint:lll // descriptive prose for agents
+	RegistryID *uint64 `json:"registry_id,omitempty" jsonschema:"Registry numeric ID, 1 or greater. Required unless the deprecated id is used."`
+	//nolint:lll // descriptive prose for agents
+	ID *uint64 `json:"id,omitempty" jsonschema:"DEPRECATED alias for registry_id, kept for existing callers. Pass one of the two, not both with different values."`
+}
+
+// registryID resolves the registry a call names. Either parameter alone is
+// accepted; both are accepted only when they agree.
+func (in getRegistryInput) registryID() (uint64, error) {
+	switch {
+	case in.RegistryID == nil && in.ID == nil:
+		return 0, fmt.Errorf("registry_id: %w", apperrors.ErrMissingRequired)
+	case in.RegistryID != nil && in.ID != nil && *in.RegistryID != *in.ID:
+		return 0, fmt.Errorf(
+			"registry_id and id name different registries; pass registry_id only: %w",
+			apperrors.ErrInvalidRegistryID)
+	case in.RegistryID != nil:
+		return *in.RegistryID, nil
+	default:
+		return *in.ID, nil
+	}
 }
 
 // getRegistriesInput carries both modes of anchor_get_registries. Every
@@ -160,15 +190,20 @@ func makeGetRegistryHandler(
 		if err := requireRole(ctx, "reader", "writer", "admin", "automation"); err != nil {
 			return nil, registryOutput{}, err
 		}
-		if input.ID == 0 {
+		id, err := input.registryID()
+		if err != nil {
+			return nil, registryOutput{}, err
+		}
+		if id == 0 {
 			// Registry IDs start at 1; 0 is a present-but-invalid value,
-			// not a missing one (the schema already rejects an absent id).
-			return nil, registryOutput{},
-				fmt.Errorf("id must be 1 or greater (registry IDs start at 1): %w", apperrors.ErrInvalidRegistryID)
+			// not a missing one.
+			return nil, registryOutput{}, fmt.Errorf(
+				"registry_id must be 1 or greater (registry IDs start at 1): %w",
+				apperrors.ErrInvalidRegistryID)
 		}
 
 		registry, err := c.GetRegistry(ctx, anchor.GetRegistryRequest{
-			ID: input.ID,
+			ID: id,
 		})
 		if err != nil {
 			return nil, registryOutput{}, err
@@ -458,6 +493,9 @@ func handleRegistriesNameLookup(
 		if err != nil {
 			return registriesOutput{}, err
 		}
+		if page == 0 && fromCursor && cursorIgnored(cursor, resp.Registries) {
+			return registriesOutput{}, apperrors.ErrNameCursorUnsupported
+		}
 		rows = append(rows, resp.Registries...)
 		lastFull = uint64(len(resp.Registries)) >= want
 		if resp.Pagination != nil {
@@ -507,6 +545,23 @@ func namePageTotal(offset, rows uint64, lastFull, fromCursor bool) (total uint64
 		return 0, true
 	}
 	return total, lowerBound
+}
+
+// cursorIgnored reports that the chain answered a keyed name lookup as if
+// no key had been sent. The cursor is the registry ID the page starts at
+// and the name index returns matches in ascending ID order, so a page
+// that honored it cannot begin below that ID. A name index without cursor
+// support (observed 2026-11-09 on chain 787222: a key for ID 2185 still
+// returned ID 2184) drops the key and returns the first matches again,
+// which would read as a continuation and repeat rows without end.
+//
+// A cursor at or before the first match is indistinguishable from an
+// honored one and is also harmless: both answers are the same page.
+func cursorIgnored(cursor []byte, rows []anchor.Registry) bool {
+	if len(cursor) != registryCursorLen || len(rows) == 0 {
+		return false
+	}
+	return rows[0].ID < binary.BigEndian.Uint64(cursor)
 }
 
 // nameLookupDone reports that a registriesByName walk should stop. A short

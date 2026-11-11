@@ -828,7 +828,7 @@ func TestHandler_GetRegistry_ByID(t *testing.T) {
 	m := &mockAnchor{registry: &anchor.Registry{ID: 42, Name: "by-id"}}
 	handler := makeGetRegistryHandler(m)
 
-	_, out, err := handler(ctx, nil, getRegistryInput{ID: 42})
+	_, out, err := handler(ctx, nil, getRegistryInput{RegistryID: u64p(42)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -840,12 +840,14 @@ func TestHandler_GetRegistry_ByID(t *testing.T) {
 func TestHandler_GetRegistry_MissingID(t *testing.T) {
 	handler := makeGetRegistryHandler(&mockAnchor{})
 
-	_, _, err := handler(ctx, nil, getRegistryInput{})
+	_, _, err := handler(ctx, nil, getRegistryInput{RegistryID: u64p(0)})
 	if err == nil {
-		t.Fatal("expected error when id is zero")
+		t.Fatal("expected error when registry_id is zero")
 	}
-	// id=0 is present but invalid (IDs start at 1); an absent id is already
-	// a schema rejection, so "missing" was the wrong word (M-2).
+	// registry_id=0 is present but invalid (IDs start at 1), so "missing"
+	// is the wrong word for it (M-2). A call with neither registry_id nor
+	// the deprecated id is the missing case; see
+	// TestGetRegistry_RegistryIDAndAlias.
 	if !errors.Is(err, apperrors.ErrInvalidRegistryID) {
 		t.Errorf("error = %v, want ErrInvalidRegistryID", err)
 	}

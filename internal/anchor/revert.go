@@ -85,6 +85,16 @@ var safePrecompileReverts = []struct {
 		apperrors.ErrPrecompileValidation,
 	},
 	{
+		// Observed 2026-11-09 on chain 787222 for registriesByName with
+		// matchMode 2/3/4: "execution reverted: only exact match is on
+		// chain; search prefix/suffix/contains off chain". The method
+		// exists and exact match works, so this is not the "method
+		// missing" case (ErrRegistriesByNameUnsupported).
+		"only exact match is on chain",
+		apperrors.ErrMatchModeUnsupported.Error(),
+		apperrors.ErrMatchModeUnsupported,
+	},
+	{
 		// On-chain role denial. Deliberately worded to distinguish it from
 		// this server's own API-key RBAC denial, which is about the caller's
 		// credential rather than the signing address's registry role.
