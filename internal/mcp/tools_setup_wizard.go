@@ -6,7 +6,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -42,9 +41,12 @@ const (
 )
 
 type walletSnapshot struct {
-	Address          string `json:"address"`
-	BalanceWei       string `json:"balance_wei"`
-	BalanceHuman     string `json:"balance_human"`
+	Address      string `json:"address"`
+	BalanceWei   string `json:"balance_wei"`
+	BalanceHuman string `json:"balance_human"`
+	// BalanceDecimals and FeeTokenAddress: see walletStatusOutput.
+	BalanceDecimals  int    `json:"balance_decimals"`
+	FeeTokenAddress  string `json:"fee_token_address,omitempty"`
 	Nonce            uint64 `json:"nonce"`
 	HasSentTx        bool   `json:"has_sent_tx"`
 	ChainID          int64  `json:"chain_id"`
@@ -70,6 +72,7 @@ type setupWizardOutput struct {
 	Wallet             *walletSnapshot `json:"wallet,omitempty"`
 	SampleCode         []sampleCode    `json:"sample_code,omitempty"`
 	BridgeURL          string          `json:"bridge_url,omitempty"`
+	FaucetURL          string          `json:"faucet_url,omitempty"`
 	WalletGeneratorURL string          `json:"wallet_generator_url,omitempty"`
 	NextActions        []NextAction    `json:"next_actions,omitempty"`
 }
@@ -95,7 +98,8 @@ func makeSetupWizardHandler(
 	c evm.Client,
 	cfg *config.Config,
 ) mcp.ToolHandlerFor[setupWizardInput, setupWizardOutput] {
-	naming := config.NamingFor(cfg.ChainEnvironment)
+	naming := cfg.TokenNaming()
+	gasToken := cfg.GasToken()
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input setupWizardInput,
 	) (*mcp.CallToolResult, setupWizardOutput, error) {
@@ -112,7 +116,7 @@ func makeSetupWizardHandler(
 			return nil, setupWizardOutput{}, err
 		}
 
-		balance, err := c.BalanceAt(ctx, addr, nil)
+		balance, err := feeBalanceAt(ctx, c, cfg, addr, nil)
 		if err != nil {
 			return nil, setupWizardOutput{}, fmt.Errorf("get balance: %w", err)
 		}
@@ -121,17 +125,13 @@ func makeSetupWizardHandler(
 			return nil, setupWizardOutput{}, fmt.Errorf("get nonce: %w", err)
 		}
 
-		hasFunds := false
-		if balance != nil {
-			b, ok := new(big.Int).SetString(balance.Wei, 10)
-			if ok && b.Sign() > 0 {
-				hasFunds = true
-			}
-		}
+		hasFunds := balanceIsPositive(balance)
 		hasSentTx := nonce > 0
 
 		snap := &walletSnapshot{
 			Address:          evm.AddressHex(addr),
+			BalanceDecimals:  gasToken.Decimals,
+			FeeTokenAddress:  gasToken.Address,
 			Nonce:            nonce,
 			HasSentTx:        hasSentTx,
 			ChainID:          cfg.ChainID,
@@ -168,13 +168,14 @@ func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWiz
 		"(2) the language-specific samples below, which generate a key in " +
 		"a local runtime and IMMEDIATELY hand it to a secrets mechanism -- " +
 		"they never print the private key to stdout. Once you have an " +
-		"address, fund it with " + naming.Wrapped + " (see `bridge_url`) " +
+		"address, fund it with " + naming.Wrapped + " (see " + fundingFieldNames(cfg) + ") " +
 		"and call this wizard again with the address."
 	return setupWizardOutput{
 		State:              WizardStateNeedsWallet,
 		Message:            msg,
 		SampleCode:         needsWalletSamples(),
 		BridgeURL:          cfg.BridgeURL,
+		FaucetURL:          cfg.FaucetURL,
 		WalletGeneratorURL: cfg.WalletGeneratorURL,
 		NextActions: []NextAction{
 			{
@@ -195,14 +196,20 @@ func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWiz
 func unfundedResponse(cfg *config.Config, snap *walletSnapshot) setupWizardOutput {
 	msg := "Wallet has no balance. Fund it with " + snap.TokenWrapped +
 		" via the bridge, then re-call this wizard."
-	if cfg.BridgeURL != "" {
-		msg += " Bridge: " + cfg.BridgeURL
+	if cfg.FeeToken.IsContract() {
+		// No native coin and no bridge to name: the wallet needs the fee
+		// token itself, from whatever source this deployment points at.
+		msg = "Wallet holds no " + snap.TokenWrapped + ", the token this chain " +
+			"charges fees in (it has no native coin). Fund the address with " +
+			snap.TokenWrapped + ", then re-call this wizard."
 	}
+	msg += fundingURLs(cfg)
 	return setupWizardOutput{
 		State:     WizardStateUnfunded,
 		Message:   msg,
 		Wallet:    snap,
 		BridgeURL: cfg.BridgeURL,
+		FaucetURL: cfg.FaucetURL,
 		NextActions: []NextAction{
 			{Tool: "nvnm_setup_wizard", Hint: "Re-call after funding; the wizard will detect the new balance automatically."},
 			{Tool: "wallet_status", Hint: "Equivalent one-shot snapshot if you don't need the prose guidance."},

@@ -68,11 +68,15 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_balance",
 		Title: "Get Balance",
-		Description: "Returns the balance of an address. balance_human is the " +
-			"amount in this chain's gas token (see token_wrapped); wei is the raw " +
-			"integer. The `ether` field is a legacy alias for the same decimal " +
-			"amount and is NOT denominated in ether -- prefer balance_human when " +
-			"reporting a balance. Optionally specify a block number or the tag " +
+		Description: "Returns the balance of an address in the asset this chain " +
+			"charges fees in. balance_human is the amount in that asset (see " +
+			"token_wrapped); wei is the raw integer at balance_decimals (18 for " +
+			"a native coin). When fee_token_address is present the chain has no " +
+			"native coin and the amount is that token's balanceOf, at the " +
+			"token's own scale. The `ether` field is a legacy alias for the same " +
+			"decimal amount and is NOT denominated in ether -- prefer " +
+			"balance_human when reporting a balance. Optionally specify a " +
+			"block number or the tag " +
 			"\"latest\"/\"earliest\".",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBalanceHandler(evmClient, cfg))
@@ -293,16 +297,18 @@ func makeGetBalanceHandler(
 		if err != nil {
 			return nil, balanceOutput{}, err
 		}
-		balance, err := c.BalanceAt(ctx, addr, input.BlockNum.bigInt())
+		balance, err := feeBalanceAt(ctx, c, cfg, addr, input.BlockNum.bigInt())
 		if err != nil {
 			return nil, balanceOutput{},
 				fmt.Errorf("failed to get balance: %w", err)
 		}
-		naming := config.NamingFor(cfg.ChainEnvironment)
+		gasToken := cfg.GasToken()
 		return nil, balanceOutput{
 			NormalizedBalance: *balance,
-			BalanceHuman:      balance.Ether + " " + naming.Wrapped,
-			TokenWrapped:      naming.Wrapped,
+			BalanceHuman:      balance.Ether + " " + gasToken.Symbol,
+			TokenWrapped:      gasToken.Symbol,
+			BalanceDecimals:   gasToken.Decimals,
+			FeeTokenAddress:   gasToken.Address,
 			NextActions:       evmGetBalanceNext(),
 		}, nil
 	}

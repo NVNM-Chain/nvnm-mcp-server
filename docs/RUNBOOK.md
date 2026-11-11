@@ -208,10 +208,14 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NVNM_CHAIN_ENVIRONMENT` | inferred from `NVNM_CHAIN_ID` | `testnet` or `mainnet`. Selects env-aware token naming (`mantraUSD`/`wmantraUSD` vs `mmUSD`/`wmmUSD`) for onboarding-tool responses. Inference falls back to `testnet` for chain IDs the server does not recognize (787111 → testnet; 1611 → mainnet). |
+| `NVNM_CHAIN_ENVIRONMENT` | inferred from `NVNM_CHAIN_ID` | `testnet` or `mainnet`. Selects env-aware token naming (`mantraUSD`/`wmantraUSD` vs `mmUSD`/`wmmUSD`) for onboarding-tool responses. Inferred for the recognized chain IDs (787111 → testnet; 1611 → mainnet; 787222, the L1 devnet → testnet); any other chain ID must set it explicitly or the server refuses to start. On a fee-token chain both token names are the fee token (`pathUSD`). |
 | `NVNM_DOCS_URL` | _(empty)_ | Operator-facing docs URL surfaced in onboarding-tool responses (e.g., the wizard's "where to learn more" hint). Optional. |
 | `NVNM_EXPLORER_URL` | _(empty)_ | Block-explorer URL surfaced to agents in onboarding-tool responses. Optional. |
 | `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
+| `NVNM_FAUCET_URL` | _(empty)_ | Faucet URL surfaced as `faucet_url` by `nvnm_overview` and the wizard's `needs_wallet` / `unfunded` states. Optional. |
+| `NVNM_FEE_TOKEN_ADDRESS` | built in for chain `787222` (`0x20c0…0000`), else _(empty)_ | Token contract fees are charged in, for a chain with no native coin (the L1). When set or built in, balances come from this token's `balanceOf`; `eth_getBalance` is not read. Empty means the native coin. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222` | Symbol for the fee token. Required together with the address and decimals on a chain with no built-in fee token; the server refuses to start on a partial description. |
+| `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222` | Fee token decimals (`0`-`36`). Same rule as the symbol. |
 | `NVNM_WALLET_GENERATOR_URL` | `https://wallet.nvnmchain.io` | Browser-hosted wallet generator page surfaced to the wizard's `needs_wallet` state. Default points at the canonical Inveniam-hosted instance (`NVNM-Chain/nvnm-wallet-page`); operators self-hosting the wallet page can override. |
 | `NVNM_KEY_REQUEST_ENABLED` | `false` | Opt-in flag for the public self-serve API-key request endpoint (`POST /api/v1/keys/request`). When `true`, `NVNM_KEY_PENDING_FILE` is required. Phase 11 L3 / RD3. |
 | `NVNM_KEY_PENDING_FILE` | _(empty)_ | Path to the on-disk JSON store of pending key requests. Required when `NVNM_KEY_REQUEST_ENABLED=true`. Operator-controlled persistence; mount on a durable filesystem. |

@@ -55,6 +55,7 @@ func TestInferEnvironmentFromChainID(t *testing.T) {
 		want    ChainEnvironment
 	}{
 		{787111, EnvTestnet},
+		{787222, EnvTestnet}, // L1 devnet (nvnm-tempo-devnet-1)
 		{1611, EnvMainnet},
 		{58887, ""}, // old manveniam-1 testnet -- not recognized by inference
 		{0, ""},

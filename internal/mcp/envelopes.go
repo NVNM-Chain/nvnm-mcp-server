@@ -45,9 +45,16 @@ type balanceOutput struct {
 	// chain -- gas is paid in wmantraUSD (testnet) / wmmUSD (mainnet), never
 	// ether -- and an agent reading `ether` will report the wrong unit to a
 	// user. `ether` is retained for wire compatibility; prefer these.
-	BalanceHuman string       `json:"balance_human"`
-	TokenWrapped string       `json:"token_wrapped"`
-	NextActions  []NextAction `json:"next_actions,omitempty"`
+	BalanceHuman string `json:"balance_human"`
+	TokenWrapped string `json:"token_wrapped"`
+	// BalanceDecimals is the scale of `wei`: 18 for a native coin, the
+	// token's own decimals on a chain that charges fees in a token (where
+	// `wei` and `ether` are that token's balanceOf, not wei or ether).
+	BalanceDecimals int `json:"balance_decimals"`
+	// FeeTokenAddress is the token contract the balance was read from.
+	// Omitted on a chain that charges fees in its native coin.
+	FeeTokenAddress string       `json:"fee_token_address,omitempty"`
+	NextActions     []NextAction `json:"next_actions,omitempty"`
 }
 
 type codeOutput struct {

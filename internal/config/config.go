@@ -309,13 +309,20 @@ type Config struct {
 	// does not recognize fall through to EnvTestnet.
 	ChainEnvironment ChainEnvironment
 
-	// DocsURL, ExplorerURL, BridgeURL are operator-facing URLs surfaced
-	// in onboarding-tool responses. Optional; empty strings are valid
-	// (consumers handle the empty case gracefully). Set via NVNM_DOCS_URL,
-	// NVNM_EXPLORER_URL, NVNM_BRIDGE_URL.
+	// FeeToken is the token contract fees are charged in, on a chain with
+	// no native coin (the L1). The zero value means the native coin. Built
+	// in for known chains, else NVNM_FEE_TOKEN_ADDRESS / _SYMBOL /
+	// _DECIMALS. Read it through GasToken and TokenNaming.
+	FeeToken FeeToken
+
+	// DocsURL, ExplorerURL, BridgeURL, FaucetURL are operator-facing URLs
+	// surfaced in onboarding-tool responses. Optional; empty strings are
+	// valid (consumers handle the empty case gracefully). Set via
+	// NVNM_DOCS_URL, NVNM_EXPLORER_URL, NVNM_BRIDGE_URL, NVNM_FAUCET_URL.
 	DocsURL     string
 	ExplorerURL string
 	BridgeURL   string
+	FaucetURL   string
 
 	// WalletGeneratorURL points the setup wizard's needs_wallet response
 	// at the browser-hosted wallet generator page (a sibling repo at
@@ -508,17 +515,11 @@ func Load() (*Config, error) {
 	}
 	cfg.JWTClockSkew = clockSkew
 
-	cfg.loadChainEnvironment()
-	cfg.DocsURL = os.Getenv("NVNM_DOCS_URL")
-	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
-	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
-	cfg.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
-
-	if err := cfg.loadKeyRequestConfig(); err != nil {
+	if err := cfg.loadChainProfile(); err != nil {
 		return nil, err
 	}
 
-	if err := cfg.loadSMTPConfig(); err != nil {
+	if err := cfg.loadKeyDeliveryConfig(); err != nil {
 		return nil, err
 	}
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
@@ -647,6 +648,36 @@ func (c *Config) loadResilienceConfig() error {
 	}
 	c.CircuitBreakerTimeout = breakerTimeout
 
+	return nil
+}
+
+// loadKeyDeliveryConfig loads the self-serve key-request flow and the SMTP
+// relay it mails approved keys through. The two are validated together
+// (validateKeyRequestEmail), and loading them through one call keeps
+// Load() below the gocyclo threshold.
+func (c *Config) loadKeyDeliveryConfig() error {
+	if err := c.loadKeyRequestConfig(); err != nil {
+		return err
+	}
+	return c.loadSMTPConfig()
+}
+
+// loadChainProfile resolves everything that describes the chain to a
+// caller: its environment, the asset it charges fees in, and the
+// operator-facing URLs the onboarding tools hand out. Extracted from
+// Load() to keep its cyclomatic complexity below the gocyclo threshold.
+func (c *Config) loadChainProfile() error {
+	c.loadChainEnvironment()
+	feeToken, err := FeeTokenFromEnv(os.Getenv, c.ChainID)
+	if err != nil {
+		return err
+	}
+	c.FeeToken = feeToken
+	c.DocsURL = os.Getenv("NVNM_DOCS_URL")
+	c.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
+	c.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
+	c.FaucetURL = os.Getenv("NVNM_FAUCET_URL")
+	c.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
 	return nil
 }
 

@@ -249,8 +249,21 @@ All configuration is via environment variables. No config files required.
 | Variable | Description |
 |---|---|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `NVNM_CHAIN_ID` | Expected chain ID (`787111` for NVNM testnet, `1611` for mainnet) |
-| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Required to disambiguate the per-instance chain pin; legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
+| `NVNM_CHAIN_ID` | Expected chain ID (`787111` for NVNM testnet, `1611` for mainnet, `787222` for the L1 devnet) |
+| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Inferred for the three chain IDs above; required for any other chain. Legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
+
+### Fee asset (L1)
+
+The L2 charges fees in its native coin. The L1 has no native coin: fees are charged in a token contract, and `eth_getBalance` is not a balance there. On chain `787222` the server knows the fee token and needs no extra configuration. The variables below describe it for any other such chain, or override a built-in value.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else _(none)_ | Token contract fees are charged in. When set (or built in), `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read this token's `balanceOf` instead of the native balance. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222` | Symbol shown for that token. Required with the address on a chain that has no built-in fee token. |
+| `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222` | The token's decimals, `0`-`36`. Required with the address on a chain that has no built-in fee token. |
+| `NVNM_FAUCET_URL` | _(none)_ | Faucet URL returned by `nvnm_overview` and the setup wizard as `faucet_url`. Optional, any chain. |
+
+A partly described fee token (an address without a symbol or decimals, or the reverse) stops the server at startup.
 
 ### Authentication (HTTP transport)
 

@@ -29,15 +29,19 @@ type canonicalJourneyStep struct {
 }
 
 type overviewOutput struct {
-	ChainName        string                 `json:"chain_name"`
-	ChainEnvironment string                 `json:"chain_environment"`
-	ChainID          int64                  `json:"chain_id"`
-	AnchorPrecompile string                 `json:"anchor_precompile"`
-	ExplorerURL      string                 `json:"explorer_url,omitempty"`
-	DocsURL          string                 `json:"docs_url,omitempty"`
-	BridgeURL        string                 `json:"bridge_url,omitempty"`
-	TokenNative      string                 `json:"token_native"`
-	TokenWrapped     string                 `json:"token_wrapped"`
+	ChainName        string `json:"chain_name"`
+	ChainEnvironment string `json:"chain_environment"`
+	ChainID          int64  `json:"chain_id"`
+	AnchorPrecompile string `json:"anchor_precompile"`
+	ExplorerURL      string `json:"explorer_url,omitempty"`
+	DocsURL          string `json:"docs_url,omitempty"`
+	BridgeURL        string `json:"bridge_url,omitempty"`
+	FaucetURL        string `json:"faucet_url,omitempty"`
+	TokenNative      string `json:"token_native"`
+	TokenWrapped     string `json:"token_wrapped"`
+	// FeeTokenAddress is the token contract fees are charged in. Omitted
+	// on a chain that charges fees in its native coin.
+	FeeTokenAddress  string                 `json:"fee_token_address,omitempty"`
 	WhatIsNVNMChain  string                 `json:"what_is_nvnm_chain"`
 	PrivacyByDesign  string                 `json:"privacy_by_design"`
 	Prereqs          []string               `json:"prereqs"`
@@ -51,7 +55,11 @@ type overviewOutput struct {
 // shapes what `wallet_status` and the wizard can and cannot tell the
 // agent about the wallet's history on chain.
 const whatIsNVNMChainText = "NVNM Chain is an EVM L2 on MANTRA Chain " +
-	"used as a neutral notary for document anchoring. It stores only " +
+	notaryText
+
+// notaryText is the part of the chain description that holds on every
+// deployment: what is anchored and what an observer can see.
+const notaryText = "used as a neutral notary for document anchoring. It stores only " +
 	"one-way hash fingerprints (SHA-256) of documents, never the " +
 	"documents themselves. Anchor writes are publicly observable: " +
 	"add_record logs the SHA-256 hash and add_registry logs the " +
@@ -59,6 +67,20 @@ const whatIsNVNMChainText = "NVNM Chain is an EVM L2 on MANTRA Chain " +
 	"underlying document is not derivable -- counterparties exchange " +
 	"the file off-band and verify by recomputing the hash; encode or " +
 	"salt sensitive registry names before anchoring."
+
+// whatIsNVNMChain is the chain description for this deployment. A chain
+// that charges fees in a token contract is the L1: it is not an L2 on
+// MANTRA Chain, and a reader has to know there is no native coin before
+// any balance in this server's output makes sense.
+func whatIsNVNMChain(cfg *config.Config) string {
+	if !cfg.FeeToken.IsContract() {
+		return whatIsNVNMChainText
+	}
+	return "NVNM Chain is an EVM L1 " + notaryText + " This chain has no " +
+		"native coin: transaction fees are charged in the " + cfg.FeeToken.Symbol +
+		" token (fee_token_address), so that is the balance a wallet needs " +
+		"and the one this server reports."
+}
 
 // privacyByDesignText states the consequence for what this server can
 // and cannot do for an agent. The wizard message in funded_active
@@ -143,8 +165,19 @@ func prereqsFor(cfg *config.Config) []string {
 			"the anchor precompile. Your wallet signature is the only identity the " +
 			"server sees. Per-signer volume quotas and a signer blacklist apply."
 	}
-	return append(append([]string(nil), basePrereqs...), broadcast)
+	prereqs := append([]string(nil), basePrereqs...)
+	if cfg.FeeToken.IsContract() {
+		prereqs[fundingPrereqIndex] = "That wallet funded with " + cfg.FeeToken.Symbol +
+			", the token this chain charges fees in (it has no native coin). See " +
+			fundingFieldNames(cfg) + " for the funding flow."
+	}
+	return append(prereqs, broadcast)
 }
+
+// fundingPrereqIndex is the position in basePrereqs of the "wallet funded
+// with the gas token" line, the one prerequisite whose wording depends on
+// what the chain charges fees in.
+const fundingPrereqIndex = 1
 
 func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 	addTool(srv, &mcp.Tool{
@@ -160,7 +193,7 @@ func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 }
 
 func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, overviewOutput] {
-	naming := config.NamingFor(cfg.ChainEnvironment)
+	naming := cfg.TokenNaming()
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, _ overviewInput,
 	) (*mcp.CallToolResult, overviewOutput, error) {
@@ -180,9 +213,11 @@ func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, o
 			ExplorerURL:      cfg.ExplorerURL,
 			DocsURL:          cfg.DocsURL,
 			BridgeURL:        cfg.BridgeURL,
+			FaucetURL:        cfg.FaucetURL,
 			TokenNative:      naming.Native,
 			TokenWrapped:     naming.Wrapped,
-			WhatIsNVNMChain:  whatIsNVNMChainText,
+			FeeTokenAddress:  cfg.FeeToken.Address,
+			WhatIsNVNMChain:  whatIsNVNMChain(cfg),
 			PrivacyByDesign:  privacyByDesignText,
 			Prereqs:          prereqsFor(cfg),
 			CanonicalJourney: canonicalJourney,
