@@ -132,7 +132,7 @@ func NewServer(
 
 	// 2-3. Existing read tools.
 	registerEVMTools(mcpSrv, evmClient, cfg, logger)
-	registerAnchorTools(mcpSrv, anchorClient, logger)
+	registerAnchorTools(mcpSrv, anchorClient)
 
 	// 4. Write tools, gated.
 	if cfg.EnableWriteTools {

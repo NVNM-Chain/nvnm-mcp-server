@@ -42,6 +42,7 @@ func TestSafeForClient_PassThrough(t *testing.T) {
 		{"tx chain id mismatch", ErrTxChainIDMismatch},
 		{"insufficient funds", ErrInsufficientFunds},
 		{"curated nonce conflict with raw cause", Curate(ErrTxNonceConflict, errors.New("raw node text"))},
+		{"registries by name unsupported", Curate(ErrRegistriesByNameUnsupported, errors.New("unknown method id: 1"))},
 	}
 
 	for _, tc := range tests {

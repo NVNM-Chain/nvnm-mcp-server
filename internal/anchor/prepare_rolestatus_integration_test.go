@@ -21,7 +21,9 @@ import (
 // precompile -- an argument-order or checksum-normalization mistake would only
 // have surfaced in production. These tests close that gap.
 //
-// Local run (needs a funded testnet wallet in ../../.chain_credentials.txt):
+// Local run (needs a wallet funded on the target chain, via
+// NVNM_TEST_PRIVATE_KEY or ../../.chain_credentials.txt; the chain comes from
+// NVNM_EVM_RPC_URL / NVNM_CHAIN_ID, default testnet):
 //
 //	make test-integration
 

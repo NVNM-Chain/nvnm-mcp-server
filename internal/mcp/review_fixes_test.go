@@ -379,8 +379,15 @@ func TestListingCursor_RejectsWrongLength(t *testing.T) {
 
 // --- L-3 ---------------------------------------------------------------
 
-func TestPageRegistries_PastEndIsEmptyNotNil(t *testing.T) {
-	page := pageRegistries([]anchor.Registry{{ID: 1}}, 5, 10)
+func TestByNamePage_PastEndIsEmptyNotNil(t *testing.T) {
+	m := &mockAnchor{registries: &anchor.GetRegistriesResponse{Registries: []anchor.Registry{{ID: 1, Name: "a"}}}}
+	name := "a"
+	offset := uint64(5)
+	_, out, err := makeGetRegistriesHandler(m)(ctx, nil, getRegistriesInput{Name: &name, Offset: &offset})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	page := out.Registries
 	if page == nil {
 		t.Fatal("page past the end must be an empty slice, not nil (serializes as null)")
 	}

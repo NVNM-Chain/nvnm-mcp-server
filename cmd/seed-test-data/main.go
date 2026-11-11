@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,9 +22,14 @@ import (
 )
 
 const (
-	rpcURL       = "https://evm.testnet.nvnmchain.io"
+	// Defaults target the public NVNM testnet; override with the same env
+	// vars the server uses (NVNM_EVM_RPC_URL / NVNM_CHAIN_ID).
+	defaultRPCURL  = "https://evm.testnet.nvnmchain.io"
+	defaultChainID = int64(787111)
+	envRPCURL      = "NVNM_EVM_RPC_URL"
+	envChainID     = "NVNM_CHAIN_ID"
+
 	abiPath      = "abi/anchoring.json"
-	chainID      = 787111
 	credsPath    = ".chain_credentials.txt" //nolint:gosec // not credentials, just a file path constant
 	registryName = "mcp-test-data"
 	registryDesc = "Test registry seeded by cmd/seed-test-data for MCP server validation"
@@ -35,7 +41,28 @@ var (
 	errReceiptTimeout       = errors.New("timed out waiting for transaction receipt")
 	errNegativeChainID      = errors.New("negative chain ID")
 	errRegistryNotFoundPost = errors.New("registry not found after creation")
+	errInvalidChainID       = errors.New("invalid " + envChainID)
+	errChainIDMismatch      = errors.New("chain ID mismatch")
 )
+
+// targetFromEnv resolves the RPC endpoint and chain ID, preferring the
+// NVNM_* env vars and falling back to the testnet defaults when unset. A
+// set-but-invalid NVNM_CHAIN_ID is an error (no silent fallback).
+func targetFromEnv() (rpcURL string, chainID int64, err error) {
+	rpcURL = defaultRPCURL
+	if v := strings.TrimSpace(os.Getenv(envRPCURL)); v != "" {
+		rpcURL = v
+	}
+	chainID = defaultChainID
+	if v := strings.TrimSpace(os.Getenv(envChainID)); v != "" {
+		parsed, parseErr := strconv.ParseInt(v, 10, 64)
+		if parseErr != nil || parsed <= 0 {
+			return "", 0, fmt.Errorf("%w: %q must be a positive integer", errInvalidChainID, v)
+		}
+		chainID = parsed
+	}
+	return rpcURL, chainID, nil
+}
 
 type testRecord struct {
 	URI          string
@@ -84,6 +111,12 @@ func run() error {
 	}
 	fmt.Printf("Sender: %s\n\n", creds.address)
 
+	rpcURL, chainID, err := targetFromEnv()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("RPC: %s | expected chain ID: %d\n", rpcURL, chainID)
+
 	evmClient, err := evm.NewClient(ctx, rpcURL, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("connect to RPC: %w", err)
@@ -95,6 +128,9 @@ func run() error {
 		return fmt.Errorf("chain info: %w", err)
 	}
 	fmt.Printf("Chain ID: %d | Latest block: %d\n\n", chainInfo.ChainID, chainInfo.LatestBlockNumber)
+	if chainInfo.ChainID != chainID {
+		return fmt.Errorf("%w: RPC reports %d, expected %d", errChainIDMismatch, chainInfo.ChainID, chainID)
+	}
 
 	anchorClient := anchor.NewClient(evmClient, anchor.PrecompileAddress, chainID, abiPath, logger)
 

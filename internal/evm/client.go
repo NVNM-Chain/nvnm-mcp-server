@@ -264,7 +264,11 @@ func (c *client) TransactionReceipt(ctx context.Context, hash defitypes.Hash) (*
 			}
 			return fmt.Errorf("failed to get transaction receipt: %w", err)
 		}
-		if receipt == nil {
+		// A missing receipt is a null RPC result, but some RPC/decoder
+		// combinations (observed on the dev chain) surface it as a non-nil
+		// zero-value struct. A real receipt always carries its tx hash, so
+		// a zero hash means not-found (mirrors TransactionByHash above).
+		if receipt == nil || receipt.TransactionHash == (defitypes.Hash{}) {
 			return apperrors.ErrTxNotFound
 		}
 		out = normalizeReceipt(receipt)

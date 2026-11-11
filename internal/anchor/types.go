@@ -121,10 +121,35 @@ func EncodeCursor(b []byte) string {
 // --- Query request/response types ---
 
 // GetRegistryRequest specifies the registry to fetch by its numeric ID.
-// The anchoring precompile keys registries by ID only; registry names are
-// not guaranteed unique and cannot be queried on-chain.
+// Registry names are not guaranteed unique, so a name resolves to a set of
+// registries (GetRegistriesByName), never to one.
 type GetRegistryRequest struct {
 	ID uint64 `json:"id"`
+}
+
+// RegistryNameMatch is the precompile's registriesByName matchMode argument.
+// Matching is case-insensitive on chain for every mode.
+type RegistryNameMatch uint8
+
+// The chain treats matchMode 0 and 1 alike (exact); 1 is sent so the
+// request states its intent.
+const (
+	RegistryNameExact    RegistryNameMatch = 1
+	RegistryNamePrefix   RegistryNameMatch = 2
+	RegistryNameSuffix   RegistryNameMatch = 3
+	RegistryNameContains RegistryNameMatch = 4
+)
+
+// GetRegistriesByNameRequest specifies a name-filtered registry page.
+// Pagination.Offset and Pagination.Limit select the window. Pagination.Key
+// resumes from a prior response's NextKey (probed live 2026-10-26, testnet
+// 787111): an 8-byte big-endian registry id, empty when the match set
+// ended. The chain still reports Total 0 and rejects Key together with a
+// non-zero Offset. Reverse is ignored.
+type GetRegistriesByNameRequest struct {
+	Name       string            `json:"name"`
+	Match      RegistryNameMatch `json:"match"`
+	Pagination *PageRequest      `json:"pagination,omitempty"`
 }
 
 // GetRegistriesRequest specifies filters and pagination for listing registries.

@@ -31,9 +31,11 @@ import (
 //	make test-integration
 //
 // Each test broadcasts a real anchor_prepare_add_registry transaction
-// against the configured testnet (nvnm-testnet-1, chain ID 787111). The
-// registry name is timestamped so each run is idempotent against the
-// on-chain unique-name constraint.
+// against the chain selected by NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (default:
+// nvnm-testnet-1, chain ID 787111; see internal/config/testenv_config.go). The
+// signing key must be funded on that chain. The registry name is
+// timestamped so each run is idempotent against the on-chain
+// unique-name constraint.
 
 const phase84ReceiptTimeout = 90 * time.Second
 

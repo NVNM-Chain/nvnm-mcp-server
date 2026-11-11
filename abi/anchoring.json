@@ -162,5 +162,47 @@
         ]
       }
     ]
+  },
+  {
+    "type": "function",
+    "name": "registriesByName",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "name", "type": "string" },
+      { "name": "matchMode", "type": "uint8" },
+      {
+        "name": "pagination",
+        "type": "tuple",
+        "components": [
+          { "name": "key", "type": "bytes" },
+          { "name": "offset", "type": "uint64" },
+          { "name": "limit", "type": "uint64" },
+          { "name": "countTotal", "type": "bool" },
+          { "name": "reverse", "type": "bool" }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "registries",
+        "type": "tuple[]",
+        "components": [
+          { "name": "id", "type": "uint64" },
+          { "name": "name", "type": "string" },
+          { "name": "description", "type": "string" },
+          { "name": "creator", "type": "string" },
+          { "name": "createdAt", "type": "string" },
+          { "name": "metadata", "type": "string" }
+        ]
+      },
+      {
+        "name": "pagination",
+        "type": "tuple",
+        "components": [
+          { "name": "nextKey", "type": "bytes" },
+          { "name": "total", "type": "uint64" }
+        ]
+      }
+    ]
   }
 ]

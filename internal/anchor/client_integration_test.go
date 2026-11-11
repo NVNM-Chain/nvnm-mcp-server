@@ -7,6 +7,7 @@ package anchor_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -16,16 +17,24 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
+	apperrors "github.com/NVNM-Chain/nvnm-mcp-server/internal/errors"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/logging"
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/telemetry"
 )
 
 const (
-	testRPCURL         = "https://evm.testnet.nvnmchain.io"
-	testChainID        = int64(787111)
 	testABIRelPath     = "../../abi/anchoring.json"
 	testConnectTimeout = 15 * time.Second
+)
+
+// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (testnet
+// defaults when unset); see internal/config/testenv_config.go.
+var (
+	testTarget  = config.MustLiveTarget()
+	testRPCURL  = testTarget.RPCURL
+	testChainID = testTarget.ChainID
 )
 
 func integrationClient(t *testing.T) anchor.Client {
@@ -177,8 +186,8 @@ func TestIntegration_Info(t *testing.T) {
 	if !info.ABILoaded {
 		t.Error("ABILoaded should be true")
 	}
-	if info.MethodCount != 7 {
-		t.Errorf("MethodCount = %d, want 7", info.MethodCount)
+	if info.MethodCount != 8 {
+		t.Errorf("MethodCount = %d, want 8", info.MethodCount)
 	}
 }
 
@@ -228,6 +237,122 @@ func TestIntegration_GetRegistries_OffsetWindow(t *testing.T) {
 	if len(past.Registries) != 0 || (past.Pagination != nil && past.Pagination.NextKey != "") {
 		t.Fatalf("offset past the end must yield no rows and no cursor; got %d rows, cursor %q",
 			len(past.Registries), past.Pagination.NextKey)
+	}
+}
+
+// TestIntegration_GetRegistriesByName pins the live registriesByName behavior
+// the name-filtered anchor_get_registries path depends on: a known registry
+// is found by its exact name in any case, and an offset past the matches
+// yields no rows. Skips on a node whose precompile predates the method.
+func TestIntegration_GetRegistriesByName(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), findRegistryPageTimeout)
+	defer cancel()
+	noID := uint64(0)
+
+	seed, err := c.GetRegistries(ctx, anchor.GetRegistriesRequest{
+		RegistryID: &noID, Pagination: &anchor.PageRequest{Limit: 1},
+	})
+	if err != nil || len(seed.Registries) == 0 {
+		t.Fatalf("GetRegistries(limit=1) = %v, %v; need one registry to look up", seed, err)
+	}
+	want := seed.Registries[0]
+
+	resp, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name:       strings.ToUpper(want.Name),
+		Match:      anchor.RegistryNameExact,
+		Pagination: &anchor.PageRequest{Limit: 200},
+	})
+	if errors.Is(err, apperrors.ErrRegistriesByNameUnsupported) {
+		t.Skip("node precompile predates registriesByName")
+	}
+	if err != nil {
+		t.Fatalf("GetRegistriesByName(%q): %v", want.Name, err)
+	}
+	found := false
+	for _, r := range resp.Registries {
+		found = found || r.ID == want.ID
+		if !strings.EqualFold(r.Name, want.Name) {
+			t.Errorf("exact match returned %q for %q", r.Name, want.Name)
+		}
+	}
+	if !found {
+		t.Fatalf("registry %d (%q) missing from its own exact-name lookup: %+v", want.ID, want.Name, resp.Registries)
+	}
+
+	past, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name: want.Name, Match: anchor.RegistryNameExact,
+		Pagination: &anchor.PageRequest{Offset: 1 << 40, Limit: 3},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistriesByName(offset past end): %v", err)
+	}
+	if len(past.Registries) != 0 {
+		t.Fatalf("offset past the matches returned %d rows", len(past.Registries))
+	}
+}
+
+// TestIntegration_GetRegistriesByName_Cursor pages a prefix with the
+// chain's next_key. Testnet 787111 started returning that cursor on
+// 2026-10-26; a full page must carry one, and passing it back must not
+// repeat the previous page. The cursor is empty on the last page.
+func TestIntegration_GetRegistriesByName_Cursor(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), findRegistryPageTimeout)
+	defer cancel()
+
+	first, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name: "a", Match: anchor.RegistryNamePrefix,
+		Pagination: &anchor.PageRequest{Limit: 2},
+	})
+	if errors.Is(err, apperrors.ErrRegistriesByNameUnsupported) {
+		t.Skip("node precompile predates registriesByName")
+	}
+	if err != nil {
+		t.Fatalf("GetRegistriesByName: %v", err)
+	}
+	if len(first.Registries) < 2 {
+		t.Skipf("prefix %q has %d matches; need a full page to observe next_key", "a", len(first.Registries))
+	}
+	if first.Pagination == nil || first.Pagination.NextKey == "" {
+		// A full page that is also the last page omits next_key. Two matches
+		// with limit 2 is that page; only a further match makes a missing
+		// cursor a failure.
+		probe, probeErr := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+			Name: "a", Match: anchor.RegistryNamePrefix,
+			Pagination: &anchor.PageRequest{Offset: 2, Limit: 1},
+		})
+		if probeErr != nil {
+			t.Fatalf("GetRegistriesByName(offset 2): %v", probeErr)
+		}
+		if len(probe.Registries) == 0 {
+			t.Skip("prefix \"a\" has exactly 2 matches; a full terminal page omits next_key")
+		}
+		t.Fatal("a full by-name page returned no next_key but another match exists")
+	}
+
+	key, err := first.Pagination.CursorBytes()
+	if err != nil {
+		t.Fatalf("decode next_key: %v", err)
+	}
+	second, err := c.GetRegistriesByName(ctx, anchor.GetRegistriesByNameRequest{
+		Name: "a", Match: anchor.RegistryNamePrefix,
+		Pagination: &anchor.PageRequest{Key: key, Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("GetRegistriesByName(key): %v", err)
+	}
+	if len(second.Registries) == 0 {
+		t.Fatal("cursor page was empty")
+	}
+	seen := map[uint64]bool{}
+	for _, r := range first.Registries {
+		seen[r.ID] = true
+	}
+	for _, r := range second.Registries {
+		if seen[r.ID] {
+			t.Errorf("cursor page repeated registry %d", r.ID)
+		}
 	}
 }
 

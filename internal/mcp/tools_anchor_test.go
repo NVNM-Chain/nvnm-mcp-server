@@ -37,6 +37,12 @@ func (f *fakeAnchor) GetRegistries(context.Context, anchor.GetRegistriesRequest)
 	return &anchor.GetRegistriesResponse{Registries: f.registries}, nil
 }
 
+func (f *fakeAnchor) GetRegistriesByName(
+	context.Context, anchor.GetRegistriesByNameRequest,
+) (*anchor.GetRegistriesResponse, error) {
+	return &anchor.GetRegistriesResponse{Registries: f.registries}, nil
+}
+
 func (f *fakeAnchor) GetRecords(context.Context, anchor.GetRecordsRequest) (*anchor.GetRecordsResponse, error) {
 	return &anchor.GetRecordsResponse{Records: f.records}, nil
 }
@@ -88,7 +94,7 @@ func TestGetRecords_CapsAndLabelsUntrusted(t *testing.T) {
 func TestGetRegistries_CapsAndLabelsUntrusted(t *testing.T) {
 	big := strings.Repeat("d", maxUntrustedDescription+500)
 	c := &fakeAnchor{registries: []anchor.Registry{{ID: 1, Name: "ok", Description: big}}}
-	h := makeGetRegistriesHandler(c, testLogger())
+	h := makeGetRegistriesHandler(c)
 
 	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRegistriesInput{})
 	if err != nil {
