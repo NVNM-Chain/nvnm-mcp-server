@@ -45,6 +45,19 @@ const (
 	liveDefaultTxSender = "0x9f8a6425F7AD925701fE1CdF85fd883340b2A9CD"
 )
 
+// liveBuiltinTxFixtures are the mined transactions known per chain, used
+// when NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER are unset. The L1 devnet
+// entry is the addRegistry that created registry 2227 (block 4881470,
+// observed 2026-11-09). A devnet can be reset; when it is, override the
+// fixture through the environment.
+var liveBuiltinTxFixtures = map[int64]LiveTxFixture{
+	LiveDefaultChainID: {Hash: liveDefaultTxHash, Sender: liveDefaultTxSender},
+	l1DevnetChainID: {
+		Hash:   "0xc3139110f81470f527de4d482125186eb0ca7142b44bd9bbd5d677c2872fb13a",
+		Sender: "0x50d476e5d2c044998eC185D86A0EF5CB32f3e8F4",
+	},
+}
+
 // Errors returned for set-but-invalid live-test configuration.
 var (
 	ErrLiveInvalidChainID          = errors.New("invalid " + LiveEnvChainID)
@@ -113,8 +126,8 @@ type LiveTxFixture struct {
 
 // LiveMinedTx returns the known mined-tx fixture for the target chain. Both
 // NVNM_TEST_TX_HASH and NVNM_TEST_TX_SENDER override it. Without overrides
-// the built-in fixture is valid only on the default testnet; on any other
-// chain ok is false and the caller should skip the test.
+// the built-in fixture for the chain is used (liveBuiltinTxFixtures); on a
+// chain with none ok is false and the caller should skip the test.
 func LiveMinedTx(getenv func(string) string, chainID int64) (fx LiveTxFixture, ok bool, err error) {
 	hash := strings.TrimSpace(getenv(LiveEnvTxHash))
 	sender := strings.TrimSpace(getenv(LiveEnvTxSender))
@@ -123,9 +136,7 @@ func LiveMinedTx(getenv func(string) string, chainID int64) (fx LiveTxFixture, o
 		return LiveTxFixture{Hash: hash, Sender: sender}, true, nil
 	case hash != "" || sender != "":
 		return LiveTxFixture{}, false, ErrLivePartialTxFixture
-	case chainID == LiveDefaultChainID:
-		return LiveTxFixture{Hash: liveDefaultTxHash, Sender: liveDefaultTxSender}, true, nil
-	default:
-		return LiveTxFixture{}, false, nil
 	}
+	fx, ok = liveBuiltinTxFixtures[chainID]
+	return fx, ok, nil
 }

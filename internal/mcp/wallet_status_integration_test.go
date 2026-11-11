@@ -78,7 +78,13 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chain environment: %v", err)
 	}
-	cfg := &config.Config{ChainID: rtChainID, ChainEnvironment: chainEnv}
+	// The fee token decides which balance wallet_status reads: on a chain
+	// with no native coin the native balance is a placeholder.
+	feeToken, err := config.FeeTokenFromEnv(os.Getenv, rtChainID)
+	if err != nil {
+		t.Fatalf("fee token: %v", err)
+	}
+	cfg := &config.Config{ChainID: rtChainID, ChainEnvironment: chainEnv, FeeToken: feeToken}
 	walletStatus := makeWalletStatusHandler(evmClient, cfg)
 
 	// --- wallet_status BEFORE ---
@@ -140,7 +146,7 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 	if after.Status != WalletStatusFundedActive {
 		t.Errorf("status = %q after broadcast, want %q", after.Status, WalletStatusFundedActive)
 	}
-	wantToken := config.NamingFor(chainEnv).Wrapped
+	wantToken := cfg.GasToken().Symbol
 	if !strings.HasSuffix(after.BalanceHuman, wantToken) {
 		t.Errorf("balance_human = %q, want suffix %q", after.BalanceHuman, wantToken)
 	}

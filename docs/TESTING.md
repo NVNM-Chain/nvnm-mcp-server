@@ -222,7 +222,10 @@ Write and round-trip integration tests require testnet credentials,
 resolved environment-first then file: `NVNM_TEST_PRIVATE_KEY` (optional
 `NVNM_TEST_ADDRESS`), then `.chain_credentials.txt`. They skip if both
 are absent. The wallet must be funded: these tests broadcast real
-transactions and wait for receipts.
+transactions and wait for receipts. A wallet that holds none of the
+target chain's fee asset is a skip, with the address and the asset named
+in the message, not a failure: the native balance on a native-coin
+chain, the fee token's `balanceOf` on a chain with no native coin.
 
 **Target chain.** The live tests do not hardcode a network. They read the
 same variables as the server, through `internal/config/testenv_config.go`: `NVNM_EVM_RPC_URL`
@@ -240,8 +243,29 @@ NVNM_EVM_RPC_URL=<rpc> NVNM_CHAIN_ID=<id> NVNM_CHAIN_ENVIRONMENT=testnet \
 The signing wallet must be funded on that chain. `internal/evm` tests that
 read a known historical transaction use `NVNM_TEST_TX_HASH` and
 `NVNM_TEST_TX_SENDER` (a mined tx and its sender on the target chain); without
-them the built-in testnet fixture is used on testnet and those tests skip on
-other chains.
+them the built-in fixture for the chain is used (testnet `787111` and the L1
+devnet `787222` have one) and those tests skip on other chains.
+
+**L1 devnet (`787222`).** The chain ID is recognized, so the RPC URL and the
+chain ID are all a run needs:
+
+```sh
+NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev NVNM_CHAIN_ID=787222 \
+  go test -mod=vendor -tags integration -count=1 ./internal/...
+```
+
+What differs from the L2 testnet there, and how the suite handles it:
+
+- Fees are charged in the pathUSD token, not a native coin. The funded check
+  and the `wallet_status` round-trip read that token; fund the signing wallet
+  with pathUSD from the faucet.
+- The name index serves exact match only and has no cursor, so
+  `TestIntegration_GetRegistriesByName_Cursor` (a prefix walk) skips.
+- The built-in tx fixture is a devnet transaction. If the devnet is reset,
+  set `NVNM_TEST_TX_HASH` / `NVNM_TEST_TX_SENDER`.
+- The node is reth-based; its two `eth_getLogs` range rejections are
+  classified the same as the L2's
+  (`TestIntegration_FilterLogs_RangeRejectionsCurated`).
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh chain before running the anchor integration suite; it honors the same `NVNM_EVM_RPC_URL` / `NVNM_CHAIN_ID` variables and refuses to run if the RPC's chain ID does not match.
 

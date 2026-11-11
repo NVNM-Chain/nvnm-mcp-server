@@ -129,6 +129,13 @@ func TestLiveMinedTx(t *testing.T) {
 	}{
 		{name: "built-in on default testnet", chainID: LiveDefaultChainID, wantOK: true},
 		{
+			name: "built-in on the L1 devnet", chainID: l1DevnetChainID, wantOK: true,
+			wantFx: &LiveTxFixture{
+				Hash:   "0xc3139110f81470f527de4d482125186eb0ca7142b44bd9bbd5d677c2872fb13a",
+				Sender: "0x50d476e5d2c044998eC185D86A0EF5CB32f3e8F4",
+			},
+		},
+		{
 			name: "override on any chain", env: override, chainID: 262144, wantOK: true,
 			wantFx: &LiveTxFixture{Hash: "0xabc", Sender: "0xdef"},
 		},

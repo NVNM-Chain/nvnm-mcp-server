@@ -66,7 +66,9 @@ func envCredentials(t *testing.T) (*defiwallet.PrivateKey, defitypes.Address) {
 		t.Fatalf("decode signing key: %v", err)
 	}
 	priv := defiwallet.NewKeyFromBytes(keyBytes)
-	return priv, priv.Address()
+	addr := priv.Address()
+	skipIfUnfunded(t, addr)
+	return priv, addr
 }
 
 // TestIntegration_PrepareAddRegistry_EIP1559_RoundTrip exercises the

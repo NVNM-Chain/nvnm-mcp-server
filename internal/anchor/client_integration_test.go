@@ -10,10 +10,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	defitypes "github.com/defiweb/go-eth/types"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/anchor"
@@ -46,6 +48,39 @@ func integrationClient(t *testing.T) anchor.Client {
 		t.Fatal("anchor client not available (ABI not loaded)")
 	}
 	return c
+}
+
+// skipIfUnfunded skips a write test whose signing wallet holds none of the
+// asset the target chain charges fees in: the fee token's balanceOf on a
+// chain with no native coin, the native balance otherwise. An empty wallet
+// is a precondition the test cannot meet, the same as a missing key, and
+// the node would only answer "insufficient funds".
+func skipIfUnfunded(t *testing.T, addr defitypes.Address) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testConnectTimeout)
+	defer cancel()
+
+	feeToken, err := config.FeeTokenFromEnv(os.Getenv, testChainID)
+	if err != nil {
+		t.Fatalf("fee token: %v", err)
+	}
+	evmClient := integrationResilientEVMClient(t)
+	var balance *evm.NormalizedBalance
+	asset := "the native coin"
+	if feeToken.IsContract() {
+		asset = feeToken.Symbol
+		balance, err = evm.TokenBalanceAt(ctx, evmClient,
+			defitypes.MustAddressFromHex(feeToken.Address), addr, feeToken.Decimals, nil)
+	} else {
+		balance, err = evmClient.BalanceAt(ctx, addr, nil)
+	}
+	if err != nil {
+		t.Fatalf("read signing wallet balance: %v", err)
+	}
+	if balance.Wei == "0" {
+		t.Skipf("signing wallet %s holds no %s on chain %d; fund it to run the write tests",
+			evm.AddressHex(addr), asset, testChainID)
+	}
 }
 
 // integrationResilientEVMClient mirrors the production wiring:
@@ -307,6 +342,11 @@ func TestIntegration_GetRegistriesByName_Cursor(t *testing.T) {
 	})
 	if errors.Is(err, apperrors.ErrRegistriesByNameUnsupported) {
 		t.Skip("node precompile predates registriesByName")
+	}
+	if errors.Is(err, apperrors.ErrMatchModeUnsupported) {
+		// A prefix is what makes several rows match here. An exact-only
+		// name index has no cursor to continue either (chain 787222).
+		t.Skip("chain's name index serves exact match only; no prefix page to continue")
 	}
 	if err != nil {
 		t.Fatalf("GetRegistriesByName: %v", err)
