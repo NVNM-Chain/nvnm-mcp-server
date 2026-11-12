@@ -5,9 +5,9 @@
 [![Latest Release](https://img.shields.io/github/v/release/NVNM-Chain/nvnm-mcp-server?include_prereleases&sort=semver)](https://github.com/NVNM-Chain/nvnm-mcp-server/releases)
 [![Cosign Signed](https://img.shields.io/badge/cosign-signed-2496ed)](.github/workflows/release.yml)
 
-A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and the NVNM Chain (Inveniam's L2 on MANTRA). It exposes 23 curated tools — EVM reads, anchor reads, prepare-sign-submit writes, and guided onboarding — with normalized responses, per-tool authorization, and zero key custody. Intended for application developers, LLM-agent authors, and pipeline operators who need a stable, audited surface against an EVM chain rather than raw JSON-RPC.
+A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and the NVNM Chain. It exposes 23 curated tools — EVM reads, anchor reads, prepare-sign-submit writes, and guided onboarding — with normalized responses, per-tool authorization, and zero key custody. Intended for application developers, LLM-agent authors, and pipeline operators who need a stable, audited surface against an EVM chain rather than raw JSON-RPC.
 
-A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the NVNM Chain (Inveniam's L2 on MANTRA) through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
+A Go-based [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes the NVNM Chain through a curated set of typed tools, with special emphasis on the chain's built-in anchoring interface.
 
 This is **not** a generic JSON-RPC passthrough. It provides stable, typed, high-value MCP tools with normalized responses designed for both human and LLM consumers.
 
@@ -28,7 +28,7 @@ The HTTP transport layers defense-in-depth middleware around the MCP SDK. Order 
                   └──────────────────────┬──────────────────────┘
                                          ▼
                                   EVM JSON-RPC
-                            (https://evm.testnet.nvnmchain.io)
+                            (https://rpc.nvnm.canary.mantrachain.dev)
 ```
 
 Source: [`internal/mcp/server.go`](internal/mcp/server.go).
@@ -81,20 +81,17 @@ Cold-reader assumptions to head off up front. The server is deliberately scoped 
 
 ## Target Chain
 
-| Property | Value (testnet) |
+| Property | Value (devnet) |
 |---|---|
-| **Network** | NVNM Chain -- Inveniam L2 (MANTRA-secured consumer chain) |
-| **EVM chain ID** | `787111` (`0xc02a7`) |
-| **Cosmos chain ID** | `nvnm-testnet-1` |
-| **Native token** | `mantraUSD` |
-| **Gas token** | `wmantraUSD` (wrapped `mantraUSD`, held in EVM wallets) -- pays gas fees |
-| **EVM RPC** | `https://evm.testnet.nvnmchain.io` |
-| **Cosmos RPC** | `https://rpc.testnet.nvnmchain.io` |
-| **EVM explorer** | `https://explorer.evm.testnet.nvnmchain.io` |
+| **Network** | NVNM Chain -- `nvnm-tempo-devnet-1` |
+| **EVM chain ID** | `787222` (`0xc0316`) |
+| **Fee token** | `pathUSD` at `0x20c0000000000000000000000000000000000000`, 6 decimals. The chain has no native coin; every fee is paid in this token |
+| **EVM RPC** | `https://rpc.nvnm.canary.mantrachain.dev` |
+| **EVM explorer** | `https://scan.nvnm.canary.mantrachain.dev` |
 | **MCP service (hosted)** | `https://mcp-testnet.nvnmchain.io` (testnet); `https://mcp.nvnmchain.io` (mainnet) |
-| **Anchor precompile** | `0x0000000000000000000000000000000000000A00` |
+| **Anchor contract** | `0x0000000000000000000000000000000000000A00` |
 
-> **Mainnet** identifiers (EVM chain ID `1611`, Cosmos `nvnm-1`, `*.nvnmchain.io` endpoints) and the full testnet+mainnet reference live in [`docs/DESIGN.md` § Target Chain](docs/DESIGN.md). The server runs as one instance per network.
+> The devnet is the one chain the server knows without being told. Any other chain needs `NVNM_CHAIN_ENVIRONMENT` and the three `NVNM_FEE_TOKEN_*` variables (see [Configuration](#configuration)). The server runs as one instance per network.
 
 ## Status
 
@@ -137,8 +134,8 @@ make test
 make coverage-check
 
 # Configure (minimum required). `make run` reads the exported environment.
-export NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io
-export NVNM_CHAIN_ID=787111
+export NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev
+export NVNM_CHAIN_ID=787222
 export ANCHOR_ABI_PATH=abi/anchoring.json
 
 # Run (stdio transport -- for local MCP client integration)
@@ -249,21 +246,19 @@ All configuration is via environment variables. No config files required.
 | Variable | Description |
 |---|---|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `NVNM_CHAIN_ID` | Expected chain ID (`787111` for NVNM testnet, `1611` for mainnet, `787222` for the L1 devnet) |
-| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Inferred for the three chain IDs above; required for any other chain. Legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
+| `NVNM_CHAIN_ID` | Expected chain ID (`787222` for the devnet) |
+| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Inferred for the devnet; required for any other chain. Legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
 
-### Fee asset (L1)
+### Fee token
 
-The L2 charges fees in its native coin. The L1 has no native coin: fees are charged in a token contract, and `eth_getBalance` is not a balance there. On chain `787222` the server knows the fee token and needs no extra configuration. The variables below describe it for any other such chain, or override a built-in value.
+NVNM Chain has no native coin. Fees are charged in a token contract, and `eth_getBalance` is not a balance: it answers the same placeholder for every address. `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` report that token's `balanceOf`. The server knows the devnet's fee token. On any other chain all three variables below are required, and the server refuses to start without them.
 
 | Variable | Default | Description |
 |---|---|---|
-| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else _(none)_ | Token contract fees are charged in. When set (or built in), `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read this token's `balanceOf` instead of the native balance. A mixed-case address must carry a valid EIP-55 checksum; all-lowercase hex is accepted as is. |
-| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222` | Symbol shown for that token. Required with the address on a chain that has no built-in fee token. |
-| `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222` | The token's decimals, `0`-`36`. Required with the address on a chain that has no built-in fee token. |
-| `NVNM_FAUCET_URL` | _(none)_ | Faucet URL returned by `nvnm_overview` and the setup wizard as `faucet_url`. Optional, any chain. |
-
-A partly described fee token (an address without a symbol or decimals, or the reverse) stops the server at startup.
+| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else required | Token contract fees are charged in. A mixed-case address must carry a valid EIP-55 checksum; all-lowercase hex is accepted as is. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222`, else required | Symbol shown for that token. |
+| `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222`, else required | The token's decimals, `0`-`36`. |
+| `NVNM_FAUCET_URL` | _(none)_ | Faucet URL returned by `nvnm_overview` and the setup wizard as `faucet_url`. Optional. |
 
 ### Authentication (HTTP transport)
 
@@ -547,8 +542,8 @@ For comprehensive testing documentation, including test architecture, framework 
 ```bash
 make docker-build
 docker run --rm \
-  -e NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
-  -e NVNM_CHAIN_ID=787111 \
+  -e NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev \
+  -e NVNM_CHAIN_ID=787222 \
   -e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
   -e MCP_TRANSPORT=http \
   -p 8080:8080 \
@@ -572,8 +567,8 @@ A Helm chart is available in `deploy/helm/nvnm-mcp-server/`:
 
 ```bash
 helm install nvnm-mcp deploy/helm/nvnm-mcp-server/ \
-  --set env.NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
-  --set env.NVNM_CHAIN_ID=787111
+  --set env.NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev \
+  --set env.NVNM_CHAIN_ID=787222
 ```
 
 Prometheus alerting rules are in `deploy/prometheus/alerts.yaml` and a Grafana dashboard in `deploy/grafana/dashboard.json`.

@@ -2,25 +2,24 @@
 
 ## 1. System Context
 
-The NVNM Chain MCP Server sits between MCP-capable clients (LLMs, developer tools, agents) and the NVNM Chain (Inveniam's L2 on MANTRA). It translates high-level tool calls into EVM JSON-RPC requests, normalizes the responses, and returns structured, typed JSON.
+The NVNM Chain MCP Server sits between MCP-capable clients (LLMs, developer tools, agents) and the NVNM Chain. It translates high-level tool calls into EVM JSON-RPC requests, normalizes the responses, and returns structured, typed JSON.
 
 For write operations, the server constructs unsigned transactions but never holds private keys. Signing is the caller's responsibility.
 
 ### Target Chain
 
-NVNM Chain is Inveniam's Layer 2 blockchain, secured by MANTRA's validator set through Interchain Security (ICS). It is purpose-built for document anchoring and provenance verification. The chain runs as two networks -- testnet and mainnet -- and this server is deployed as one instance per network (see § 8 Multi-chain).
+NVNM Chain is purpose-built for document anchoring and provenance verification. It has no native coin: transaction fees are charged in a token contract (`pathUSD`). This server is deployed as one instance per network (see § 8 Multi-chain).
 
-| Property | Testnet | Mainnet |
-|---|---|---|
-| Cosmos chain ID | `nvnm-testnet-1` | `nvnm-1` |
-| EVM chain ID | `787111` (`0xc02a7`) | `1611` (`0x64b`) |
-| Native token | `mantraUSD` | `mmUSD` |
-| Gas token (EVM, wrapped) | `wmantraUSD` | `wmmUSD` |
-| EVM RPC | `https://evm.testnet.nvnmchain.io` | `https://evm.nvnmchain.io` |
-| Cosmos RPC | `https://rpc.testnet.nvnmchain.io` | `https://rpc.nvnmchain.io` |
-| EVM explorer | `https://explorer.evm.testnet.nvnmchain.io` | `https://evm.explorer.nvnmchain.io` |
-| MCP service (hosted) | `https://mcp-testnet.nvnmchain.io` | `https://mcp.nvnmchain.io` |
-| Anchor precompile | `0x0000000000000000000000000000000000000A00` | `0x0000000000000000000000000000000000000A00` |
+| Property | Devnet |
+|---|---|
+| Network | `nvnm-tempo-devnet-1` |
+| EVM chain ID | `787222` (`0xc0316`) |
+| Fee token | `pathUSD`, `0x20c0000000000000000000000000000000000000`, 6 decimals |
+| EVM RPC | `https://rpc.nvnm.canary.mantrachain.dev` |
+| EVM explorer | `https://scan.nvnm.canary.mantrachain.dev` |
+| Anchor contract | `0x0000000000000000000000000000000000000A00` |
+
+The devnet is the one chain the server recognizes. For any other network the operator sets `NVNM_CHAIN_ENVIRONMENT` and the three `NVNM_FEE_TOKEN_*` variables.
 
 > **Privacy-by-design.** The chain stores only hash fingerprints of data (one-way SHA-256), never the underlying data itself. Anchor writes are publicly observable: `add_record` logs the SHA-256 hash and `add_registry` logs the registry name in public on-chain logs. A hash is one-way, so the underlying document is not derivable — counterparties exchange the file off-band and verify by recomputing the hash; encode or salt sensitive registry names before anchoring. The chain is a neutral notary that never reads documents.
 >
@@ -408,7 +407,7 @@ type WalletTransactionRequest struct {
     To                   string `json:"to"`                                // Precompile address
     Data                 string `json:"data"`                              // ABI-encoded calldata
     Value                string `json:"value"`                             // "0x0"
-    ChainID              string `json:"chainId"`                           // 0x-prefixed hex (e.g. "0xc02a7")
+    ChainID              string `json:"chainId"`                           // 0x-prefixed hex (e.g. "0xc0316")
     Gas                  string `json:"gas"`                               // 0x-prefixed hex quantity
     GasPrice             string `json:"gasPrice,omitempty"`                // Type-0 path; omitted for EIP-1559
     MaxFeePerGas         string `json:"maxFeePerGas,omitempty"`            // EIP-1559 path

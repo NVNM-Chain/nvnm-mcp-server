@@ -35,7 +35,7 @@ Which MCP tool(s) or endpoint? (e.g. `evm_get_balance`, `anchor_prepare_add_reco
 
 - **Server version / commit:** (e.g. `v0.3.1` or `git rev-parse --short HEAD`)
 - **Deployment:** stdio / Streamable HTTP; container / binary / Helm chart
-- **Chain:** testnet (`787111`) / mainnet (`1611`) / other
+- **Chain:** devnet (`787222`) / other (chain ID)
 - **MCP client:** (e.g. Claude Desktop, ChatGPT, custom Go/Python client) and version
 - **Auth provider:** `apikey` / `fusionauth` / none (read-only)
 - **OS / arch:**

@@ -112,7 +112,7 @@ make seed-test-data    # Create a test registry with phoney records on-chain
 | Command | Prerequisite | Install |
 |---------|-------------|---------|
 | `make test` | Go 1.26+ | -- |
-| `make test-integration` | Network access to `https://evm.testnet.nvnmchain.io` | -- |
+| `make test-integration` | Network access to `https://rpc.nvnm.canary.mantrachain.dev` | -- |
 | `make test-e2e` | Funded signing key + RPC (in-process) or `NVNM_MCP_TEST_SERVER_URL` | See `tests/e2e/README.md` |
 | `make test-load` | k6, running server on `:8080` | `brew install k6` |
 | `make docker-smoke` | Docker Desktop | -- |
@@ -193,8 +193,8 @@ To update golden files after an intentional change, delete the `.golden.json` fi
 
 These sit next to the client code (`internal/evm`, `internal/anchor`). They
 are not the MCP tool-regression net — that is section 4. They connect to
-the NVNM Chain testnet EVM RPC at `https://evm.testnet.nvnmchain.io`
-(chain ID 787111) and are excluded from default `go test ./...` by the
+the NVNM Chain devnet EVM RPC at `https://rpc.nvnm.canary.mantrachain.dev`
+(chain ID 787222) and are excluded from default `go test ./...` by the
 `//go:build integration` build tag.
 
 `make test-integration` runs `TestMCP_Tools` first, then
@@ -222,50 +222,36 @@ Write and round-trip integration tests require testnet credentials,
 resolved environment-first then file: `NVNM_TEST_PRIVATE_KEY` (optional
 `NVNM_TEST_ADDRESS`), then `.chain_credentials.txt`. They skip if both
 are absent. The wallet must be funded: these tests broadcast real
-transactions and wait for receipts. A wallet that holds none of the
-target chain's fee asset is a skip, with the address and the asset named
-in the message, not a failure: the native balance on a native-coin
-chain, the fee token's `balanceOf` on a chain with no native coin.
+transactions and wait for receipts. A wallet that holds none of the fee
+token (its `balanceOf`; the chain has no native coin) is a skip, with the
+address and the token named in the message, not a failure.
 
 **Target chain.** The live tests do not hardcode a network. They read the
 same variables as the server, through `internal/config/testenv_config.go`: `NVNM_EVM_RPC_URL`
-(default `https://evm.testnet.nvnmchain.io`) and `NVNM_CHAIN_ID` (default
-`787111`). `NVNM_CHAIN_ENVIRONMENT` is used by the `wallet_status` test (else
-inferred from the chain ID; an unknown chain ID without it is an error). A
-set-but-invalid value fails the run immediately. To run against another
-chain, e.g. the dev chain:
+(default `https://rpc.nvnm.canary.mantrachain.dev`) and `NVNM_CHAIN_ID` (default
+`787222`, the devnet). A set-but-invalid value fails the run immediately. The
+devnet's environment and fee token are built in. To run against another
+chain, describe it the way the server requires:
 
 ```sh
 NVNM_EVM_RPC_URL=<rpc> NVNM_CHAIN_ID=<id> NVNM_CHAIN_ENVIRONMENT=testnet \
+NVNM_FEE_TOKEN_ADDRESS=<token> NVNM_FEE_TOKEN_SYMBOL=<symbol> NVNM_FEE_TOKEN_DECIMALS=<n> \
   go test -mod=vendor -tags integration -count=1 ./internal/anchor
 ```
 
-The signing wallet must be funded on that chain. `internal/evm` tests that
-read a known historical transaction use `NVNM_TEST_TX_HASH` and
-`NVNM_TEST_TX_SENDER` (a mined tx and its sender on the target chain); without
-them the built-in fixture for the chain is used (testnet `787111` and the L1
-devnet `787222` have one) and those tests skip on other chains.
+The signing wallet must hold the fee token on that chain; on the devnet,
+fund it with pathUSD from the faucet. `internal/evm` tests that read a known
+historical transaction use `NVNM_TEST_TX_HASH` and `NVNM_TEST_TX_SENDER` (a
+mined tx and its sender on the target chain); without them the built-in
+devnet fixture is used, and those tests skip on other chains. If the devnet
+is reset, set the two variables.
 
-**L1 devnet (`787222`).** The chain ID is recognized, so the RPC URL and the
-chain ID are all a run needs:
+What the suite expects of the chain, as observed on the devnet:
 
-```sh
-NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev NVNM_CHAIN_ID=787222 \
-  go test -mod=vendor -tags integration -count=1 ./internal/...
-```
-
-What differs from the L2 testnet there, and how the suite handles it:
-
-- Fees are charged in the pathUSD token, not a native coin. The funded check
-  and the `wallet_status` round-trip read that token; fund the signing wallet
-  with pathUSD from the faucet.
 - The name index serves exact match only and has no cursor, so
   `TestIntegration_GetRegistriesByName_Cursor` (a prefix walk) skips.
-- The built-in tx fixture is a devnet transaction. If the devnet is reset,
-  set `NVNM_TEST_TX_HASH` / `NVNM_TEST_TX_SENDER`.
 - The node is reth-based; its two `eth_getLogs` range rejections are
-  classified the same as the L2's
-  (`TestIntegration_FilterLogs_RangeRejectionsCurated`).
+  curated (`TestIntegration_FilterLogs_RangeRejectionsCurated`).
 
 The anchor read tests depend on a stable registry named `mcp-test-data` (one registry, three records) seeded by `cmd/seed-test-data`. Re-run that command against a fresh chain before running the anchor integration suite; it honors the same `NVNM_EVM_RPC_URL` / `NVNM_CHAIN_ID` variables and refuses to run if the RPC's chain ID does not match.
 
