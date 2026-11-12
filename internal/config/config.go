@@ -302,20 +302,25 @@ type Config struct {
 	JWTClockSkew              time.Duration // JWT_CLOCK_SKEW: leeway for token expiry checks (default 60s)
 	JWTRolesClaim             string        // JWT_ROLES_CLAIM: name of the roles claim in JWT (default "roles")
 
-	// Chain environment (NVNM-prefixed; introduced in Phase 8).
-	// ChainEnvironment selects between testnet and mainnet token naming
-	// and operator-facing URL defaults. When NVNM_CHAIN_ENVIRONMENT is
-	// unset, the value is inferred from ChainID; chain IDs the server
-	// does not recognize fall through to EnvTestnet.
+	// ChainEnvironment labels the chain as testnet or mainnet in tool
+	// responses. Set by NVNM_CHAIN_ENVIRONMENT, else inferred from a known
+	// ChainID; an unknown chain ID with no explicit value fails
+	// validation.
 	ChainEnvironment ChainEnvironment
 
-	// DocsURL, ExplorerURL, BridgeURL are operator-facing URLs surfaced
-	// in onboarding-tool responses. Optional; empty strings are valid
-	// (consumers handle the empty case gracefully). Set via NVNM_DOCS_URL,
-	// NVNM_EXPLORER_URL, NVNM_BRIDGE_URL.
+	// FeeToken is the token contract fees are charged in; the chain has
+	// no native coin. Built in for a known chain, else required through
+	// NVNM_FEE_TOKEN_ADDRESS / _SYMBOL / _DECIMALS.
+	FeeToken FeeToken
+
+	// DocsURL, ExplorerURL, BridgeURL, FaucetURL are operator-facing URLs
+	// surfaced in onboarding-tool responses. Optional; empty strings are
+	// valid (consumers handle the empty case gracefully). Set via
+	// NVNM_DOCS_URL, NVNM_EXPLORER_URL, NVNM_BRIDGE_URL, NVNM_FAUCET_URL.
 	DocsURL     string
 	ExplorerURL string
 	BridgeURL   string
+	FaucetURL   string
 
 	// WalletGeneratorURL points the setup wizard's needs_wallet response
 	// at the browser-hosted wallet generator page (a sibling repo at
@@ -508,17 +513,11 @@ func Load() (*Config, error) {
 	}
 	cfg.JWTClockSkew = clockSkew
 
-	cfg.loadChainEnvironment()
-	cfg.DocsURL = os.Getenv("NVNM_DOCS_URL")
-	cfg.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
-	cfg.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
-	cfg.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
-
-	if err := cfg.loadKeyRequestConfig(); err != nil {
+	if err := cfg.loadChainProfile(); err != nil {
 		return nil, err
 	}
 
-	if err := cfg.loadSMTPConfig(); err != nil {
+	if err := cfg.loadKeyDeliveryConfig(); err != nil {
 		return nil, err
 	}
 	cfg.AllowedOrigins = parseCommaSeparated(os.Getenv("NVNM_ALLOWED_ORIGINS"))
@@ -650,6 +649,39 @@ func (c *Config) loadResilienceConfig() error {
 	return nil
 }
 
+// loadKeyDeliveryConfig loads the self-serve key-request flow and the SMTP
+// relay it mails approved keys through. The two are validated together
+// (validateKeyRequestEmail), and loading them through one call keeps
+// Load() below the gocyclo threshold.
+func (c *Config) loadKeyDeliveryConfig() error {
+	if err := c.loadKeyRequestConfig(); err != nil {
+		return err
+	}
+	return c.loadSMTPConfig()
+}
+
+// loadChainProfile resolves everything that describes the chain to a
+// caller: its environment, the asset it charges fees in, and the
+// operator-facing URLs the onboarding tools hand out. Extracted from
+// Load() to keep its cyclomatic complexity below the gocyclo threshold.
+func (c *Config) loadChainProfile() error {
+	c.loadChainEnvironment()
+	// A fee token that is set but invalid is reported here. One that is
+	// missing is left empty for Validate, so a server with no RPC URL or
+	// chain ID is told about that first.
+	feeToken, err := FeeTokenFromEnv(os.Getenv, c.ChainID)
+	if err != nil && !errors.Is(err, ErrFeeTokenRequired) {
+		return err
+	}
+	c.FeeToken = feeToken
+	c.DocsURL = os.Getenv("NVNM_DOCS_URL")
+	c.ExplorerURL = os.Getenv("NVNM_EXPLORER_URL")
+	c.BridgeURL = os.Getenv("NVNM_BRIDGE_URL")
+	c.FaucetURL = os.Getenv("NVNM_FAUCET_URL")
+	c.WalletGeneratorURL = envOrDefault("NVNM_WALLET_GENERATOR_URL", "https://wallet.nvnmchain.io")
+	return nil
+}
+
 // loadChainEnvironment resolves c.ChainEnvironment from
 // NVNM_CHAIN_ENVIRONMENT (when set) or by inference from c.ChainID.
 // Validate() rejects explicit values that are not "testnet" or
@@ -690,8 +722,8 @@ func (c *Config) Validate() error {
 	if c.Transport != "stdio" && c.Transport != "http" {
 		return fmt.Errorf("%w: got %q", ErrInvalidTransport, c.Transport)
 	}
-	if !c.ChainEnvironment.IsValid() {
-		return fmt.Errorf("%w: got %q", ErrInvalidChainEnvironment, c.ChainEnvironment)
+	if err := c.validateChainProfile(); err != nil {
+		return err
 	}
 	if err := c.validateAuth(); err != nil {
 		return err
@@ -709,6 +741,20 @@ func (c *Config) Validate() error {
 		return err
 	}
 	return c.validateResilience()
+}
+
+// validateChainProfile checks what the server must know about the chain
+// and cannot infer for an unrecognized chain ID: its environment label,
+// and the token it charges fees in. Every balance the server reports is
+// that token's, so a chain without one described refuses to start.
+func (c *Config) validateChainProfile() error {
+	if !c.ChainEnvironment.IsValid() {
+		return fmt.Errorf("%w: got %q", ErrInvalidChainEnvironment, c.ChainEnvironment)
+	}
+	if c.FeeToken.Address == "" || c.FeeToken.Symbol == "" {
+		return ErrFeeTokenRequired
+	}
+	return nil
 }
 
 // validateKeyRequestEmail enforces the F4 fail-closed guard on the

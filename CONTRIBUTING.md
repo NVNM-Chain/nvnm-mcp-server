@@ -9,7 +9,7 @@ baseline Go competence and does not duplicate content from the
 
 This repository is the canonical NVNM Chain MCP Server: a Go-based
 [Model Context Protocol](https://modelcontextprotocol.io/) server that
-exposes the NVNM Chain (an Inveniam L2 on MANTRA) through a curated set of
+exposes the NVNM Chain through a curated set of
 typed tools. It is licensed under Apache 2.0; see [`LICENSE`](LICENSE) and
 [`NOTICE`](NOTICE).
 

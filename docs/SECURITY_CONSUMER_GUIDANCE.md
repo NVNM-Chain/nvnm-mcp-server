@@ -104,8 +104,8 @@ broadcast.
 3. **Always check the Method selector.** Anchor-precompile methods
    are stable; any selector that does not match the operation you
    asked for is a substitution attack.
-4. **Do not submit on Chain ID mismatch.** Mainnet (`1611`) and
-   testnet (`787111`) transactions must not be confused. Verify the
+4. **Do not submit on Chain ID mismatch.** Transactions for different
+   networks must not be confused (the devnet is `787222`). Verify the
    `chainId` field in the unsigned transaction before signing.
 
 ## Reporting

@@ -1,6 +1,6 @@
 # Operational runbook: NVNM Chain MCP Server
 
-This document covers production deployment and day-two operations for the Go MCP server that exposes the NVNM Chain (Inveniam L2 on MANTRA, chain ID **787111**) via MCP tools, with HTTP transport, separate health/metrics port, OpenTelemetry traces, and Prometheus metrics.
+This document covers production deployment and day-two operations for the Go MCP server that exposes the NVNM Chain (devnet chain ID **787222**) via MCP tools, with HTTP transport, separate health/metrics port, OpenTelemetry traces, and Prometheus metrics.
 
 ---
 
@@ -172,9 +172,9 @@ shape.
 | Variable | Purpose |
 |----------|---------|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC URL (`http://` or `https://` only). May include query parameters for provider API keys; treat as secret if it does. |
-| `NVNM_CHAIN_ID` | Expected chain ID; must be a positive integer (e.g. `787111`). Startup fails validation if missing or invalid. |
+| `NVNM_CHAIN_ID` | Expected chain ID; must be a positive integer (e.g. `787222`). Startup fails validation if missing or invalid. |
 
-Default RPC for the testnet network: `https://evm.testnet.nvnmchain.io`.
+RPC for the devnet: `https://rpc.nvnm.canary.mantrachain.dev`.
 
 ### Strongly recommended for production
 
@@ -208,10 +208,14 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NVNM_CHAIN_ENVIRONMENT` | inferred from `NVNM_CHAIN_ID` | `testnet` or `mainnet`. Selects env-aware token naming (`mantraUSD`/`wmantraUSD` vs `mmUSD`/`wmmUSD`) for onboarding-tool responses. Inference falls back to `testnet` for chain IDs the server does not recognize (787111 → testnet; 1611 → mainnet). |
+| `NVNM_CHAIN_ENVIRONMENT` | inferred for the devnet (`787222` → `testnet`) | `testnet` or `mainnet`. A label surfaced in tool responses. Any other chain ID must set it explicitly or the server refuses to start. |
 | `NVNM_DOCS_URL` | _(empty)_ | Operator-facing docs URL surfaced in onboarding-tool responses (e.g., the wizard's "where to learn more" hint). Optional. |
 | `NVNM_EXPLORER_URL` | _(empty)_ | Block-explorer URL surfaced to agents in onboarding-tool responses. Optional. |
 | `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
+| `NVNM_FAUCET_URL` | _(empty)_ | Faucet URL surfaced as `faucet_url` by `nvnm_overview` and the wizard's `needs_wallet` / `unfunded` states. Optional. |
+| `NVNM_FEE_TOKEN_ADDRESS` | built in for chain `787222` (`0x20c0…0000`), else required | Token contract fees are charged in. The chain has no native coin, so every balance the server reports is this token's `balanceOf`; `eth_getBalance` is not read. A mixed-case address must carry a valid EIP-55 checksum. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222`, else required | Symbol for the fee token. |
+| `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222`, else required | Fee token decimals (`0`-`36`). On a chain with no built-in fee token the server refuses to start unless all three are set. |
 | `NVNM_WALLET_GENERATOR_URL` | `https://wallet.nvnmchain.io` | Browser-hosted wallet generator page surfaced to the wizard's `needs_wallet` state. Default points at the canonical Inveniam-hosted instance (`NVNM-Chain/nvnm-wallet-page`); operators self-hosting the wallet page can override. |
 | `NVNM_KEY_REQUEST_ENABLED` | `false` | Opt-in flag for the public self-serve API-key request endpoint (`POST /api/v1/keys/request`). When `true`, `NVNM_KEY_PENDING_FILE` is required. Phase 11 L3 / RD3. |
 | `NVNM_KEY_PENDING_FILE` | _(empty)_ | Path to the on-disk JSON store of pending key requests. Required when `NVNM_KEY_REQUEST_ENABLED=true`. Operator-controlled persistence; mount on a durable filesystem. |
@@ -878,8 +882,8 @@ on a "reasonable efforts" basis per `docs/TERMS.md` § 10).
 
 | Environment | Sustained RPS target | Burst RPS target | HPA posture |
 |---|---|---|---|
-| Testnet (`nvnm-testnet-1`, EVM `787111`) | ~5 RPS | ~25 RPS | Aggressive (low CPU target, fast scale-up) |
-| Mainnet (`nvnm-1`, EVM `1611`) | ~50 RPS | ~200 RPS | Aggressive (same posture, more headroom) |
+| Testnet | ~5 RPS | ~25 RPS | Aggressive (low CPU target, fast scale-up) |
+| Mainnet | ~50 RPS | ~200 RPS | Aggressive (same posture, more headroom) |
 
 Per RD1, **node sizing is explicitly out of scope** for this design —
 the operator's Kubernetes platform handles node-level capacity; this

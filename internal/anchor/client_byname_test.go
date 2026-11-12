@@ -172,6 +172,44 @@ func TestGetRegistriesByName_UnsupportedNode(t *testing.T) {
 	}
 }
 
+// TestGetRegistriesByName_ExactOnlyChain proves a name index that serves
+// exact match only -- observed live on chain 787222 for match modes 2, 3
+// and 4 -- reports the dedicated sentinel. It is not the "method missing"
+// case: the lookup exists, so the caller must not be told to give up on
+// name lookups, and it must not collapse to "upstream operation failed".
+func TestGetRegistriesByName_ExactOnlyChain(t *testing.T) {
+	const raw = "RPC error: 3 execution reverted: only exact match is on chain; " +
+		"search prefix/suffix/contains off chain"
+	mock := &mockEVMClient{
+		callContractFn: func(context.Context, defitypes.Call, *big.Int) ([]byte, error) {
+			return nil, errors.New(raw)
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 787222, testABIPath(t), logging.New("error"))
+
+	for _, mode := range []RegistryNameMatch{RegistryNamePrefix, RegistryNameSuffix, RegistryNameContains} {
+		_, err := c.GetRegistriesByName(context.Background(), GetRegistriesByNameRequest{
+			Name: "tempo", Match: mode,
+		})
+		if !errors.Is(err, apperrors.ErrMatchModeUnsupported) {
+			t.Fatalf("mode %d: err = %v, want ErrMatchModeUnsupported", mode, err)
+		}
+		if errors.Is(err, apperrors.ErrRegistriesByNameUnsupported) {
+			t.Errorf("mode %d: reported as a missing method; exact match still works", mode)
+		}
+		safe := apperrors.SafeForClient(err)
+		if !errors.Is(safe, apperrors.ErrMatchModeUnsupported) {
+			t.Errorf("mode %d: SafeForClient collapsed the error to %q", mode, safe)
+		}
+		if strings.Contains(safe.Error(), "execution reverted") || strings.Contains(safe.Error(), "RPC error") {
+			t.Errorf("mode %d: client message leaks raw node text: %q", mode, safe)
+		}
+		if !strings.Contains(safe.Error(), "match=exact") {
+			t.Errorf("mode %d: client message must name the mode that works: %q", mode, safe)
+		}
+	}
+}
+
 func TestGetRegistriesByName_CallAndDecodeErrors(t *testing.T) {
 	tests := []struct {
 		name   string

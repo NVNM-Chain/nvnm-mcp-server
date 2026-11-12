@@ -58,6 +58,10 @@ func clearEnv(t *testing.T) {
 		"NVNM_DOCS_URL",
 		"NVNM_EXPLORER_URL",
 		"NVNM_BRIDGE_URL",
+		"NVNM_FAUCET_URL",
+		"NVNM_FEE_TOKEN_ADDRESS",
+		"NVNM_FEE_TOKEN_SYMBOL",
+		"NVNM_FEE_TOKEN_DECIMALS",
 		"NVNM_ALLOWED_ORIGINS",
 		"MCP_CLIENT_ID_HMAC_KEY",
 		"MCP_KEYLESS_READS",
@@ -91,11 +95,21 @@ func setMinimalEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
 	t.Setenv("NVNM_CHAIN_ID", "58887")
-	// Chain ID 58887 (the old manveniam-1) is intentionally not in the
-	// recognized list. Set NVNM_CHAIN_ENVIRONMENT explicitly so Load()
-	// has a fail-safe answer for non-recognized chain IDs. Tests that
-	// exercise unrecognized-chain fail-fast unset this themselves.
+	// Chain ID 58887 is intentionally not a recognized chain, so nothing
+	// about it is inferred: Load() needs NVNM_CHAIN_ENVIRONMENT and the
+	// fee token described in full. Tests that exercise the fail-fast for
+	// either one unset it themselves.
 	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "testnet")
+	setFeeTokenEnv(t)
+}
+
+// setFeeTokenEnv describes a fee token in full, which a chain with no
+// built-in one requires.
+func setFeeTokenEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("NVNM_FEE_TOKEN_ADDRESS", "0x1111111111111111111111111111111111111111")
+	t.Setenv("NVNM_FEE_TOKEN_SYMBOL", "tUSD")
+	t.Setenv("NVNM_FEE_TOKEN_DECIMALS", "6")
 }
 
 func TestLoad_Minimal(t *testing.T) {
@@ -181,8 +195,9 @@ func TestLoad_AllFields(t *testing.T) {
 	t.Setenv("MCP_HTTP_ADDR", ":9090")
 	t.Setenv("ENABLE_WRITE_TOOLS", "true")
 	// Chain ID 1 is not a recognized NVNM chain; supply an explicit
-	// environment so Load() does not fail-fast on unrecognized chain.
+	// environment and fee token so Load() does not fail-fast on it.
 	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "testnet")
+	setFeeTokenEnv(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -731,6 +746,7 @@ func TestLoad_ChainEnvironment_FailsFastForUnknownChainID(t *testing.T) {
 	// testnet; the new behavior is fail-fast.
 	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
 	t.Setenv("NVNM_CHAIN_ID", "58887")
+	setFeeTokenEnv(t)
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for unrecognized chain ID with no explicit NVNM_CHAIN_ENVIRONMENT, got nil")
@@ -752,36 +768,48 @@ func TestLoad_ChainEnvironment_ExplicitTestnetWithUnrecognizedChainID(t *testing
 	}
 }
 
-func TestLoad_ChainEnvironment_InferredFromTestnetChainID(t *testing.T) {
+func TestLoad_ChainEnvironment_InferredFromKnownChainID(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
-	t.Setenv("NVNM_CHAIN_ID", "787111")
+	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.nvnm.canary.mantrachain.dev")
+	t.Setenv("NVNM_CHAIN_ID", "787222")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.ChainEnvironment != EnvTestnet {
-		t.Errorf("ChainEnvironment = %q, want EnvTestnet (inferred from 787111)", cfg.ChainEnvironment)
+		t.Errorf("ChainEnvironment = %q, want EnvTestnet (inferred from 787222)", cfg.ChainEnvironment)
 	}
 }
 
-func TestLoad_ChainEnvironment_InferredFromMainnetChainID(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.nvnmchain.io")
-	t.Setenv("NVNM_CHAIN_ID", "1611")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.ChainEnvironment != EnvMainnet {
-		t.Errorf("ChainEnvironment = %q, want EnvMainnet (inferred from 1611)", cfg.ChainEnvironment)
+// TestLoad_RetiredChainIDsAreNotRecognized pins the cutover: the two chain
+// IDs the server used to recognize get no inferred environment and no
+// built-in fee token, so a deployment still pointed at one refuses to
+// start instead of running with settings that no longer apply.
+func TestLoad_RetiredChainIDsAreNotRecognized(t *testing.T) {
+	for _, chainID := range []string{"787111", "1611"} {
+		t.Run(chainID, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
+			t.Setenv("NVNM_CHAIN_ID", chainID)
+			if _, err := Load(); !errors.Is(err, ErrInvalidChainEnvironment) {
+				t.Fatalf("Load error = %v, want ErrInvalidChainEnvironment", err)
+			}
+			t.Setenv("NVNM_CHAIN_ENVIRONMENT", "testnet")
+			if _, err := Load(); !errors.Is(err, ErrFeeTokenRequired) {
+				t.Fatalf("Load error with an environment = %v, want ErrFeeTokenRequired", err)
+			}
+			setFeeTokenEnv(t)
+			if _, err := Load(); err != nil {
+				t.Fatalf("Load with environment and fee token described: %v", err)
+			}
+		})
 	}
 }
 
 func TestLoad_ChainEnvironment_ExplicitOverridesInference(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.testnet.nvnmchain.io")
-	t.Setenv("NVNM_CHAIN_ID", "787111") // testnet by inference
+	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.nvnm.canary.mantrachain.dev")
+	t.Setenv("NVNM_CHAIN_ID", "787222") // testnet by inference
 	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "mainnet")
 	cfg, err := Load()
 	if err != nil {

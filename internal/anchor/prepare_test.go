@@ -675,6 +675,66 @@ func TestPrepareAddRegistry_FallsBackToDefaultTipCap_WhenSuggestGasTipCapErrors(
 	}
 }
 
+// TestPrepareAddRegistry_HonorsZeroTipCap pins the fee shape on a chain
+// that charges no priority fee. Observed 2026-11-09 on chain 787222:
+// eth_maxPriorityFeePerGas = 0, eth_gasPrice = 600000000, and mined
+// transactions pay exactly that. A zero the node reported is the tip; the
+// default is only for a node that gives no answer.
+func TestPrepareAddRegistry_HonorsZeroTipCap(t *testing.T) {
+	mock := &mockEVMClient{
+		suggestGasFn: func(context.Context) (*big.Int, error) {
+			return big.NewInt(600_000_000), nil
+		},
+		suggestGasTipFn: func(context.Context) (*big.Int, error) {
+			return big.NewInt(0), nil
+		},
+	}
+	c := NewClient(mock, PrecompileAddress, 787222, testABIPath(t), logging.New("error"))
+
+	tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
+		From: "0x1234567890abcdef1234567890abcdef12345678",
+		Name: "zero-tip",
+	})
+	if err != nil {
+		t.Fatalf("PrepareAddRegistry: %v", err)
+	}
+	if tx.Type != 2 {
+		t.Errorf("Type = %d, want 2", tx.Type)
+	}
+	if tx.MaxPriorityFeePerGas != "0" {
+		t.Errorf("MaxPriorityFeePerGas = %q, want 0 (the node's answer)", tx.MaxPriorityFeePerGas)
+	}
+	if tx.MaxFeePerGas != "1200000000" {
+		t.Errorf("MaxFeePerGas = %q, want 1200000000 (2x gas price)", tx.MaxFeePerGas)
+	}
+	if tx.WalletTxRequest == nil || tx.WalletTxRequest.MaxPriorityFeePerGas != "0x0" {
+		t.Errorf("wallet_tx_request.maxPriorityFeePerGas = %+v, want 0x0", tx.WalletTxRequest)
+	}
+}
+
+// TestPrepareAddRegistry_NegativeOrNilTipCapFallsBack covers a node that
+// answers eth_maxPriorityFeePerGas with something unusable.
+func TestPrepareAddRegistry_NegativeOrNilTipCapFallsBack(t *testing.T) {
+	for name, tip := range map[string]*big.Int{"nil": nil, "negative": big.NewInt(-1)} {
+		t.Run(name, func(t *testing.T) {
+			mock := &mockEVMClient{
+				suggestGasTipFn: func(context.Context) (*big.Int, error) { return tip, nil },
+			}
+			c := NewClient(mock, PrecompileAddress, 58887, testABIPath(t), logging.New("error"))
+			tx, err := c.PrepareAddRegistry(context.Background(), PrepareAddRegistryRequest{
+				From: "0x1234567890abcdef1234567890abcdef12345678",
+				Name: "fallback",
+			})
+			if err != nil {
+				t.Fatalf("PrepareAddRegistry: %v", err)
+			}
+			if tx.MaxPriorityFeePerGas != "1000000000" {
+				t.Errorf("MaxPriorityFeePerGas = %q, want the 1 gwei default", tx.MaxPriorityFeePerGas)
+			}
+		})
+	}
+}
+
 func TestWalletTransactionRequest_JSON(t *testing.T) {
 	req := WalletTransactionRequest{
 		From:     "0x1234567890AbcdEF1234567890aBcdef12345678",

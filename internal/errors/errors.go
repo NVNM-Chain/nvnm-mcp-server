@@ -93,6 +93,25 @@ var (
 		"key must be the next_key from a previous page of the same listing " +
 			"and cannot be combined with a non-zero offset: " +
 			"page with either key or offset, not both")
+	// ErrMatchModeUnsupported marks a name lookup whose match mode the
+	// connected chain's name index does not serve (observed live on chain
+	// 787222 as "only exact match is on chain; search prefix/suffix/contains
+	// off chain"). Distinct from ErrRegistriesByNameUnsupported: the lookup
+	// exists and exact match works. The message is the client-facing text,
+	// surfaced verbatim (input class).
+	ErrMatchModeUnsupported = errors.New(
+		"match mode not supported on this chain: its registry name index " +
+			"serves match=exact only; retry with match=exact, or omit name " +
+			"and page the full listing")
+	// ErrNameCursorUnsupported marks a name-filtered listing whose key the
+	// connected chain ignored: the page it returned starts before the
+	// cursor, so it is the first page again and not the continuation the
+	// caller asked for. The message is the client-facing text, surfaced
+	// verbatim (input class).
+	ErrNameCursorUnsupported = errors.New(
+		"key is not supported with name on this chain: its registry name " +
+			"index ignores the cursor and would return the first page again; " +
+			"page name matches with offset and limit instead")
 	// ErrInvalidHexData marks calldata (or similar free-form hex input) that
 	// is not valid hex. Input class so the caller learns it is their bytes,
 	// not the node, that failed.
@@ -233,6 +252,8 @@ var inputErrors = []error{
 	ErrInvalidFilterCombination,
 	ErrMatchWithoutName,
 	ErrInvalidCursor,
+	ErrMatchModeUnsupported,
+	ErrNameCursorUnsupported,
 	ErrInvalidHexData,
 	ErrInvalidRole,
 	ErrBlockBeyondHead,

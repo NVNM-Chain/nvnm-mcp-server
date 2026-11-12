@@ -25,38 +25,15 @@ func TestChainEnvironment_IsValid(t *testing.T) {
 	}
 }
 
-func TestNamingFor(t *testing.T) {
-	tests := []struct {
-		env         ChainEnvironment
-		wantNative  string
-		wantWrapped string
-	}{
-		{EnvTestnet, "mantraUSD", "wmantraUSD"},
-		{EnvMainnet, "mmUSD", "wmmUSD"},
-		{"", "mantraUSD", "wmantraUSD"},        // empty defaults to testnet
-		{"unknown", "mantraUSD", "wmantraUSD"}, // unrecognized defaults to testnet
-	}
-	for _, tc := range tests {
-		t.Run(string(tc.env), func(t *testing.T) {
-			n := NamingFor(tc.env)
-			if n.Native != tc.wantNative {
-				t.Errorf("Native = %q, want %q", n.Native, tc.wantNative)
-			}
-			if n.Wrapped != tc.wantWrapped {
-				t.Errorf("Wrapped = %q, want %q", n.Wrapped, tc.wantWrapped)
-			}
-		})
-	}
-}
-
 func TestInferEnvironmentFromChainID(t *testing.T) {
 	tests := []struct {
 		chainID int64
 		want    ChainEnvironment
 	}{
-		{787111, EnvTestnet},
-		{1611, EnvMainnet},
-		{58887, ""}, // old manveniam-1 testnet -- not recognized by inference
+		{787222, EnvTestnet}, // devnet (nvnm-tempo-devnet-1)
+		{787111, ""},         // retired chain ID: no longer recognized
+		{1611, ""},           // retired chain ID: no longer recognized
+		{58887, ""},
 		{0, ""},
 		{1, ""},
 	}

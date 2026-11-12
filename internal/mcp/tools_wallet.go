@@ -6,7 +6,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -44,17 +43,26 @@ type walletStatusInput struct {
 }
 
 type walletStatusOutput struct {
-	Address          string       `json:"address"`
-	BalanceWei       string       `json:"balance_wei"`
-	BalanceHuman     string       `json:"balance_human"`
-	Nonce            uint64       `json:"nonce"`
-	HasSentTx        bool         `json:"has_sent_tx"`
-	Status           string       `json:"status"`
-	ChainID          int64        `json:"chain_id"`
-	ChainEnvironment string       `json:"chain_environment"`
-	TokenNative      string       `json:"token_native"`
-	TokenWrapped     string       `json:"token_wrapped"`
-	NextActions      []NextAction `json:"next_actions,omitempty"`
+	Address      string `json:"address"`
+	BalanceWei   string `json:"balance_wei"`
+	BalanceHuman string `json:"balance_human"`
+	// BalanceDecimals is the scale of BalanceWei: the fee token's own
+	// decimals. BalanceWei is the token's smallest unit, not wei; the
+	// field keeps its name for wire compatibility.
+	BalanceDecimals int `json:"balance_decimals"`
+	// FeeTokenAddress is the token contract the balance was read from.
+	FeeTokenAddress  string `json:"fee_token_address"`
+	Nonce            uint64 `json:"nonce"`
+	HasSentTx        bool   `json:"has_sent_tx"`
+	Status           string `json:"status"`
+	ChainID          int64  `json:"chain_id"`
+	ChainEnvironment string `json:"chain_environment"`
+	// TokenNative and TokenWrapped are both the fee token's symbol. The
+	// chain has one fee asset and no native coin; the two fields are kept
+	// for callers that read either.
+	TokenNative  string       `json:"token_native"`
+	TokenWrapped string       `json:"token_wrapped"`
+	NextActions  []NextAction `json:"next_actions,omitempty"`
 }
 
 func registerWalletTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Config) {
@@ -62,7 +70,10 @@ func registerWalletTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Confi
 		Name:  "wallet_status",
 		Title: "Wallet Status",
 		Description: "Returns a one-shot snapshot of an EVM address: " +
-			"balance (wei + human-readable in the env-aware gas token), " +
+			"balance in the token this chain charges fees in (the chain has " +
+			"no native coin, so this is the balanceOf of fee_token_address; " +
+			"balance_human names the token, and balance_wei is the raw " +
+			"integer in the token's smallest unit at balance_decimals), " +
 			"nonce, whether any transaction has been sent, and a " +
 			"three-state status (`unfunded` / `funded_unused` / " +
 			"`funded_active`). Status `funded_active` means \"has sent " +
@@ -77,7 +88,7 @@ func makeWalletStatusHandler(
 	c evm.Client,
 	cfg *config.Config,
 ) mcp.ToolHandlerFor[walletStatusInput, walletStatusOutput] {
-	naming := config.NamingFor(cfg.ChainEnvironment)
+	feeToken := cfg.FeeToken
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input walletStatusInput,
 	) (*mcp.CallToolResult, walletStatusOutput, error) {
@@ -89,7 +100,7 @@ func makeWalletStatusHandler(
 			return nil, walletStatusOutput{}, err
 		}
 
-		balance, err := c.BalanceAt(ctx, addr, nil)
+		balance, err := feeBalanceAt(ctx, c, cfg, addr, nil)
 		if err != nil {
 			return nil, walletStatusOutput{}, fmt.Errorf("get balance: %w", err)
 		}
@@ -98,17 +109,7 @@ func makeWalletStatusHandler(
 			return nil, walletStatusOutput{}, fmt.Errorf("get nonce: %w", err)
 		}
 
-		// classify balance==0 vs balance>0 by parsing the wei string.
-		// BalanceAt returns a *NormalizedBalance with Wei as decimal
-		// string; we don't have direct access to the *big.Int, so
-		// re-parse here. An empty or "0" string is unfunded.
-		hasFunds := false
-		if balance != nil {
-			b, ok := new(big.Int).SetString(balance.Wei, 10)
-			if ok && b.Sign() > 0 {
-				hasFunds = true
-			}
-		}
+		hasFunds := balanceIsPositive(balance)
 		hasSentTx := nonce > 0
 
 		status := WalletStatusUnfunded
@@ -119,24 +120,19 @@ func makeWalletStatusHandler(
 			status = WalletStatusFundedUnused
 		}
 
-		balanceWei := "0"
-		balanceHuman := "0 " + naming.Wrapped
-		if balance != nil {
-			balanceWei = balance.Wei
-			balanceHuman = balance.Ether + " " + naming.Wrapped
-		}
-
 		return nil, walletStatusOutput{
 			Address:          evm.AddressHex(addr),
-			BalanceWei:       balanceWei,
-			BalanceHuman:     balanceHuman,
+			BalanceWei:       balance.Wei,
+			BalanceHuman:     balance.Ether + " " + feeToken.Symbol,
+			BalanceDecimals:  feeToken.Decimals,
+			FeeTokenAddress:  feeToken.Address,
 			Nonce:            nonce,
 			HasSentTx:        hasSentTx,
 			Status:           status,
 			ChainID:          cfg.ChainID,
 			ChainEnvironment: string(cfg.ChainEnvironment),
-			TokenNative:      naming.Native,
-			TokenWrapped:     naming.Wrapped,
+			TokenNative:      feeToken.Symbol,
+			TokenWrapped:     feeToken.Symbol,
 			NextActions:      walletStatusNextActions(status),
 		}, nil
 	}
@@ -153,7 +149,7 @@ func walletStatusNextActions(status string) []NextAction {
 			{
 				Tool: "nvnm_setup_wizard",
 				Hint: "Walk through the funding flow. The wizard's `unfunded` state " +
-					"points at the bridge.",
+					"says how to fund the wallet on this chain.",
 			},
 		}
 	case WalletStatusFundedUnused:

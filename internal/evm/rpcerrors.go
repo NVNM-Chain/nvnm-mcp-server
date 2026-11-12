@@ -37,6 +37,12 @@ var safeNodeRPCErrors = []struct {
 	// "RPC error: -32000 invalid block range params". A different rejection
 	// from the width cap -- "narrow the range" would not fix it.
 	{"invalid block range params", apperrors.ErrLogRangeInvalid},
+	// The same two rejections in reth's wording, observed 2026-11-09 on
+	// chain 787222 (tempo): "query exceeds max block range 100000" for an
+	// over-wide window, and "block range extends beyond current head block:
+	// requested N, head M" for to_block past the head.
+	{"exceeds max block range", apperrors.ErrLogRangeTooWide},
+	{"extends beyond current head block", apperrors.ErrLogRangeInvalid},
 	// Observed 2026-09-15 for eth_getBalance / eth_getCode at a block past
 	// the head: "height 999999999 must be less than or equal to the current
 	// blockchain height 4005936".

@@ -20,12 +20,91 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   both the standard library and `golang.org/x/net` v0.58.0), and
   `GO-2026-6505` (OTLP trace exporter config logging, fixed in
   OpenTelemetry v1.45.0). No application code changes.
+- Bumped the Go toolchain to 1.26.11 (same three pins) for
+  `GO-2026-6859`, an HTTP/1 server crash in `net/http` from a
+  `MaxBytesReader` header race, reachable through the MCP, admin, and
+  health HTTP servers. No dependency or application code changes.
+
+### Breaking
+
+- **The server supports one chain type: fees charged in a token
+  contract, no native coin.** Chain IDs `787111` and `1611` are no longer
+  recognized, the `mantraUSD` / `wmantraUSD` / `mmUSD` / `wmmUSD` naming
+  is gone, and balances are never read with `eth_getBalance`. A
+  deployment still pointed at either retired chain ID refuses to start.
+  The one recognized chain is the devnet, `787222`
+  (`nvnm-tempo-devnet-1`): it starts with `NVNM_EVM_RPC_URL` and
+  `NVNM_CHAIN_ID` alone. Any other chain must set
+  `NVNM_CHAIN_ENVIRONMENT` and all three of `NVNM_FEE_TOKEN_ADDRESS`,
+  `NVNM_FEE_TOKEN_SYMBOL`, `NVNM_FEE_TOKEN_DECIMALS`, or the server
+  refuses to start. Chain-side gaps and verification:
+  `docs/CHAIN_COMPATIBILITY.md`.
+- **Live tests, `cmd/seed-test-data`, `cmd/query-anchor`, and the
+  in-process e2e target default to the devnet** instead of the retired
+  testnet.
+
+### Added
+
+- **Fee-token balances.** `eth_getBalance` answers the same placeholder
+  for every address on this chain, so `wallet_status`,
+  `nvnm_setup_wizard`, and `evm_get_balance` read the fee token's
+  `balanceOf` and render it at the token's scale
+  (`100.000000 pathUSD`). Responses gain `balance_decimals` and
+  `fee_token_address`. `token_native` and `token_wrapped` are kept and
+  both carry the fee token's symbol. `balance_wei` / `wei` keep their
+  names but hold the token's smallest unit, not wei. An unreadable token
+  balance is an error, not zero, and a balance at a block the node does
+  not have returns `block not found`. A mixed-case
+  `NVNM_FEE_TOKEN_ADDRESS` with a wrong EIP-55 checksum stops startup,
+  the same rule the balance read applies.
+- **`NVNM_FAUCET_URL`**, returned as `faucet_url` by `nvnm_overview` and
+  the setup wizard. The overview and the `initialize` instructions say
+  the chain has no native coin and name the fee token. The wizard's
+  `unfunded` message names the token and the configured faucet or bridge
+  URL; with neither configured it sends the reader to the operator
+  instead of naming an absent field.
+- **`anchor_get_registry` takes `registry_id`**, the name every other
+  anchor tool uses. `id` still works as a deprecated alias; both are
+  accepted together only when they agree. A call with neither now fails
+  with `registry_id: missing required parameter` from the handler instead
+  of a schema rejection.
 
 ### Changed
 
+- **Name lookups say what the chain's name index does not support.**
+  `registriesByName` serves `match=exact` only and ignores the cursor
+  (observed on chain `787222`). `prefix` / `suffix` / `contains` used to
+  come back as `upstream operation failed`; they now return
+  `match mode not supported on this chain: …`. A `key` sent with `name`
+  used to return the first page again; it is now rejected with
+  `key is not supported with name on this chain: …`, detected when the
+  returned page starts before the registry ID the cursor names. Page name
+  matches with `offset`. Both rejections come from the chain's answer,
+  so they stop firing if the chain adds the missing support.
+- **Missing registries and records are reported as not found.** The
+  anchoring contract reverts with `registry does not exist` and
+  `record does not exist`. `anchor_get_registry`, `anchor_get_records`,
+  and the prepare tools returned `upstream operation failed` for them;
+  they now return `registry not found` / `record not found`.
+  `uri cannot be empty` and `cannot revoke the last registry admin` are
+  surfaced as stated reasons.
+- **Prepared transactions use the node's priority fee when it is zero.**
+  A zero `eth_maxPriorityFeePerGas` used to be replaced by a 1 gwei
+  default, which made every type-2 transaction pay 1.2 gwei against a
+  0.6 gwei base fee (observed on mined transactions). The tip is now the
+  node's answer, including `0`; the default applies only when the node
+  gives no usable answer. Zero-tip type-2 transactions from this server
+  are mined and pay the base fee exactly.
+- **`evm_get_logs` range errors from a reth node are classified.**
+  `query exceeds max block range …` and
+  `block range extends beyond current head block …` map to the curated
+  range errors instead of `upstream operation failed`.
+- **Live write tests skip on an unfunded signing wallet** instead of
+  failing with `insufficient funds`: they read the fee token's
+  `balanceOf`. A built-in historical-tx fixture covers chain `787222`.
 - **Live integration tests and `cmd/seed-test-data` no longer hardcode the
   testnet.** The RPC endpoint and chain ID come from `NVNM_EVM_RPC_URL` /
-  `NVNM_CHAIN_ID` (testnet defaults when unset) via the live-test
+  `NVNM_CHAIN_ID` (devnet defaults when unset) via the live-test
   settings in `internal/config/testenv_config.go`, so the same suites run
   against any chain.
   `seed-test-data` also refuses to run when the RPC's chain ID differs

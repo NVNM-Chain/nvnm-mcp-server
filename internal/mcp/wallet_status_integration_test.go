@@ -34,7 +34,7 @@ const (
 	rtReceiptTimeout = 90 * time.Second
 )
 
-// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (testnet
+// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (devnet
 // defaults when unset); see internal/config/testenv_config.go.
 var (
 	rtTarget  = config.MustLiveTarget()
@@ -66,19 +66,25 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 	}
 	defer evmClient.Close()
 
-	// Minimal config: makeWalletStatusHandler only reads ChainID (for
-	// the output) and ChainEnvironment (for env-aware token naming).
-	// The environment is NVNM_CHAIN_ENVIRONMENT or inferred from the chain ID.
+	// Minimal config: makeWalletStatusHandler reads ChainID and
+	// ChainEnvironment (echoed in the output) and the fee token (the
+	// balance it reads). The environment is NVNM_CHAIN_ENVIRONMENT or
+	// inferred from the chain ID.
 	chainEnv, err := config.LiveEnvironment(os.Getenv, rtChainID)
 	if errors.Is(err, config.ErrLiveUnknownEnvironment) {
-		// The token-naming assertions need the environment; a fork chain ID
-		// is not guessable, so require it explicitly rather than assuming one.
+		// The environment of an unrecognized chain ID is not guessable,
+		// so require it explicitly rather than assuming one.
 		t.Skipf("%v", err)
 	}
 	if err != nil {
 		t.Fatalf("chain environment: %v", err)
 	}
-	cfg := &config.Config{ChainID: rtChainID, ChainEnvironment: chainEnv}
+	// The fee token is the balance wallet_status reads.
+	feeToken, err := config.FeeTokenFromEnv(os.Getenv, rtChainID)
+	if err != nil {
+		t.Fatalf("fee token: %v", err)
+	}
+	cfg := &config.Config{ChainID: rtChainID, ChainEnvironment: chainEnv, FeeToken: feeToken}
 	walletStatus := makeWalletStatusHandler(evmClient, cfg)
 
 	// --- wallet_status BEFORE ---
@@ -140,7 +146,7 @@ func TestIntegration_EthAccountRoundTrip(t *testing.T) {
 	if after.Status != WalletStatusFundedActive {
 		t.Errorf("status = %q after broadcast, want %q", after.Status, WalletStatusFundedActive)
 	}
-	wantToken := config.NamingFor(chainEnv).Wrapped
+	wantToken := cfg.FeeToken.Symbol
 	if !strings.HasSuffix(after.BalanceHuman, wantToken) {
 		t.Errorf("balance_human = %q, want suffix %q", after.BalanceHuman, wantToken)
 	}

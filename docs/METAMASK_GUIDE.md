@@ -10,7 +10,7 @@ Before you can anchor documents on the NVNM chain:
 
 1. **MetaMask installed** in your browser (Chrome, Firefox, Brave, or Edge extension)
 2. **NVNM Chain added** to MetaMask (see [Add the NVNM Chain](#step-1-add-the-nvnm-chain))
-3. **wmantraUSD balance** -- the gas token on NVNM testnet
+3. **pathUSD balance** -- the token fees are charged in (the chain has no native coin)
 4. **MCP server running** with write tools enabled. Set this in `.env` --
    `run-http` sources that file, so an inline `ENABLE_WRITE_TOOLS=` prefix
    would be overwritten and have no effect. If `.env` also turns on
@@ -36,11 +36,13 @@ Open MetaMask → Settings → Networks → Add a network → Add a network manu
 
 | Field | Value |
 |---|---|
-| Network name | NVNM Chain (Inveniam L2) |
-| New RPC URL | `https://evm.testnet.nvnmchain.io` |
-| Chain ID | `787111` |
-| Currency symbol | `wmantraUSD` |
-| Block explorer | `https://explorer.evm.testnet.nvnmchain.io` |
+| Network name | NVNM Chain (devnet) |
+| New RPC URL | `https://rpc.nvnm.canary.mantrachain.dev` |
+| Chain ID | `787222` |
+| Currency symbol | `pathUSD` |
+| Block explorer | `https://scan.nvnm.canary.mantrachain.dev` |
+
+The chain has no native coin. Fees are charged in the `pathUSD` token, so the balance MetaMask shows next to the currency symbol is not what pays for a transaction. Check the token balance with `wallet_status`.
 
 Click **Save**. Switch to the NVNM Chain network.
 
@@ -83,13 +85,13 @@ The response includes two signing paths. You want `wallet_tx_request`:
   "gas": 120000,
   "gas_price": "5000000000",
   "value": "0",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "wallet_tx_request": {
     "from": "0xYourWalletAddress",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0x...",
     "value": "0x0",
-    "chainId": "0xc02a7",
+    "chainId": "0xc0316",
     "gas": "0x1d4c0",
     "nonce": "0x5",
     "gasPrice": "0x12a05f200"
@@ -120,7 +122,7 @@ MetaMask will pop up a confirmation window showing:
 
 - **From:** your wallet address
 - **To:** the anchor precompile (`0x0000...0A00`)
-- **Gas fee:** estimated in wmantraUSD
+- **Gas fee:** charged in pathUSD
 - **Data:** the ABI-encoded anchor call (shown as hex)
 
 Review and click **Confirm**.
@@ -178,7 +180,7 @@ Each returns a `wallet_tx_request`. Pass it to MetaMask the same way.
 ## Troubleshooting
 
 **MetaMask shows "Wrong network"**
-Switch to NVNM Chain in MetaMask. The `chainId` in `wallet_tx_request` is `0xc02a7` (787111 decimal).
+Switch to NVNM Chain in MetaMask. The `chainId` in `wallet_tx_request` is `0xc0316` (787222 decimal).
 
 **MetaMask shows "Transaction underpriced"**
 The gas price suggested at prepare time may have changed. Call `anchor_prepare_*` again to get a fresh estimate.
@@ -200,7 +202,7 @@ Call `anchor_get_records` with the registry numeric ID (`registry_id`) or the do
 ## At a Glance
 
 ```
-1. Add NVNM chain to MetaMask  (chainId 787111 / 0xc02a7)
+1. Add NVNM chain to MetaMask  (chainId 787222 / 0xc0316)
 2. Call anchor_prepare_*       (from = your wallet address)
 3. Take wallet_tx_request      (ready-made MetaMask payload)
 4. window.ethereum.request     (eth_sendTransaction)

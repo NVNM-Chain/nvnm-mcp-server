@@ -100,6 +100,8 @@ All `anchor_prepare_*` tools now build EIP-1559 (type-2) transactions by default
 
 On type-2 responses, `gas_price` is dual-populated to equal `max_fee_per_gas` so a legacy-only signer that only reads `gas_price` still has a usable value.
 
+`max_fee_per_gas` is twice the node's `eth_gasPrice`. `max_priority_fee_per_gas` is the node's `eth_maxPriorityFeePerGas`, including `0`: the chain charges no priority fee (observed on chain `787222`), and the transaction then pays the base fee only. A node that does not answer the call gets a 1 gwei default.
+
 Each prepare tool gains an optional `prefer_legacy_tx` (bool, default `false`) input. Set to `true` to opt back into a type-0 `LegacyTx` for signers that cannot produce type-2 signatures.
 
 ---
@@ -162,9 +164,11 @@ _No parameters._
 | `explorer_url` | `string` | Operator-configured explorer URL (omitted when empty). |
 | `docs_url` | `string` | Operator-configured docs URL (omitted when empty). |
 | `bridge_url` | `string` | Operator-configured bridge URL (omitted when empty). |
-| `token_native` | `string` | Native gas token symbol (`mantraUSD` on testnet, `mmUSD` on mainnet). |
-| `token_wrapped` | `string` | Wrapped token symbol (`wmantraUSD` on testnet, `wmmUSD` on mainnet). |
-| `what_is_nvnm_chain` | `string` | 2-3 sentence prose explanation. |
+| `faucet_url` | `string` | Operator-configured faucet URL (`NVNM_FAUCET_URL`; omitted when empty). |
+| `token_native` | `string` | The fee token's symbol (`pathUSD`). The chain has no native coin; the field keeps its name for callers that read it. |
+| `token_wrapped` | `string` | The fee token's symbol (`pathUSD`), the same value as `token_native`. |
+| `fee_token_address` | `string` | Token contract fees are charged in. Every balance this server reports is this token's `balanceOf`. |
+| `what_is_nvnm_chain` | `string` | Prose explanation of the chain, ending with the fee token: the chain has no native coin. |
 | `privacy_by_design` | `string` | Verbatim caveat: anchored data (hash + registry name) is public on-chain, but a hash doesn't reveal the document; wallet_status reads only balance/nonce so it can't tell what a wallet anchored. |
 | `prereqs` | `[]string` | Prerequisites a caller needs before interacting. |
 | `canonical_journey` | `[]object` | Recommended first-time-agent sequence; each entry is `{step, tool, hint}`. |
@@ -180,6 +184,8 @@ None: pure-compute, no RPC.
 
 One-shot snapshot for an EVM address. Returns balance, nonce, and a three-state status -- `unfunded` / `funded_unused` / `funded_active`. The status field is intentionally honest: `funded_active` means "has sent any transaction," NOT "has anchored," because `wallet_status` reads only balance and nonce, never transaction contents.
 
+The balance is in the token the chain charges fees in. The chain has no native coin: `eth_getBalance` answers the same placeholder for every address, so the balance is the fee token's `balanceOf` (`fee_token_address`), and that is what decides `unfunded`.
+
 ### Input Parameters
 
 | Field | Type | Required | Description |
@@ -191,21 +197,23 @@ One-shot snapshot for an EVM address. Returns balance, nonce, and a three-state 
 | Field | Type | Description |
 | --- | --- | --- |
 | `address` | `string` | EIP-55 checksummed address. |
-| `balance_wei` | `string` | Balance as decimal-wei string (`"0"` when unfunded). |
-| `balance_human` | `string` | Balance in the env-aware wrapped-token unit (e.g. `"1.5 wmantraUSD"`). |
+| `balance_wei` | `string` | Balance as a decimal integer in the fee token's smallest unit (`"0"` when unfunded). It is not wei, despite the name -- see `balance_decimals`. |
+| `balance_human` | `string` | Balance with its symbol, e.g. `"100.000000 pathUSD"`. |
+| `balance_decimals` | `int` | Scale of `balance_wei`: the fee token's decimals (`6` for pathUSD). |
+| `fee_token_address` | `string` | Token contract the balance was read from. |
 | `nonce` | `uint64` | Pending nonce. |
 | `has_sent_tx` | `bool` | True iff `nonce > 0`. |
 | `status` | `string` | `unfunded` / `funded_unused` / `funded_active`. |
 | `chain_id` | `int64` | EIP-155 chain ID (echoed for client convenience). |
 | `chain_environment` | `string` | `mainnet` / `testnet`. |
-| `token_native` | `string` | Native gas-token symbol. |
-| `token_wrapped` | `string` | Wrapped-token symbol used by `balance_human`. |
+| `token_native` | `string` | The fee token's symbol; same value as `token_wrapped`. |
+| `token_wrapped` | `string` | Symbol used by `balance_human`. |
 | `next_actions` | `[]NextAction` | Status-specific recommendations. |
 
 ### Error Conditions
 
 - Invalid address format.
-- Upstream RPC error fetching balance or pending nonce.
+- Upstream RPC error fetching balance or pending nonce. This includes a `balanceOf` call that reverts or returns anything but one 32-byte word; an unreadable balance is an error, never a zero.
 
 ---
 
@@ -225,9 +233,10 @@ Four-state prose-guided onboarding flow: `needs_wallet` / `unfunded` / `funded_u
 | --- | --- | --- |
 | `state` | `string` | One of `needs_wallet` / `unfunded` / `funded_unused` / `funded_active`. |
 | `message` | `string` | State-specific prose guidance. |
-| `wallet` | `object` | Snapshot (`address`, `balance_wei`, `balance_human`, `nonce`, `has_sent_tx`, `chain_id`, `chain_environment`, `token_native`, `token_wrapped`) -- omitted when `state=needs_wallet`. |
+| `wallet` | `object` | Snapshot (`address`, `balance_wei`, `balance_human`, `balance_decimals`, `fee_token_address`, `nonce`, `has_sent_tx`, `chain_id`, `chain_environment`, `token_native`, `token_wrapped`; same meanings as [wallet\_status](#wallet_status)) -- omitted when `state=needs_wallet`. |
 | `sample_code` | `[]object` | Language-specific wallet-generation snippets -- only populated when `state=needs_wallet`. Each entry has `language`, `title`, `code`. |
 | `bridge_url` | `string` | Bridge URL for funding -- populated when `state=needs_wallet` or `state=unfunded`. |
+| `faucet_url` | `string` | Faucet URL for funding (`NVNM_FAUCET_URL`) -- populated in the same two states, omitted when not configured. With neither URL configured, the message tells the reader to ask the operator. |
 | `wallet_generator_url` | `string` | Operator-configured URL of a hosted wallet generator (`NVNM_WALLET_GENERATOR_URL`) -- only populated when `state=needs_wallet`, omitted otherwise. |
 | `next_actions` | `[]NextAction` | State-specific recommendations. |
 
@@ -346,7 +355,7 @@ _No parameters._
 
 ```json
 {
-  "chain_id": 787111,
+  "chain_id": 787222,
   "latest_block_number": 185432
 }
 ```
@@ -573,7 +582,9 @@ Returns the receipt for a mined transaction, including status, gas used, logs, a
 
 ## 5. evm\_get\_balance
 
-Returns the balance of an address in both wei and ether. Optionally specify a block number.
+Returns the balance of an address in the token the chain charges fees in. Optionally specify a block number.
+
+The chain has no native coin, so this is the fee token's `balanceOf` at that block. `eth_getBalance` answers one placeholder value for every address and is not a balance.
 
 ### Input Parameters
 
@@ -587,9 +598,11 @@ Returns the balance of an address in both wei and ether. Optionally specify a bl
 | Field     | Type     | Description                            |
 |-----------|----------|----------------------------------------|
 | `address` | `string` | Queried address (0x-prefixed)          |
-| `wei`     | `string` | Balance in wei (decimal string)        |
-| `balance_human` | `string` | Balance in the chain gas token, e.g. `1.5 wmantraUSD` (prefer this) |
-| `token_wrapped` | `string` | Gas-token symbol for this deployment (`wmantraUSD` / `wmmUSD`) |
+| `wei`     | `string` | Balance as a decimal integer in the fee token's smallest unit. It is not wei, despite the name |
+| `balance_human` | `string` | Balance with the fee token's symbol, e.g. `100.000000 pathUSD` (prefer this) |
+| `token_wrapped` | `string` | Fee token symbol for this deployment (`pathUSD`) |
+| `balance_decimals` | `int` | Scale of `wei`: the fee token's decimals (`6` for pathUSD) |
+| `fee_token_address` | `string` | Token contract the balance was read from |
 | `ether`   | `string` | Legacy alias for the same decimal amount. NOT denominated in ether -- this chain has no ether. Retained for wire compatibility |
 
 ### Error Conditions
@@ -846,7 +859,7 @@ This tool reads local configuration only and does not make RPC calls. It should 
 ```json
 {
   "address": "0x0000000000000000000000000000000000000A00",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "abi_loaded": true,
   "method_count": 12
 }
@@ -862,7 +875,8 @@ Fetch a single anchoring registry by its numeric ID. A registry is a logical con
 
 | Name   | Type     | Required | Description                  |
 |--------|----------|----------|------------------------------|
-| `id`   | `uint64` (**≥ 1**) | required | Registry numeric ID. `0` is rejected. |
+| `registry_id` | `uint64` (**≥ 1**) | required unless `id` is used | Registry numeric ID. `0` is rejected. The same name every other anchor tool uses. |
+| `id`   | `uint64` (**≥ 1**) | optional, **DEPRECATED** | Original name of `registry_id`, still accepted. Pass one of the two; both are accepted only when they hold the same value. |
 
 ### Output Fields
 
@@ -879,8 +893,9 @@ Fetch a single anchoring registry by its numeric ID. A registry is a logical con
 
 ### Error Conditions
 
-- `id` not provided (schema rejection).
-- `id` is `0` (`invalid registry ID`: registry IDs start at 1).
+- Neither `registry_id` nor `id` provided (`registry_id: missing required parameter`).
+- `registry_id` and `id` both provided with different values.
+- The ID is `0` (`invalid registry ID`: registry IDs start at 1).
 - Registry not found for the given ID.
 - ABI encoding/decoding failure.
 - RPC connection failure.
@@ -891,7 +906,7 @@ Fetch a single anchoring registry by its numeric ID. A registry is a logical con
 
 ```json
 {
-  "id": 1
+  "registry_id": 1
 }
 ```
 
@@ -930,6 +945,16 @@ Fetch a page of anchoring registries, optionally filtered by name. The mode is s
 > the call with `registry name lookup unavailable: …` -- there is no
 > fallback to scanning the table. The unfiltered listing works on every node.
 
+> **Partial name index (chain `787222`, observed 2026-11-09).**
+> `match=exact` works and is case-insensitive. `prefix`, `suffix`, and
+> `contains` are rejected with `match mode not supported on this chain: …`.
+> The name index has no cursor there: a name-filtered page never carries
+> `pagination.next_key`, and a `key` sent with `name` is rejected with
+> `key is not supported with name on this chain: …` because the chain would
+> ignore it and return the first page again. Page name matches with
+> `offset` and `limit`, using the offset stop rule above. The unfiltered
+> listing keeps both paging styles.
+
 ### Input Parameters
 
 | Name          | Type     | Required | Description                   |
@@ -961,6 +986,8 @@ Each element in `registries` has the same fields as [anchor\_get\_registry](#10-
 - `key` combined with a non-zero `offset` (two different ways of naming a position), `key` that is not base64, or `key` that decodes to anything other than the 8-byte registry cursor this listing issues (previously such a key produced a silent empty page).
 - Invalid `match` value (must be `exact`, `prefix`, `suffix`, or `contains`).
 - `name` against a node whose precompile lacks `registriesByName` (`registry name lookup unavailable`).
+- `match` other than `exact` on a chain whose name index serves exact match only (`match mode not supported on this chain`).
+- `key` with `name` on a chain whose name index ignores the cursor (`key is not supported with name on this chain`). Detected from the answer: the page starts before the registry ID the cursor names.
 - ABI encoding/decoding failure.
 - RPC connection failure.
 
@@ -1238,13 +1265,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "gas": 200000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0x12345678...",
     "value": "0x0",
-    "chainId": "0xc02a7",
+    "chainId": "0xc0316",
     "gas": "0x30d40",
     "nonce": "0x5",
     "gasPrice": "0x3b9aca00"
@@ -1314,13 +1341,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "gas": 250000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0xabcdef01...",
     "value": "0x0",
-    "chainId": "0xc02a7",
+    "chainId": "0xc0316",
     "gas": "0x3d090",
     "nonce": "0x6",
     "gasPrice": "0x3b9aca00"
@@ -1385,13 +1412,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "max_priority_fee_per_gas": "5000000000",
   "type": 2,
   "value": "0",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0x97b40c25...",
     "value": "0x0",
-    "chainId": "0xc02a7",
+    "chainId": "0xc0316",
     "gas": "0xd5a6",
     "nonce": "0x8",
     "maxFeePerGas": "0x14f46b0400",
@@ -1462,13 +1489,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "gas": 150000,
   "gas_price": "1000000000",
   "value": "0",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0x87654321...",
     "value": "0x0",
-    "chainId": "0xc02a7",
+    "chainId": "0xc0316",
     "gas": "0x249f0",
     "nonce": "0x7",
     "gasPrice": "0x3b9aca00"
@@ -1535,13 +1562,13 @@ Returns an [UnsignedTransaction](#unsignedtransaction-fields) object.
   "max_priority_fee_per_gas": "5000000000",
   "type": 2,
   "value": "0",
-  "chain_id": 787111,
+  "chain_id": 787222,
   "wallet_tx_request": {
     "from": "0xaaa...111",
     "to": "0x0000000000000000000000000000000000000A00",
     "data": "0xacd58bc7...",
     "value": "0x0",
-    "chainId": "0xc02a7",
+    "chainId": "0xc0316",
     "gas": "0xab9f",
     "nonce": "0x9",
     "maxFeePerGas": "0x14f46b0400",
@@ -1637,7 +1664,7 @@ quantities suitable for EIP-1193 wallets):
 | `to`       | `string` | Precompile address (0x-prefixed).            |
 | `data`     | `string` | ABI-encoded calldata (hex, 0x-prefixed).     |
 | `value`    | `string` | `"0x0"` for precompile calls.                |
-| `chainId`  | `string` | 0x-prefixed hex chain ID (e.g. `"0xc02a7"`).  |
+| `chainId`  | `string` | 0x-prefixed hex chain ID (e.g. `"0xc0316"`).  |
 | `gas`      | `string` | 0x-prefixed hex gas limit.                   |
 | `nonce`    | `string` | 0x-prefixed hex sender nonce -- the same value as the parent `nonce`. MetaMask ignores it (it looks the nonce up itself); a headless signer passing this object to `sign_transaction` needs it. |
 | `gasPrice` | `string` | 0x-prefixed hex gas price (wei). Type-0 only; type-2 requests carry `maxFeePerGas` / `maxPriorityFeePerGas` instead. |

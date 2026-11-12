@@ -23,7 +23,7 @@ import (
 //
 // Local run (needs a wallet funded on the target chain, via
 // NVNM_TEST_PRIVATE_KEY or ../../.chain_credentials.txt; the chain comes from
-// NVNM_EVM_RPC_URL / NVNM_CHAIN_ID, default testnet):
+// NVNM_EVM_RPC_URL / NVNM_CHAIN_ID, default the devnet):
 //
 //	make test-integration
 
