@@ -20,6 +20,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   both the standard library and `golang.org/x/net` v0.58.0), and
   `GO-2026-6505` (OTLP trace exporter config logging, fixed in
   OpenTelemetry v1.45.0). No application code changes.
+- Bumped the Go toolchain to 1.26.11 (same three pins) for
+  `GO-2026-6859`, an HTTP/1 server crash in `net/http` from a
+  `MaxBytesReader` header race, reachable through the MCP, admin, and
+  health HTTP servers. No dependency or application code changes.
 
 ### Added
 
