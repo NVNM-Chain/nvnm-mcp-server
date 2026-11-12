@@ -104,7 +104,7 @@ func testPrivateKey(t *testing.T) *defiwallet.PrivateKey {
 }
 
 func TestSignTx_HappyPath(t *testing.T) {
-	utx := testUnsignedTx(t, 787111)
+	utx := testUnsignedTx(t, 787222)
 	signed, err := signTx(context.Background(), utx, testPrivateKey(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

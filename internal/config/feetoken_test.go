@@ -10,7 +10,7 @@ import (
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
-const l1FeeTokenAddress = "0x20c0000000000000000000000000000000000000"
+const devnetFeeTokenAddress = "0x20c0000000000000000000000000000000000000"
 
 func envMap(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
@@ -18,6 +18,7 @@ func envMap(m map[string]string) func(string) string {
 
 func TestFeeTokenFromEnv(t *testing.T) {
 	const other = "0x1111111111111111111111111111111111111111"
+	builtIn := FeeToken{Symbol: "pathUSD", Decimals: 6, Address: devnetFeeTokenAddress}
 	tests := []struct {
 		name    string
 		chainID int64
@@ -26,29 +27,19 @@ func TestFeeTokenFromEnv(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "L2 testnet charges fees in its native coin",
-			chainID: testnetChainID,
-			want:    FeeToken{},
-		},
-		{
-			name:    "mainnet charges fees in its native coin",
-			chainID: mainnetChainID,
-			want:    FeeToken{},
-		},
-		{
-			name:    "L1 devnet has a built-in fee token",
-			chainID: l1DevnetChainID,
-			want:    FeeToken{Symbol: "pathUSD", Decimals: 6, Address: l1FeeTokenAddress},
+			name:    "the devnet has a built-in fee token",
+			chainID: devnetChainID,
+			want:    builtIn,
 		},
 		{
 			name:    "each variable overrides one built-in field",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetSymbol: "nUSD"},
-			want:    FeeToken{Symbol: "nUSD", Decimals: 6, Address: l1FeeTokenAddress},
+			want:    FeeToken{Symbol: "nUSD", Decimals: 6, Address: devnetFeeTokenAddress},
 		},
 		{
 			name:    "address and decimals override on a known chain",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetAddress: other, envFeeAssetDecimals: "18"},
 			want:    FeeToken{Symbol: "pathUSD", Decimals: 18, Address: other},
 		},
@@ -61,37 +52,42 @@ func TestFeeTokenFromEnv(t *testing.T) {
 			want: FeeToken{Symbol: "tUSD", Decimals: 0, Address: other},
 		},
 		{
-			name:    "unknown chain without an address stays native",
+			name:    "unknown chain with no fee token",
 			chainID: 58887,
-			want:    FeeToken{},
+			wantErr: ErrFeeTokenRequired,
 		},
 		{
-			name:    "address alone on an unknown chain is incomplete",
+			name:    "unknown chain with the address alone",
 			chainID: 58887,
 			env:     map[string]string{envFeeAssetAddress: other},
-			wantErr: ErrFeeTokenIncomplete,
+			wantErr: ErrFeeTokenRequired,
 		},
 		{
-			name:    "address without decimals on an unknown chain is incomplete",
+			name:    "unknown chain without decimals",
 			chainID: 58887,
 			env:     map[string]string{envFeeAssetAddress: other, envFeeAssetSymbol: "tUSD"},
-			wantErr: ErrFeeTokenIncomplete,
+			wantErr: ErrFeeTokenRequired,
 		},
 		{
-			name:    "symbol without an address on an unknown chain is incomplete",
+			name:    "unknown chain without a symbol",
 			chainID: 58887,
-			env:     map[string]string{envFeeAssetSymbol: "tUSD"},
-			wantErr: ErrFeeTokenIncomplete,
+			env:     map[string]string{envFeeAssetAddress: other, envFeeAssetDecimals: "6"},
+			wantErr: ErrFeeTokenRequired,
 		},
 		{
-			name:    "decimals without an address on a native-coin chain is incomplete",
-			chainID: testnetChainID,
-			env:     map[string]string{envFeeAssetDecimals: "6"},
-			wantErr: ErrFeeTokenIncomplete,
+			name:    "unknown chain without an address",
+			chainID: 58887,
+			env:     map[string]string{envFeeAssetSymbol: "tUSD", envFeeAssetDecimals: "6"},
+			wantErr: ErrFeeTokenRequired,
+		},
+		{
+			name:    "a retired chain ID has no built-in fee token",
+			chainID: 787111,
+			wantErr: ErrFeeTokenRequired,
 		},
 		{
 			name:    "malformed address",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetAddress: "0x20c0"},
 			wantErr: ErrFeeTokenAddressInvalid,
 		},
@@ -100,7 +96,7 @@ func TestFeeTokenFromEnv(t *testing.T) {
 			// casing broken. A bare hex parse accepts it; the balance read
 			// does not, so startup must not either.
 			name:    "mixed-case address with a wrong checksum",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env: map[string]string{
 				envFeeAssetAddress: "0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- wrong checksum on purpose
 			},
@@ -108,7 +104,7 @@ func TestFeeTokenFromEnv(t *testing.T) {
 		},
 		{
 			name:    "mixed-case address with the right checksum",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env: map[string]string{
 				envFeeAssetAddress: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
 			},
@@ -119,7 +115,7 @@ func TestFeeTokenFromEnv(t *testing.T) {
 		},
 		{
 			name:    "upper-case address carries no checksum",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env: map[string]string{
 				envFeeAssetAddress: "0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
 			},
@@ -130,19 +126,19 @@ func TestFeeTokenFromEnv(t *testing.T) {
 		},
 		{
 			name:    "non-numeric decimals",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetDecimals: "six"},
 			wantErr: ErrFeeTokenDecimalsInvalid,
 		},
 		{
 			name:    "negative decimals",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetDecimals: "-1"},
 			wantErr: ErrFeeTokenDecimalsInvalid,
 		},
 		{
 			name:    "decimals above the cap",
-			chainID: l1DevnetChainID,
+			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetDecimals: "37"},
 			wantErr: ErrFeeTokenDecimalsInvalid,
 		},
@@ -160,42 +156,13 @@ func TestFeeTokenFromEnv(t *testing.T) {
 	}
 }
 
-func TestConfig_GasTokenAndNaming(t *testing.T) {
-	t.Run("native coin takes the environment's name and 18 decimals", func(t *testing.T) {
-		cfg := &Config{ChainEnvironment: EnvMainnet}
-		if got, want := cfg.GasToken(), (FeeToken{Symbol: "wmmUSD", Decimals: 18}); got != want {
-			t.Errorf("GasToken = %+v, want %+v", got, want)
-		}
-		if cfg.GasToken().IsContract() {
-			t.Error("native coin reported as a token contract")
-		}
-		if got, want := cfg.TokenNaming(), (TokenNaming{Native: "mmUSD", Wrapped: "wmmUSD"}); got != want {
-			t.Errorf("TokenNaming = %+v, want %+v", got, want)
-		}
-	})
-	t.Run("fee token names both symbols and keeps its own scale", func(t *testing.T) {
-		token := FeeToken{Symbol: "pathUSD", Decimals: 6, Address: l1FeeTokenAddress}
-		cfg := &Config{ChainEnvironment: EnvTestnet, FeeToken: token}
-		if got := cfg.GasToken(); got != token {
-			t.Errorf("GasToken = %+v, want %+v", got, token)
-		}
-		if !cfg.GasToken().IsContract() {
-			t.Error("fee token not reported as a token contract")
-		}
-		if got, want := cfg.TokenNaming(), (TokenNaming{Native: "pathUSD", Wrapped: "pathUSD"}); got != want {
-			t.Errorf("TokenNaming = %+v, want %+v", got, want)
-		}
-	})
-}
-
-// TestLoad_L1Devnet proves chain 787222 boots with no chain-specific
+// TestLoad_Devnet proves chain 787222 boots with no chain-specific
 // variables beyond the RPC URL and chain ID: the environment is inferred
 // and the fee token is the built-in one.
-func TestLoad_L1Devnet(t *testing.T) {
+func TestLoad_Devnet(t *testing.T) {
 	clearEnv(t)
-	setMinimalEnv(t)
+	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.nvnm.canary.mantrachain.dev")
 	t.Setenv("NVNM_CHAIN_ID", "787222")
-	t.Setenv("NVNM_CHAIN_ENVIRONMENT", "")
 	t.Setenv("NVNM_FAUCET_URL", "https://faucet.example.com")
 
 	cfg, err := Load()
@@ -205,7 +172,7 @@ func TestLoad_L1Devnet(t *testing.T) {
 	if cfg.ChainEnvironment != EnvTestnet {
 		t.Errorf("ChainEnvironment = %q, want testnet (inferred from 787222)", cfg.ChainEnvironment)
 	}
-	want := FeeToken{Symbol: "pathUSD", Decimals: 6, Address: l1FeeTokenAddress}
+	want := FeeToken{Symbol: "pathUSD", Decimals: 6, Address: devnetFeeTokenAddress}
 	if cfg.FeeToken != want {
 		t.Errorf("FeeToken = %+v, want %+v", cfg.FeeToken, want)
 	}
@@ -214,26 +181,34 @@ func TestLoad_L1Devnet(t *testing.T) {
 	}
 }
 
-func TestLoad_FeeTokenMisconfigurationFailsFast(t *testing.T) {
-	clearEnv(t)
-	setMinimalEnv(t)
-	t.Setenv("NVNM_FEE_TOKEN_ADDRESS", "0x1111111111111111111111111111111111111111")
-
-	if _, err := Load(); !errors.Is(err, ErrFeeTokenIncomplete) {
-		t.Fatalf("Load error = %v, want ErrFeeTokenIncomplete", err)
+// TestLoad_UnknownChainRequiresFeeToken proves the server refuses to
+// start on a chain whose fee token it was not told, in full: there is no
+// other balance it could report.
+func TestLoad_UnknownChainRequiresFeeToken(t *testing.T) {
+	for name, unset := range map[string]string{
+		"no address":  "NVNM_FEE_TOKEN_ADDRESS",
+		"no symbol":   "NVNM_FEE_TOKEN_SYMBOL",
+		"no decimals": "NVNM_FEE_TOKEN_DECIMALS",
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			setMinimalEnv(t)
+			t.Setenv(unset, "")
+			if _, err := Load(); !errors.Is(err, ErrFeeTokenRequired) {
+				t.Fatalf("Load error = %v, want ErrFeeTokenRequired", err)
+			}
+		})
 	}
-}
 
-func TestLoad_NativeCoinChainHasNoFeeToken(t *testing.T) {
 	clearEnv(t)
 	setMinimalEnv(t)
-
 	cfg, err := Load()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Load with a full description: %v", err)
 	}
-	if cfg.FeeToken.IsContract() {
-		t.Errorf("FeeToken = %+v, want the zero value on a native-coin chain", cfg.FeeToken)
+	want := FeeToken{Symbol: "tUSD", Decimals: 6, Address: "0x1111111111111111111111111111111111111111"}
+	if cfg.FeeToken != want {
+		t.Errorf("FeeToken = %+v, want %+v", cfg.FeeToken, want)
 	}
 }
 
@@ -243,7 +218,7 @@ func TestLoad_NativeCoinChainHasNoFeeToken(t *testing.T) {
 // call, or is refused at startup though it would have worked.
 func TestValidFeeTokenAddress_MatchesBalanceReadParser(t *testing.T) {
 	vectors := []string{
-		l1FeeTokenAddress,
+		devnetFeeTokenAddress,
 		"0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
 		"0x57eb2e9ee9345ce3dd4063e130d58ec79aba7207", // pragma: allowlist secret -- same vector, lower case
 		"0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case

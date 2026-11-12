@@ -63,9 +63,9 @@ func TestLiveTargetFromEnv(t *testing.T) {
 func TestMustLiveTarget(t *testing.T) {
 	t.Run("process env", func(t *testing.T) {
 		t.Setenv(LiveEnvRPCURL, "https://rpc.example.com")
-		t.Setenv(LiveEnvChainID, "1611")
+		t.Setenv(LiveEnvChainID, "4242")
 		got := MustLiveTarget()
-		if got.RPCURL != "https://rpc.example.com" || got.ChainID != 1611 {
+		if got.RPCURL != "https://rpc.example.com" || got.ChainID != 4242 {
 			t.Errorf("target = %+v", got)
 		}
 	})
@@ -88,8 +88,13 @@ func TestLiveEnvironment(t *testing.T) {
 		want    ChainEnvironment
 		wantErr error
 	}{
-		{name: "inferred testnet", chainID: 787111, want: EnvTestnet},
-		{name: "inferred mainnet", chainID: 1611, want: EnvMainnet},
+		{name: "inferred for the devnet", chainID: devnetChainID, want: EnvTestnet},
+		{
+			name:    "explicit mainnet",
+			env:     map[string]string{LiveEnvChainEnvironment: "mainnet"},
+			chainID: 262144,
+			want:    EnvMainnet,
+		},
 		{
 			name:    "explicit wins for fork chain id",
 			env:     map[string]string{LiveEnvChainEnvironment: "testnet"},
@@ -99,7 +104,7 @@ func TestLiveEnvironment(t *testing.T) {
 		{
 			name:    "invalid explicit",
 			env:     map[string]string{LiveEnvChainEnvironment: "staging"},
-			chainID: 787111,
+			chainID: devnetChainID,
 			wantErr: ErrLiveInvalidChainEnvironment,
 		},
 		{name: "unknown chain without explicit", chainID: 262144, wantErr: ErrLiveUnknownEnvironment},
@@ -127,9 +132,8 @@ func TestLiveMinedTx(t *testing.T) {
 		wantFx  *LiveTxFixture
 		wantErr error
 	}{
-		{name: "built-in on default testnet", chainID: LiveDefaultChainID, wantOK: true},
 		{
-			name: "built-in on the L1 devnet", chainID: l1DevnetChainID, wantOK: true,
+			name: "built-in on the devnet", chainID: LiveDefaultChainID, wantOK: true,
 			wantFx: &LiveTxFixture{
 				Hash:   "0xc3139110f81470f527de4d482125186eb0ca7142b44bd9bbd5d677c2872fb13a",
 				Sender: "0x50d476e5d2c044998eC185D86A0EF5CB32f3e8F4",

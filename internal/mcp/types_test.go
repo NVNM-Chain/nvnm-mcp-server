@@ -27,9 +27,9 @@ func TestNextAction_JSON_RoundTrip(t *testing.T) {
 			na: NextAction{
 				Tool: "nvnm_setup_wizard",
 				Hint: "Call again after funding lands.",
-				When: "after wmmUSD lands in your wallet on chain",
+				When: "after pathUSD lands in your wallet on chain",
 			},
-			want: `{"tool":"nvnm_setup_wizard","hint":"Call again after funding lands.","when":"after wmmUSD lands in your wallet on chain"}`,
+			want: `{"tool":"nvnm_setup_wizard","hint":"Call again after funding lands.","when":"after pathUSD lands in your wallet on chain"}`,
 		},
 	}
 

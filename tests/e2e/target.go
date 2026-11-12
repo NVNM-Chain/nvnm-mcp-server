@@ -53,7 +53,7 @@ func startInProcess(t *testing.T) string {
 		SkipOrFail(t, "in-process target requires NVNM_EVM_RPC_URL")
 	}
 
-	chainID := int64(787111)
+	chainID := config.LiveDefaultChainID
 	if raw := os.Getenv("NVNM_CHAIN_ID"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
@@ -111,10 +111,18 @@ func startInProcess(t *testing.T) string {
 
 	anchorClient := anchor.NewClient(evmClient, anchorAddr, chainID, abiPath, logger)
 
+	// The fee token decides which balance the onboarding tools read; the
+	// server refuses to guess it, and so does this harness.
+	feeToken, ftErr := config.FeeTokenFromEnv(os.Getenv, chainID)
+	if ftErr != nil {
+		t.Fatalf("fee token for chain %d: %v", chainID, ftErr)
+	}
+
 	cfg := &config.Config{
 		EVMRPCURL:        rpcURL,
 		ChainID:          chainID,
 		ChainEnvironment: env,
+		FeeToken:         feeToken,
 		AnchorAddress:    anchorAddr,
 		AnchorABIPath:    abiPath,
 		EnableWriteTools: true,

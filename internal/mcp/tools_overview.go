@@ -39,9 +39,11 @@ type overviewOutput struct {
 	FaucetURL        string `json:"faucet_url,omitempty"`
 	TokenNative      string `json:"token_native"`
 	TokenWrapped     string `json:"token_wrapped"`
-	// FeeTokenAddress is the token contract fees are charged in. Omitted
-	// on a chain that charges fees in its native coin.
-	FeeTokenAddress  string                 `json:"fee_token_address,omitempty"`
+	// FeeTokenAddress is the token contract fees are charged in.
+	// TokenNative and TokenWrapped are both that token's symbol: the chain
+	// has no native coin, and the two fields are kept for callers that
+	// read either.
+	FeeTokenAddress  string                 `json:"fee_token_address"`
 	WhatIsNVNMChain  string                 `json:"what_is_nvnm_chain"`
 	PrivacyByDesign  string                 `json:"privacy_by_design"`
 	Prereqs          []string               `json:"prereqs"`
@@ -54,12 +56,8 @@ type overviewOutput struct {
 // MUST set expectations about on-chain observability, because that
 // shapes what `wallet_status` and the wizard can and cannot tell the
 // agent about the wallet's history on chain.
-const whatIsNVNMChainText = "NVNM Chain is an EVM L2 on MANTRA Chain " +
-	notaryText
-
-// notaryText is the part of the chain description that holds on every
-// deployment: what is anchored and what an observer can see.
-const notaryText = "used as a neutral notary for document anchoring. It stores only " +
+const whatIsNVNMChainText = "NVNM Chain is an EVM chain used as a " +
+	"neutral notary for document anchoring. It stores only " +
 	"one-way hash fingerprints (SHA-256) of documents, never the " +
 	"documents themselves. Anchor writes are publicly observable: " +
 	"add_record logs the SHA-256 hash and add_registry logs the " +
@@ -68,18 +66,14 @@ const notaryText = "used as a neutral notary for document anchoring. It stores o
 	"the file off-band and verify by recomputing the hash; encode or " +
 	"salt sensitive registry names before anchoring."
 
-// whatIsNVNMChain is the chain description for this deployment. A chain
-// that charges fees in a token contract is the L1: it is not an L2 on
-// MANTRA Chain, and a reader has to know there is no native coin before
-// any balance in this server's output makes sense.
+// whatIsNVNMChain is the chain description for this deployment: the
+// fixed text, then the fee asset. A reader has to know there is no native
+// coin before any balance in this server's output makes sense.
 func whatIsNVNMChain(cfg *config.Config) string {
-	if !cfg.FeeToken.IsContract() {
-		return whatIsNVNMChainText
-	}
-	return "NVNM Chain is an EVM L1 " + notaryText + " This chain has no " +
-		"native coin: transaction fees are charged in the " + cfg.FeeToken.Symbol +
-		" token (fee_token_address), so that is the balance a wallet needs " +
-		"and the one this server reports."
+	return whatIsNVNMChainText + " This chain has no native coin: " +
+		"transaction fees are charged in the " + cfg.FeeToken.Symbol +
+		" token (fee_token_address), so that is the balance a wallet " +
+		"needs and the one this server reports."
 }
 
 // privacyByDesignText states the consequence for what this server can
@@ -134,18 +128,22 @@ var canonicalJourney = []canonicalJourneyStep{
 	},
 }
 
-// basePrereqs lists the prerequisites that hold in every deployment,
-// regardless of the auth posture. The wizard's needs_wallet / unfunded
-// states walk the agent through these; the overview lists them up front
-// for self-aware consumers.
-//
-//nolint:gochecknoglobals // immutable text; package-level by design
-var basePrereqs = []string{
-	"An EVM wallet you control. Server never holds private keys.",
-	"That wallet funded with the gas token. See bridge_url for the funding flow.",
-	"A signing path: either a browser wallet (MetaMask via the wallet_tx_request " +
+// The prerequisites that do not depend on the deployment. The wizard's
+// needs_wallet / unfunded states walk the agent through these; the
+// overview lists them up front for self-aware consumers.
+const (
+	walletPrereq  = "An EVM wallet you control. Server never holds private keys."
+	signingPrereq = "A signing path: either a browser wallet (MetaMask via the wallet_tx_request " +
 		"field returned by anchor_prepare_*) or a local/headless signer " +
-		"(sign raw_tx, broadcast via evm_send_raw_transaction).",
+		"(sign raw_tx, broadcast via evm_send_raw_transaction)."
+)
+
+// fundingPrereq says which asset the wallet needs and where this
+// deployment points for it.
+func fundingPrereq(cfg *config.Config) string {
+	return "That wallet funded with " + cfg.FeeToken.Symbol +
+		", the token this chain charges fees in (it has no native coin); " +
+		fundingHint(cfg) + "."
 }
 
 // prereqsFor returns the prerequisite list for this deployment. The
@@ -165,26 +163,15 @@ func prereqsFor(cfg *config.Config) []string {
 			"the anchor precompile. Your wallet signature is the only identity the " +
 			"server sees. Per-signer volume quotas and a signer blacklist apply."
 	}
-	prereqs := append([]string(nil), basePrereqs...)
-	if cfg.FeeToken.IsContract() {
-		prereqs[fundingPrereqIndex] = "That wallet funded with " + cfg.FeeToken.Symbol +
-			", the token this chain charges fees in (it has no native coin); " +
-			fundingHint(cfg) + "."
-	}
-	return append(prereqs, broadcast)
+	return []string{walletPrereq, fundingPrereq(cfg), signingPrereq, broadcast}
 }
-
-// fundingPrereqIndex is the position in basePrereqs of the "wallet funded
-// with the gas token" line, the one prerequisite whose wording depends on
-// what the chain charges fees in.
-const fundingPrereqIndex = 1
 
 func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 	addTool(srv, &mcp.Tool{
 		Name:  "nvnm_overview",
 		Title: "NVNM Chain Overview",
 		Description: "Lobby tool. Returns chain identity (env, chain ID, " +
-			"precompile address, explorer/docs/bridge URLs), the chain's " +
+			"precompile address, fee token, explorer/docs/faucet/bridge URLs), the chain's " +
 			"privacy-by-design property, prerequisites for writes, and a " +
 			"6-step canonical agent journey. Intended as the first call of a " +
 			"session that has not used this server before. No chain calls.",
@@ -193,7 +180,6 @@ func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 }
 
 func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, overviewOutput] {
-	naming := cfg.TokenNaming()
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, _ overviewInput,
 	) (*mcp.CallToolResult, overviewOutput, error) {
@@ -214,8 +200,8 @@ func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, o
 			DocsURL:          cfg.DocsURL,
 			BridgeURL:        cfg.BridgeURL,
 			FaucetURL:        cfg.FaucetURL,
-			TokenNative:      naming.Native,
-			TokenWrapped:     naming.Wrapped,
+			TokenNative:      cfg.FeeToken.Symbol,
+			TokenWrapped:     cfg.FeeToken.Symbol,
 			FeeTokenAddress:  cfg.FeeToken.Address,
 			WhatIsNVNMChain:  whatIsNVNMChain(cfg),
 			PrivacyByDesign:  privacyByDesignText,

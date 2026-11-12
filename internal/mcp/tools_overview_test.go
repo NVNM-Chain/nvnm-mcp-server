@@ -6,8 +6,6 @@ package mcp
 import (
 	"strings"
 	"testing"
-
-	"github.com/NVNM-Chain/nvnm-mcp-server/internal/config"
 )
 
 // TestPrereqsFor_BroadcastLineTracksAuthPosture pins the broadcast
@@ -44,16 +42,16 @@ func TestPrereqsFor_BroadcastLineTracksAuthPosture(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := prereqsFor(&config.Config{KeylessWrites: tt.keylessWrites})
+			cfg := testServerConfig(false)
+			cfg.KeylessWrites = tt.keylessWrites
+			got := prereqsFor(cfg)
 
-			if len(got) != len(basePrereqs)+1 {
-				t.Fatalf("prereqsFor() returned %d entries, want %d (base + broadcast)",
-					len(got), len(basePrereqs)+1)
+			// wallet, funding, signing path, then the broadcast line.
+			if len(got) != 4 {
+				t.Fatalf("prereqsFor() returned %d entries, want 4", len(got))
 			}
-			for i, want := range basePrereqs {
-				if got[i] != want {
-					t.Errorf("prereqsFor()[%d] = %q, want base prereq %q", i, got[i], want)
-				}
+			if got[0] != walletPrereq || got[1] != fundingPrereq(cfg) || got[2] != signingPrereq {
+				t.Errorf("prereqsFor() fixed entries = %q", got[:3])
 			}
 
 			broadcast := got[len(got)-1]
@@ -72,20 +70,20 @@ func TestPrereqsFor_BroadcastLineTracksAuthPosture(t *testing.T) {
 	}
 }
 
-// TestPrereqsFor_DoesNotMutateBasePrereqs guards the append-to-shared-slice
-// footgun: prereqsFor appends the broadcast line to basePrereqs, and appending
-// to a package-level slice without copying would let one call's broadcast line
-// leak into the next call's result.
-func TestPrereqsFor_DoesNotMutateBasePrereqs(t *testing.T) {
-	before := len(basePrereqs)
+// TestPrereqsFor_CallsAreIndependent guards against one call's
+// deployment-specific lines leaking into the next call's result.
+func TestPrereqsFor_CallsAreIndependent(t *testing.T) {
+	authedCfg, keylessCfg := testServerConfig(false), testServerConfig(false)
+	keylessCfg.KeylessWrites = true
 
-	authed := prereqsFor(&config.Config{KeylessWrites: false})
-	keyless := prereqsFor(&config.Config{KeylessWrites: true})
+	authed := prereqsFor(authedCfg)
+	keyless := prereqsFor(keylessCfg)
+	authedAgain := prereqsFor(authedCfg)
 
-	if len(basePrereqs) != before {
-		t.Errorf("prereqsFor mutated basePrereqs: len %d, want %d", len(basePrereqs), before)
-	}
 	if authed[len(authed)-1] == keyless[len(keyless)-1] {
 		t.Error("authed and keyless deployments returned the same broadcast prereq")
+	}
+	if strings.Join(authed, "|") != strings.Join(authedAgain, "|") {
+		t.Error("a keyless call changed the authed deployment's prerequisites")
 	}
 }

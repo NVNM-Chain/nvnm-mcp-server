@@ -68,15 +68,14 @@ func registerEVMTools(srv *mcp.Server, evmClient evm.Client, cfg *config.Config,
 	addTool(srv, &mcp.Tool{
 		Name:  "evm_get_balance",
 		Title: "Get Balance",
-		Description: "Returns the balance of an address in the asset this chain " +
-			"charges fees in. balance_human is the amount in that asset (see " +
-			"token_wrapped); wei is the raw integer at balance_decimals (18 for " +
-			"a native coin). When fee_token_address is present the chain has no " +
-			"native coin and the amount is that token's balanceOf, at the " +
-			"token's own scale. The `ether` field is a legacy alias for the same " +
-			"decimal amount and is NOT denominated in ether -- prefer " +
-			"balance_human when reporting a balance. Optionally specify a " +
-			"block number or the tag " +
+		Description: "Returns the balance of an address in the token this chain " +
+			"charges fees in. The chain has no native coin, so the amount is the " +
+			"balanceOf of fee_token_address. balance_human is the amount with the " +
+			"token's symbol (see token_wrapped); wei is the raw integer in the " +
+			"token's smallest unit at balance_decimals, and is NOT wei. The " +
+			"`ether` field is a legacy alias for the decimal amount and is NOT " +
+			"denominated in ether -- prefer balance_human when reporting a " +
+			"balance. Optionally specify a block number or the tag " +
 			"\"latest\"/\"earliest\".",
 		Annotations: newOpenWorldReadOnly(),
 	}, makeGetBalanceHandler(evmClient, cfg))
@@ -302,13 +301,13 @@ func makeGetBalanceHandler(
 			return nil, balanceOutput{},
 				fmt.Errorf("failed to get balance: %w", err)
 		}
-		gasToken := cfg.GasToken()
+		feeToken := cfg.FeeToken
 		return nil, balanceOutput{
 			NormalizedBalance: *balance,
-			BalanceHuman:      balance.Ether + " " + gasToken.Symbol,
-			TokenWrapped:      gasToken.Symbol,
-			BalanceDecimals:   gasToken.Decimals,
-			FeeTokenAddress:   gasToken.Address,
+			BalanceHuman:      balance.Ether + " " + feeToken.Symbol,
+			TokenWrapped:      feeToken.Symbol,
+			BalanceDecimals:   feeToken.Decimals,
+			FeeTokenAddress:   feeToken.Address,
 			NextActions:       evmGetBalanceNext(),
 		}, nil
 	}

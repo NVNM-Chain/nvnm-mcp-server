@@ -40,20 +40,17 @@ type receiptOutput struct {
 
 type balanceOutput struct {
 	evm.NormalizedBalance
-	// BalanceHuman and TokenWrapped restate the amount in the chain's own gas
-	// token. The embedded NormalizedBalance.Ether field is a misnomer on this
-	// chain -- gas is paid in wmantraUSD (testnet) / wmmUSD (mainnet), never
-	// ether -- and an agent reading `ether` will report the wrong unit to a
-	// user. `ether` is retained for wire compatibility; prefer these.
+	// BalanceHuman and TokenWrapped restate the amount in the chain's fee
+	// token. The embedded NormalizedBalance field names are misnomers on
+	// this chain -- it has no native coin, so `wei` is the fee token's
+	// smallest unit and `ether` is that amount at the token's scale. Both
+	// are retained for wire compatibility; prefer these.
 	BalanceHuman string `json:"balance_human"`
 	TokenWrapped string `json:"token_wrapped"`
-	// BalanceDecimals is the scale of `wei`: 18 for a native coin, the
-	// token's own decimals on a chain that charges fees in a token (where
-	// `wei` and `ether` are that token's balanceOf, not wei or ether).
+	// BalanceDecimals is the scale of `wei`: the fee token's decimals.
 	BalanceDecimals int `json:"balance_decimals"`
 	// FeeTokenAddress is the token contract the balance was read from.
-	// Omitted on a chain that charges fees in its native coin.
-	FeeTokenAddress string       `json:"fee_token_address,omitempty"`
+	FeeTokenAddress string       `json:"fee_token_address"`
 	NextActions     []NextAction `json:"next_actions,omitempty"`
 }
 

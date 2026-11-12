@@ -302,17 +302,15 @@ type Config struct {
 	JWTClockSkew              time.Duration // JWT_CLOCK_SKEW: leeway for token expiry checks (default 60s)
 	JWTRolesClaim             string        // JWT_ROLES_CLAIM: name of the roles claim in JWT (default "roles")
 
-	// Chain environment (NVNM-prefixed; introduced in Phase 8).
-	// ChainEnvironment selects between testnet and mainnet token naming
-	// and operator-facing URL defaults. When NVNM_CHAIN_ENVIRONMENT is
-	// unset, the value is inferred from ChainID; chain IDs the server
-	// does not recognize fall through to EnvTestnet.
+	// ChainEnvironment labels the chain as testnet or mainnet in tool
+	// responses. Set by NVNM_CHAIN_ENVIRONMENT, else inferred from a known
+	// ChainID; an unknown chain ID with no explicit value fails
+	// validation.
 	ChainEnvironment ChainEnvironment
 
-	// FeeToken is the token contract fees are charged in, on a chain with
-	// no native coin (the L1). The zero value means the native coin. Built
-	// in for known chains, else NVNM_FEE_TOKEN_ADDRESS / _SYMBOL /
-	// _DECIMALS. Read it through GasToken and TokenNaming.
+	// FeeToken is the token contract fees are charged in; the chain has
+	// no native coin. Built in for a known chain, else required through
+	// NVNM_FEE_TOKEN_ADDRESS / _SYMBOL / _DECIMALS.
 	FeeToken FeeToken
 
 	// DocsURL, ExplorerURL, BridgeURL, FaucetURL are operator-facing URLs
@@ -668,8 +666,11 @@ func (c *Config) loadKeyDeliveryConfig() error {
 // Load() to keep its cyclomatic complexity below the gocyclo threshold.
 func (c *Config) loadChainProfile() error {
 	c.loadChainEnvironment()
+	// A fee token that is set but invalid is reported here. One that is
+	// missing is left empty for Validate, so a server with no RPC URL or
+	// chain ID is told about that first.
 	feeToken, err := FeeTokenFromEnv(os.Getenv, c.ChainID)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrFeeTokenRequired) {
 		return err
 	}
 	c.FeeToken = feeToken
@@ -721,8 +722,8 @@ func (c *Config) Validate() error {
 	if c.Transport != "stdio" && c.Transport != "http" {
 		return fmt.Errorf("%w: got %q", ErrInvalidTransport, c.Transport)
 	}
-	if !c.ChainEnvironment.IsValid() {
-		return fmt.Errorf("%w: got %q", ErrInvalidChainEnvironment, c.ChainEnvironment)
+	if err := c.validateChainProfile(); err != nil {
+		return err
 	}
 	if err := c.validateAuth(); err != nil {
 		return err
@@ -740,6 +741,20 @@ func (c *Config) Validate() error {
 		return err
 	}
 	return c.validateResilience()
+}
+
+// validateChainProfile checks what the server must know about the chain
+// and cannot infer for an unrecognized chain ID: its environment label,
+// and the token it charges fees in. Every balance the server reports is
+// that token's, so a chain without one described refuses to start.
+func (c *Config) validateChainProfile() error {
+	if !c.ChainEnvironment.IsValid() {
+		return fmt.Errorf("%w: got %q", ErrInvalidChainEnvironment, c.ChainEnvironment)
+	}
+	if c.FeeToken.Address == "" || c.FeeToken.Symbol == "" {
+		return ErrFeeTokenRequired
+	}
+	return nil
 }
 
 // validateKeyRequestEmail enforces the F4 fail-closed guard on the

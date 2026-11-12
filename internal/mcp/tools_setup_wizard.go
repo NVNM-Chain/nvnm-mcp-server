@@ -46,7 +46,7 @@ type walletSnapshot struct {
 	BalanceHuman string `json:"balance_human"`
 	// BalanceDecimals and FeeTokenAddress: see walletStatusOutput.
 	BalanceDecimals  int    `json:"balance_decimals"`
-	FeeTokenAddress  string `json:"fee_token_address,omitempty"`
+	FeeTokenAddress  string `json:"fee_token_address"`
 	Nonce            uint64 `json:"nonce"`
 	HasSentTx        bool   `json:"has_sent_tx"`
 	ChainID          int64  `json:"chain_id"`
@@ -98,8 +98,7 @@ func makeSetupWizardHandler(
 	c evm.Client,
 	cfg *config.Config,
 ) mcp.ToolHandlerFor[setupWizardInput, setupWizardOutput] {
-	naming := cfg.TokenNaming()
-	gasToken := cfg.GasToken()
+	feeToken := cfg.FeeToken
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input setupWizardInput,
 	) (*mcp.CallToolResult, setupWizardOutput, error) {
@@ -108,7 +107,7 @@ func makeSetupWizardHandler(
 		}
 
 		if input.Address == "" {
-			return nil, needsWalletResponse(cfg, naming), nil
+			return nil, needsWalletResponse(cfg), nil
 		}
 
 		addr, err := parseAddress(input.Address)
@@ -130,23 +129,17 @@ func makeSetupWizardHandler(
 
 		snap := &walletSnapshot{
 			Address:          evm.AddressHex(addr),
-			BalanceDecimals:  gasToken.Decimals,
-			FeeTokenAddress:  gasToken.Address,
+			BalanceWei:       balance.Wei,
+			BalanceHuman:     balance.Ether + " " + feeToken.Symbol,
+			BalanceDecimals:  feeToken.Decimals,
+			FeeTokenAddress:  feeToken.Address,
 			Nonce:            nonce,
 			HasSentTx:        hasSentTx,
 			ChainID:          cfg.ChainID,
 			ChainEnvironment: string(cfg.ChainEnvironment),
-			TokenNative:      naming.Native,
-			TokenWrapped:     naming.Wrapped,
+			TokenNative:      feeToken.Symbol,
+			TokenWrapped:     feeToken.Symbol,
 		}
-		if balance != nil {
-			snap.BalanceWei = balance.Wei
-			snap.BalanceHuman = balance.Ether + " " + naming.Wrapped
-		} else {
-			snap.BalanceWei = "0"
-			snap.BalanceHuman = "0 " + naming.Wrapped
-		}
-
 		switch {
 		case !hasFunds:
 			return nil, unfundedResponse(cfg, snap), nil
@@ -160,7 +153,7 @@ func makeSetupWizardHandler(
 
 // --- Per-state response builders ---
 
-func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWizardOutput {
+func needsWalletResponse(cfg *config.Config) setupWizardOutput {
 	msg := "No address provided. Two ways to get one: " +
 		"(1) the browser-hosted wallet generator at `wallet_generator_url` " +
 		"(opens in a tab, creates a key entirely in the browser, hands you " +
@@ -168,7 +161,7 @@ func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWiz
 		"(2) the language-specific samples below, which generate a key in " +
 		"a local runtime and IMMEDIATELY hand it to a secrets mechanism -- " +
 		"they never print the private key to stdout. Once you have an " +
-		"address, fund it with " + naming.Wrapped + " (" + fundingHint(cfg) + ") " +
+		"address, fund it with " + cfg.FeeToken.Symbol + " (" + fundingHint(cfg) + ") " +
 		"and call this wizard again with the address."
 	return setupWizardOutput{
 		State:              WizardStateNeedsWallet,
@@ -194,18 +187,13 @@ func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWiz
 }
 
 func unfundedResponse(cfg *config.Config, snap *walletSnapshot) setupWizardOutput {
-	msg := "Wallet has no balance. Fund it with " + snap.TokenWrapped +
-		" via the bridge, then re-call this wizard."
-	if cfg.FeeToken.IsContract() {
-		// No native coin and no bridge to name: the wallet needs the fee
-		// token itself, from whatever source this deployment points at.
-		msg = "Wallet holds no " + snap.TokenWrapped + ", the token this chain " +
-			"charges fees in (it has no native coin). Fund the address with " +
-			snap.TokenWrapped + ", then re-call this wizard."
-		if cfg.FaucetURL == "" && cfg.BridgeURL == "" {
-			msg += " This deployment lists no funding URL; ask its operator where to get " +
-				snap.TokenWrapped + "."
-		}
+	symbol := cfg.FeeToken.Symbol
+	msg := "Wallet holds no " + symbol + ", the token this chain charges " +
+		"fees in (it has no native coin). Fund the address with " + symbol +
+		", then re-call this wizard."
+	if cfg.FaucetURL == "" && cfg.BridgeURL == "" {
+		msg += " This deployment lists no funding URL; ask its operator where to get " +
+			symbol + "."
 	}
 	msg += fundingURLs(cfg)
 	return setupWizardOutput{

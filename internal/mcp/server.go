@@ -37,28 +37,8 @@ const serverName = "nvnm-chain"
 // tool response, which this string deliberately points at rather
 // than duplicates.
 const initializeInstructions = "NVNM Chain MCP server -- typed " +
-	"access to NVNM Chain, " + chainKindL2 + " used as a " +
-	initializeInstructionsBody
-
-// chainKindL2 and chainKindL1 are the one clause of the instructions that
-// depends on the deployment. A chain that charges fees in a token contract
-// is the L1, not an L2 on MANTRA Chain.
-const (
-	chainKindL2 = "an EVM L2 on MANTRA Chain"
-	chainKindL1 = "an EVM L1"
-)
-
-// initializeInstructionsFor returns the session instructions for this
-// deployment's chain.
-func initializeInstructionsFor(cfg *config.Config) string {
-	if !cfg.FeeToken.IsContract() {
-		return initializeInstructions
-	}
-	return "NVNM Chain MCP server -- typed access to NVNM Chain, " + chainKindL1 +
-		" used as a " + initializeInstructionsBody
-}
-
-const initializeInstructionsBody = "neutral notary for document anchoring. This server holds no " +
+	"access to NVNM Chain, an EVM chain used as a " +
+	"neutral notary for document anchoring. This server holds no " +
 	"private keys (writes are prepare-sign-submit, signed caller-side) " +
 	"and returns only public on-chain data; anchored hashes and " +
 	"registry names are public on-chain, so encode anything sensitive " +
@@ -114,7 +94,7 @@ func NewServer(
 			Name:    serverName,
 			Version: version.Version,
 		},
-		&mcp.ServerOptions{Instructions: initializeInstructionsFor(cfg)},
+		&mcp.ServerOptions{Instructions: initializeInstructions},
 	)
 
 	// Keyless reads are HTTP-only; stdio is local/trusted and has no

@@ -46,20 +46,23 @@ type walletStatusOutput struct {
 	Address      string `json:"address"`
 	BalanceWei   string `json:"balance_wei"`
 	BalanceHuman string `json:"balance_human"`
-	// BalanceDecimals is the scale of BalanceWei: 18 for a native coin,
-	// the token's own decimals on a chain that charges fees in a token.
+	// BalanceDecimals is the scale of BalanceWei: the fee token's own
+	// decimals. BalanceWei is the token's smallest unit, not wei; the
+	// field keeps its name for wire compatibility.
 	BalanceDecimals int `json:"balance_decimals"`
 	// FeeTokenAddress is the token contract the balance was read from.
-	// Omitted on a chain that charges fees in its native coin.
-	FeeTokenAddress  string       `json:"fee_token_address,omitempty"`
-	Nonce            uint64       `json:"nonce"`
-	HasSentTx        bool         `json:"has_sent_tx"`
-	Status           string       `json:"status"`
-	ChainID          int64        `json:"chain_id"`
-	ChainEnvironment string       `json:"chain_environment"`
-	TokenNative      string       `json:"token_native"`
-	TokenWrapped     string       `json:"token_wrapped"`
-	NextActions      []NextAction `json:"next_actions,omitempty"`
+	FeeTokenAddress  string `json:"fee_token_address"`
+	Nonce            uint64 `json:"nonce"`
+	HasSentTx        bool   `json:"has_sent_tx"`
+	Status           string `json:"status"`
+	ChainID          int64  `json:"chain_id"`
+	ChainEnvironment string `json:"chain_environment"`
+	// TokenNative and TokenWrapped are both the fee token's symbol. The
+	// chain has one fee asset and no native coin; the two fields are kept
+	// for callers that read either.
+	TokenNative  string       `json:"token_native"`
+	TokenWrapped string       `json:"token_wrapped"`
+	NextActions  []NextAction `json:"next_actions,omitempty"`
 }
 
 func registerWalletTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Config) {
@@ -67,11 +70,10 @@ func registerWalletTool(srv *mcp.Server, evmClient evm.Client, cfg *config.Confi
 		Name:  "wallet_status",
 		Title: "Wallet Status",
 		Description: "Returns a one-shot snapshot of an EVM address: " +
-			"balance in the asset this chain charges fees in (balance_human " +
-			"names it; balance_wei is the raw integer at balance_decimals " +
-			"-- 18 for a native coin, the token's own scale when " +
-			"fee_token_address is present, in which case the balance is " +
-			"that token's balanceOf and the chain has no native coin), " +
+			"balance in the token this chain charges fees in (the chain has " +
+			"no native coin, so this is the balanceOf of fee_token_address; " +
+			"balance_human names the token, and balance_wei is the raw " +
+			"integer in the token's smallest unit at balance_decimals), " +
 			"nonce, whether any transaction has been sent, and a " +
 			"three-state status (`unfunded` / `funded_unused` / " +
 			"`funded_active`). Status `funded_active` means \"has sent " +
@@ -86,8 +88,7 @@ func makeWalletStatusHandler(
 	c evm.Client,
 	cfg *config.Config,
 ) mcp.ToolHandlerFor[walletStatusInput, walletStatusOutput] {
-	naming := cfg.TokenNaming()
-	gasToken := cfg.GasToken()
+	feeToken := cfg.FeeToken
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, input walletStatusInput,
 	) (*mcp.CallToolResult, walletStatusOutput, error) {
@@ -119,26 +120,19 @@ func makeWalletStatusHandler(
 			status = WalletStatusFundedUnused
 		}
 
-		balanceWei := "0"
-		balanceHuman := "0 " + naming.Wrapped
-		if balance != nil {
-			balanceWei = balance.Wei
-			balanceHuman = balance.Ether + " " + naming.Wrapped
-		}
-
 		return nil, walletStatusOutput{
 			Address:          evm.AddressHex(addr),
-			BalanceWei:       balanceWei,
-			BalanceHuman:     balanceHuman,
-			BalanceDecimals:  gasToken.Decimals,
-			FeeTokenAddress:  gasToken.Address,
+			BalanceWei:       balance.Wei,
+			BalanceHuman:     balance.Ether + " " + feeToken.Symbol,
+			BalanceDecimals:  feeToken.Decimals,
+			FeeTokenAddress:  feeToken.Address,
 			Nonce:            nonce,
 			HasSentTx:        hasSentTx,
 			Status:           status,
 			ChainID:          cfg.ChainID,
 			ChainEnvironment: string(cfg.ChainEnvironment),
-			TokenNative:      naming.Native,
-			TokenWrapped:     naming.Wrapped,
+			TokenNative:      feeToken.Symbol,
+			TokenWrapped:     feeToken.Symbol,
 			NextActions:      walletStatusNextActions(status),
 		}, nil
 	}

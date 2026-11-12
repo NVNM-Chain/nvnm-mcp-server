@@ -136,11 +136,11 @@ const onChainRoleDenial = "on-chain authorization failed: the `from` address doe
 // used here to pick between the two not-found sentinels.
 const collectionsNotFound = "collections: not found"
 
-// The L1 anchoring contract's own miss phrasing, observed 2026-11-11 on
+// The anchoring contract's own miss phrasing, observed 2026-11-11 on
 // chain 787222 as "execution reverted: registry does not exist" and
 // "execution reverted: record does not exist" (also "record does not exist
-// in registry" for a role scoped to an unknown record checksum). They mean
-// what collectionsNotFound means on the L2 and map to the same sentinels.
+// in registry" for a role scoped to an unknown record checksum). They map
+// to the same not-found sentinels as collectionsNotFound.
 const (
 	contractRegistryMissing = "registry does not exist"
 	contractRecordMissing   = "record does not exist"

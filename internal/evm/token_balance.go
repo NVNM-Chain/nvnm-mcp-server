@@ -22,13 +22,13 @@ var balanceOfSelector = []byte{0x70, 0xa0, 0x82, 0x31}
 const abiWordLen = 32
 
 // TokenBalanceAt reads owner's balance of an ERC-20-style token with
-// balanceOf, and renders it at the token's own scale. It is how a balance
-// is read on a chain that charges fees in a token contract and has no
-// native coin.
+// balanceOf, and renders it at the token's own scale. It is how the server
+// reads a fee balance: NVNM Chain charges fees in a token contract and has
+// no native coin.
 //
 // The result reuses NormalizedBalance: Wei is the raw integer in the
 // token's smallest unit and Ether is that integer divided by 10^decimals.
-// Neither is wei or ether on such a chain; callers label them.
+// Neither is wei or ether; callers label them.
 func TokenBalanceAt(
 	ctx context.Context, c Client, token, owner defitypes.Address, decimals int, block *big.Int,
 ) (*NormalizedBalance, error) {
@@ -39,10 +39,10 @@ func TokenBalanceAt(
 
 	output, err := c.CallContract(ctx, defitypes.Call{To: &token, Input: input}, block)
 	if err != nil {
-		// CallContract hands back the node's raw error. BalanceAt curates
-		// the ones a caller can act on, and a token balance at a block the
-		// node does not have (observed 2026-11-12 on chain 787222 as "block
-		// not found: 0x3b9ac9ff") must not read worse than a native one.
+		// CallContract hands back the node's raw error. Curate the ones a
+		// caller can act on, such as a balance at a block the node does not
+		// have (observed 2026-11-12 on chain 787222 as "block not found:
+		// 0x3b9ac9ff").
 		if curated := classifyNodeRPCError(err); curated != nil {
 			return nil, curated
 		}

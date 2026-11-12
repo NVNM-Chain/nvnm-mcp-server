@@ -225,17 +225,18 @@ func TestHandlers_NonceErrors(t *testing.T) {
 	}
 }
 
-// TestSetupWizard_NilBalanceIsUnfunded covers the balance==nil snapshot
-// branch: the wizard reports 0 balance rather than dereferencing nil.
-func TestSetupWizard_NilBalanceIsUnfunded(t *testing.T) {
-	m := &mockEVM{} // BalanceAt returns (nil, nil)
+// TestSetupWizard_UnreadableBalanceIsAnError proves a fee-token read that
+// returns no value fails the call. Reporting it as "unfunded" would send a
+// funded wallet's owner off to fund it again.
+func TestSetupWizard_UnreadableBalanceIsAnError(t *testing.T) {
+	m := &mockEVM{} // the token call returns no bytes
 	cfg := testServerConfig(true)
 	_, out, err := makeSetupWizardHandler(m, cfg)(ctx, nil, setupWizardInput{Address: testAddr})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, apperrors.ErrNodeResponseDecode) {
+		t.Fatalf("err = %v, want ErrNodeResponseDecode", err)
 	}
-	if out.State != "unfunded" {
-		t.Errorf("state = %q, want unfunded", out.State)
+	if out.State != "" {
+		t.Errorf("state = %q, want no state on a failed read", out.State)
 	}
 }
 

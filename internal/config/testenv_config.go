@@ -9,7 +9,7 @@ package config
 //
 // Values come from the same NVNM_* variables the server itself reads, so
 // one .env drives both the server and the live tests. When a variable is
-// unset the public NVNM testnet defaults apply; a variable that is set
+// unset the devnet defaults apply; a variable that is set
 // but invalid is an error (never silently replaced by a default).
 //
 // Every identifier carries a "Live" prefix to keep it distinct from the
@@ -34,25 +34,19 @@ const (
 	LiveEnvTxSender = "NVNM_TEST_TX_SENDER"
 )
 
-// Testnet defaults, used only when the matching variable is unset.
+// Defaults, used only when the matching variable is unset: the devnet.
 const (
-	LiveDefaultRPCURL  = "https://evm.testnet.nvnmchain.io"
-	LiveDefaultChainID = int64(787111)
-
-	// liveDefaultTxHash is a permanent testnet tx: addRecord into
-	// ElicitTest-rc6 (registry 741), sent by liveDefaultTxSender.
-	liveDefaultTxHash   = "0x7e0b28b30916a3dcc14c4ffe9a5ed6be06acd3d4f4c618161fbb1e6c1acf2188"
-	liveDefaultTxSender = "0x9f8a6425F7AD925701fE1CdF85fd883340b2A9CD"
+	LiveDefaultRPCURL  = "https://rpc.nvnm.canary.mantrachain.dev"
+	LiveDefaultChainID = devnetChainID
 )
 
 // liveBuiltinTxFixtures are the mined transactions known per chain, used
-// when NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER are unset. The L1 devnet
-// entry is the addRegistry that created registry 2227 (block 4881470,
-// observed 2026-11-09). A devnet can be reset; when it is, override the
-// fixture through the environment.
+// when NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER are unset. The devnet entry
+// is the addRegistry that created registry 2227 (block 4881470, observed
+// 2026-11-09). A devnet can be reset; when it is, override the fixture
+// through the environment.
 var liveBuiltinTxFixtures = map[int64]LiveTxFixture{
-	LiveDefaultChainID: {Hash: liveDefaultTxHash, Sender: liveDefaultTxSender},
-	l1DevnetChainID: {
+	devnetChainID: {
 		Hash:   "0xc3139110f81470f527de4d482125186eb0ca7142b44bd9bbd5d677c2872fb13a",
 		Sender: "0x50d476e5d2c044998eC185D86A0EF5CB32f3e8F4",
 	},

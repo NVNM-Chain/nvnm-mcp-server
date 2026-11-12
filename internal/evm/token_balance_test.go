@@ -85,7 +85,7 @@ func TestTokenBalanceAt_Errors(t *testing.T) {
 		}
 	})
 	// Verbatim from chain 787222 (2026-11-12) for a balanceOf at a block
-	// past the head. The native path curates this; the token path must too.
+	// past the head. It must reach the caller as a reason, not a collapse.
 	t.Run("block the node does not have is block not found", func(t *testing.T) {
 		c := newFakeClient(&fakeRPC{callErr: errors.New("RPC error: -32001 block not found: 0x3b9ac9ff")})
 		got, err := TokenBalanceAt(context.Background(), c, token, holder, 6, big.NewInt(999_999_999))
