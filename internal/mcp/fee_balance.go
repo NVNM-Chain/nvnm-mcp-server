@@ -44,17 +44,25 @@ func balanceIsPositive(balance *evm.NormalizedBalance) bool {
 	return ok && amount.Sign() > 0
 }
 
-// fundingFieldNames names the response fields that carry this deployment's
-// funding URLs, for prose that points a reader at them. The bridge is the
-// only source on a native-coin chain, so it is the default.
-func fundingFieldNames(cfg *config.Config) string {
+// fundingHint is the clause that tells a reader where to fund a wallet:
+// the response field that carries this deployment's faucet or bridge URL.
+//
+// A native-coin chain is funded through the bridge, so with nothing
+// configured the hint still names bridge_url (the long-standing L2 text).
+// A fee-token chain has no bridge. With neither URL configured there, no
+// response field carries one, so the hint sends the reader to the
+// operator instead of at a field that is not in the response.
+func fundingHint(cfg *config.Config) string {
 	switch {
 	case cfg.FaucetURL != "" && cfg.BridgeURL != "":
-		return "`faucet_url` or `bridge_url`"
+		return "see `faucet_url` or `bridge_url`"
 	case cfg.FaucetURL != "":
-		return "`faucet_url`"
+		return "see `faucet_url`"
+	case cfg.BridgeURL != "" || !cfg.FeeToken.IsContract():
+		return "see `bridge_url`"
 	default:
-		return "`bridge_url`"
+		return "this deployment lists no funding URL; ask its operator where to get " +
+			cfg.FeeToken.Symbol
 	}
 }
 

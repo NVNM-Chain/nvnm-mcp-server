@@ -168,7 +168,7 @@ func needsWalletResponse(cfg *config.Config, naming config.TokenNaming) setupWiz
 		"(2) the language-specific samples below, which generate a key in " +
 		"a local runtime and IMMEDIATELY hand it to a secrets mechanism -- " +
 		"they never print the private key to stdout. Once you have an " +
-		"address, fund it with " + naming.Wrapped + " (see " + fundingFieldNames(cfg) + ") " +
+		"address, fund it with " + naming.Wrapped + " (" + fundingHint(cfg) + ") " +
 		"and call this wizard again with the address."
 	return setupWizardOutput{
 		State:              WizardStateNeedsWallet,
@@ -202,6 +202,10 @@ func unfundedResponse(cfg *config.Config, snap *walletSnapshot) setupWizardOutpu
 		msg = "Wallet holds no " + snap.TokenWrapped + ", the token this chain " +
 			"charges fees in (it has no native coin). Fund the address with " +
 			snap.TokenWrapped + ", then re-call this wizard."
+		if cfg.FaucetURL == "" && cfg.BridgeURL == "" {
+			msg += " This deployment lists no funding URL; ask its operator where to get " +
+				snap.TokenWrapped + "."
+		}
 	}
 	msg += fundingURLs(cfg)
 	return setupWizardOutput{

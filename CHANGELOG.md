@@ -42,7 +42,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   chains only). An unreadable token balance is an error, not zero.
   Configuration: `NVNM_FEE_TOKEN_ADDRESS`, `NVNM_FEE_TOKEN_SYMBOL`,
   `NVNM_FEE_TOKEN_DECIMALS` -- built in for `787222`, required together on
-  any other such chain, and a partial description stops startup.
+  any other such chain, and a partial description stops startup. A
+  mixed-case `NVNM_FEE_TOKEN_ADDRESS` with a wrong EIP-55 checksum also
+  stops startup, the same rule the balance read applies. A balance at a
+  block the node does not have returns `block not found`, as the native
+  path does. With no faucet or bridge URL configured, the funding text
+  sends the reader to the operator instead of naming an absent field.
 - **`NVNM_FAUCET_URL`**, returned as `faucet_url` by `nvnm_overview` and
   the setup wizard. On a fee-token chain the overview describes an EVM L1
   with no native coin, both token names are the fee token, and the

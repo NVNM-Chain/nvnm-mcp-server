@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	deficrypto "github.com/defiweb/go-eth/crypto"
 	defitypes "github.com/defiweb/go-eth/types"
 )
 
@@ -25,7 +26,8 @@ const (
 // Fee-token configuration errors.
 var (
 	ErrFeeTokenAddressInvalid = errors.New(
-		envFeeAssetAddress + " must be a 0x-prefixed 20-byte address")
+		envFeeAssetAddress + " must be a 0x-prefixed 20-byte address; a mixed-case " +
+			"address must carry a valid EIP-55 checksum (all-lowercase hex has none)")
 	ErrFeeTokenDecimalsInvalid = errors.New(
 		envFeeAssetDecimals + " must be an integer between 0 and " + strconv.Itoa(maxFeeTokenDecimals))
 	// ErrFeeTokenIncomplete marks a fee token that is only partly
@@ -61,7 +63,7 @@ func FeeTokenFromEnv(getenv func(string) string, chainID int64) (FeeToken, error
 	}
 
 	if addr != "" {
-		if _, err := defitypes.AddressFromHex(addr); err != nil {
+		if !validFeeTokenAddress(addr) {
 			return FeeToken{}, fmt.Errorf("%w: got %q", ErrFeeTokenAddressInvalid, addr)
 		}
 		token.Address = addr
@@ -77,6 +79,27 @@ func FeeTokenFromEnv(getenv func(string) string, chainID int64) (FeeToken, error
 		token.Decimals = decimals
 	}
 	return token, nil
+}
+
+// validFeeTokenAddress applies the rule the balance read applies to the
+// same string (evm.ParseAddress): 20 bytes of hex, and when the hex is
+// mixed-case its casing must be the EIP-55 checksum. Lower- and upper-case
+// hex carry no checksum. A bare hex parse is not enough: it accepts a
+// mixed-case address with the wrong checksum, and the server would then
+// start and fail every balance call instead of refusing to start.
+//
+// The rule is restated here because this package cannot import
+// internal/evm: that package's tests import this one.
+func validFeeTokenAddress(s string) bool {
+	addr, err := defitypes.AddressFromHex(s)
+	if err != nil {
+		return false
+	}
+	hexPart := strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	if hexPart == strings.ToLower(hexPart) || hexPart == strings.ToUpper(hexPart) {
+		return true
+	}
+	return "0x"+hexPart == addr.Checksum(deficrypto.Keccak256)
 }
 
 // GasToken returns the asset this deployment's wallets pay fees in: the

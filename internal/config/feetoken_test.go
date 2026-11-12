@@ -6,6 +6,8 @@ package config
 import (
 	"errors"
 	"testing"
+
+	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
 )
 
 const l1FeeTokenAddress = "0x20c0000000000000000000000000000000000000"
@@ -92,6 +94,39 @@ func TestFeeTokenFromEnv(t *testing.T) {
 			chainID: l1DevnetChainID,
 			env:     map[string]string{envFeeAssetAddress: "0x20c0"},
 			wantErr: ErrFeeTokenAddressInvalid,
+		},
+		{
+			// The EIP-55 vector from internal/evm/addrhex_test.go with its
+			// casing broken. A bare hex parse accepts it; the balance read
+			// does not, so startup must not either.
+			name:    "mixed-case address with a wrong checksum",
+			chainID: l1DevnetChainID,
+			env: map[string]string{
+				envFeeAssetAddress: "0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- wrong checksum on purpose
+			},
+			wantErr: ErrFeeTokenAddressInvalid,
+		},
+		{
+			name:    "mixed-case address with the right checksum",
+			chainID: l1DevnetChainID,
+			env: map[string]string{
+				envFeeAssetAddress: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
+			},
+			want: FeeToken{
+				Symbol: "pathUSD", Decimals: 6,
+				Address: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
+			},
+		},
+		{
+			name:    "upper-case address carries no checksum",
+			chainID: l1DevnetChainID,
+			env: map[string]string{
+				envFeeAssetAddress: "0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
+			},
+			want: FeeToken{
+				Symbol: "pathUSD", Decimals: 6,
+				Address: "0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
+			},
 		},
 		{
 			name:    "non-numeric decimals",
@@ -199,5 +234,31 @@ func TestLoad_NativeCoinChainHasNoFeeToken(t *testing.T) {
 	}
 	if cfg.FeeToken.IsContract() {
 		t.Errorf("FeeToken = %+v, want the zero value on a native-coin chain", cfg.FeeToken)
+	}
+}
+
+// TestValidFeeTokenAddress_MatchesBalanceReadParser pins the startup check
+// to the parser the balance read uses (evm.ParseAddress). If the two ever
+// disagree, an address either passes startup and then fails every balance
+// call, or is refused at startup though it would have worked.
+func TestValidFeeTokenAddress_MatchesBalanceReadParser(t *testing.T) {
+	vectors := []string{
+		l1FeeTokenAddress,
+		"0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
+		"0x57eb2e9ee9345ce3dd4063e130d58ec79aba7207", // pragma: allowlist secret -- same vector, lower case
+		"0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
+		"57EB2e9ee9345ce3dD4063E130D58EC79aba7207",   // pragma: allowlist secret -- same vector, no 0x
+		"0X57eb2e9ee9345ce3dd4063e130d58ec79aba7207", // pragma: allowlist secret -- same vector, 0X prefix
+		"0x57eb2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- wrong checksum on purpose
+		"0x20C0000000000000000000000000000000000000",
+		"0x1234",
+		"not-an-address",
+		"",
+	}
+	for _, v := range vectors {
+		_, err := evm.ParseAddress(v)
+		if got, want := validFeeTokenAddress(v), err == nil; got != want {
+			t.Errorf("validFeeTokenAddress(%q) = %v, but evm.ParseAddress accepts = %v", v, got, want)
+		}
 	}
 }

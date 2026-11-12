@@ -258,7 +258,7 @@ The L2 charges fees in its native coin. The L1 has no native coin: fees are char
 
 | Variable | Default | Description |
 |---|---|---|
-| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else _(none)_ | Token contract fees are charged in. When set (or built in), `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read this token's `balanceOf` instead of the native balance. |
+| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else _(none)_ | Token contract fees are charged in. When set (or built in), `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read this token's `balanceOf` instead of the native balance. A mixed-case address must carry a valid EIP-55 checksum; all-lowercase hex is accepted as is. |
 | `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222` | Symbol shown for that token. Required with the address on a chain that has no built-in fee token. |
 | `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222` | The token's decimals, `0`-`36`. Required with the address on a chain that has no built-in fee token. |
 | `NVNM_FAUCET_URL` | _(none)_ | Faucet URL returned by `nvnm_overview` and the setup wizard as `faucet_url`. Optional, any chain. |

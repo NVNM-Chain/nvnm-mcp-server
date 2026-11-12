@@ -201,19 +201,30 @@ func TestSetupWizard_NativeCoinUnfundedMessageUnchanged(t *testing.T) {
 	}
 }
 
-func TestFundingFieldNames(t *testing.T) {
+func TestFundingHint(t *testing.T) {
+	pathUSD := config.FeeToken{Symbol: "pathUSD", Decimals: 6, Address: l1TestFeeToken}
 	tests := []struct {
-		faucet, bridge, want string
+		name           string
+		faucet, bridge string
+		feeToken       config.FeeToken
+		want           string
 	}{
-		{"", "", "`bridge_url`"},
-		{"", "https://b", "`bridge_url`"},
-		{"https://f", "", "`faucet_url`"},
-		{"https://f", "https://b", "`faucet_url` or `bridge_url`"},
+		{"native coin, nothing configured: the bridge field, as before", "", "", config.FeeToken{}, "see `bridge_url`"},
+		{"native coin, bridge", "", "https://b", config.FeeToken{}, "see `bridge_url`"},
+		{"native coin, faucet", "https://f", "", config.FeeToken{}, "see `faucet_url`"},
+		{"native coin, both", "https://f", "https://b", config.FeeToken{}, "see `faucet_url` or `bridge_url`"},
+		{"fee token, faucet", "https://f", "", pathUSD, "see `faucet_url`"},
+		{"fee token, bridge", "", "https://b", pathUSD, "see `bridge_url`"},
+		{"fee token, both", "https://f", "https://b", pathUSD, "see `faucet_url` or `bridge_url`"},
+		{
+			"fee token, nothing configured: no field to point at", "", "", pathUSD,
+			"this deployment lists no funding URL; ask its operator where to get pathUSD",
+		},
 	}
 	for _, tt := range tests {
-		cfg := &config.Config{FaucetURL: tt.faucet, BridgeURL: tt.bridge}
-		if got := fundingFieldNames(cfg); got != tt.want {
-			t.Errorf("fundingFieldNames(faucet=%q, bridge=%q) = %q, want %q", tt.faucet, tt.bridge, got, tt.want)
+		cfg := &config.Config{FaucetURL: tt.faucet, BridgeURL: tt.bridge, FeeToken: tt.feeToken}
+		if got := fundingHint(cfg); got != tt.want {
+			t.Errorf("%s: fundingHint = %q, want %q", tt.name, got, tt.want)
 		}
 	}
 	both := &config.Config{FaucetURL: "https://f", BridgeURL: "https://b"}
@@ -222,6 +233,44 @@ func TestFundingFieldNames(t *testing.T) {
 	}
 	if got := fundingURLs(&config.Config{}); got != "" {
 		t.Errorf("fundingURLs with nothing configured = %q, want empty", got)
+	}
+}
+
+// TestFeeTokenChain_NoFundingURLConfigured is the minimal L1 deployment:
+// RPC URL and chain ID only. No response carries bridge_url or faucet_url,
+// so no text may send the reader to either field.
+func TestFeeTokenChain_NoFundingURLConfigured(t *testing.T) {
+	cfg := l1ServerConfig()
+	const operator = "ask its operator where to get pathUSD"
+
+	_, wizard, err := makeSetupWizardHandler(&mockEVM{}, cfg)(ctx, nil, setupWizardInput{})
+	if err != nil {
+		t.Fatalf("wizard needs_wallet: %v", err)
+	}
+	_, unfunded, err := makeSetupWizardHandler(l1Mock(0, 0), cfg)(ctx, nil, setupWizardInput{Address: testAddr})
+	if err != nil {
+		t.Fatalf("wizard unfunded: %v", err)
+	}
+	_, overview, err := makeOverviewHandler(cfg)(ctx, nil, overviewInput{})
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if wizard.BridgeURL != "" || wizard.FaucetURL != "" || unfunded.BridgeURL != "" || overview.BridgeURL != "" {
+		t.Fatal("a funding URL is set; this test is about the deployment that configures none")
+	}
+
+	texts := map[string]string{
+		"wizard needs_wallet message":   wizard.Message,
+		"wizard unfunded message":       unfunded.Message,
+		"overview funding prerequisite": overview.Prereqs[fundingPrereqIndex],
+	}
+	for name, text := range texts {
+		if strings.Contains(text, "bridge_url") || strings.Contains(text, "faucet_url") {
+			t.Errorf("%s points at a field this response does not carry: %q", name, text)
+		}
+		if !strings.Contains(text, operator) {
+			t.Errorf("%s must send the reader to the operator: %q", name, text)
+		}
 	}
 }
 
@@ -238,6 +287,23 @@ func TestGetBalance_FeeTokenChain(t *testing.T) {
 		t.Errorf("token = (%q, %d, %q)", out.TokenWrapped, out.BalanceDecimals, out.FeeTokenAddress)
 	}
 	assertBalanceOfCall(t, m)
+}
+
+// TestGetBalance_FeeTokenChain_MissingBlock proves a historical balance at
+// a block the node does not have keeps its reason on the token path, the
+// way the native path does (chain 787222: "block not found: 0x3b9ac9ff").
+func TestGetBalance_FeeTokenChain_MissingBlock(t *testing.T) {
+	m := l1Mock(1, 0)
+	m.returnErr = errors.New("RPC error: -32001 block not found: 0x3b9ac9ff")
+	_, _, err := makeGetBalanceHandler(m, l1ServerConfig())(ctx, nil,
+		getBalanceInput{Address: testAddr, BlockNum: blockNumArg(999_999_999)})
+	if !errors.Is(err, apperrors.ErrBlockNotFound) {
+		t.Fatalf("err = %v, want ErrBlockNotFound", err)
+	}
+	if got := apperrors.SafeForClient(err).Error(); got == "upstream operation failed" ||
+		strings.Contains(got, "0x3b9ac9ff") {
+		t.Errorf("client sees %q", got)
+	}
 }
 
 func TestGetBalance_NativeCoinChainReportsScale(t *testing.T) {

@@ -39,6 +39,13 @@ func TokenBalanceAt(
 
 	output, err := c.CallContract(ctx, defitypes.Call{To: &token, Input: input}, block)
 	if err != nil {
+		// CallContract hands back the node's raw error. BalanceAt curates
+		// the ones a caller can act on, and a token balance at a block the
+		// node does not have (observed 2026-11-12 on chain 787222 as "block
+		// not found: 0x3b9ac9ff") must not read worse than a native one.
+		if curated := classifyNodeRPCError(err); curated != nil {
+			return nil, curated
+		}
 		return nil, fmt.Errorf("fee token balanceOf: %w", err)
 	}
 	if len(output) != abiWordLen {

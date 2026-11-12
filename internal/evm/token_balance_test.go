@@ -84,6 +84,28 @@ func TestTokenBalanceAt_Errors(t *testing.T) {
 			t.Errorf("error = %v, want %v", err, errRPCDown)
 		}
 	})
+	// Verbatim from chain 787222 (2026-11-12) for a balanceOf at a block
+	// past the head. The native path curates this; the token path must too.
+	t.Run("block the node does not have is block not found", func(t *testing.T) {
+		c := newFakeClient(&fakeRPC{callErr: errors.New("RPC error: -32001 block not found: 0x3b9ac9ff")})
+		got, err := TokenBalanceAt(context.Background(), c, token, holder, 6, big.NewInt(999_999_999))
+		if !errors.Is(err, apperrors.ErrBlockNotFound) {
+			t.Fatalf("error = %v, want ErrBlockNotFound", err)
+		}
+		if got != nil {
+			t.Errorf("balance = %+v, want nil", got)
+		}
+		if msg := apperrors.SafeForClient(err).Error(); msg != "block not found" {
+			t.Errorf("client sees %q, want %q", msg, "block not found")
+		}
+	})
+	t.Run("unrecognized call error still collapses for the client", func(t *testing.T) {
+		c := newFakeClient(&fakeRPC{callErr: errRPCDown})
+		_, err := TokenBalanceAt(context.Background(), c, token, holder, 6, nil)
+		if msg := apperrors.SafeForClient(err).Error(); msg != "upstream operation failed" {
+			t.Errorf("client sees %q, want the generic collapse", msg)
+		}
+	})
 	// A token that is not deployed answers eth_call with empty bytes. That
 	// must not read as a zero balance.
 	for name, out := range map[string][]byte{"empty": {}, "short": {0x01}, "long": make([]byte, abiWordLen*2)} {

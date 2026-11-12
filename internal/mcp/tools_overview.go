@@ -168,8 +168,8 @@ func prereqsFor(cfg *config.Config) []string {
 	prereqs := append([]string(nil), basePrereqs...)
 	if cfg.FeeToken.IsContract() {
 		prereqs[fundingPrereqIndex] = "That wallet funded with " + cfg.FeeToken.Symbol +
-			", the token this chain charges fees in (it has no native coin). See " +
-			fundingFieldNames(cfg) + " for the funding flow."
+			", the token this chain charges fees in (it has no native coin); " +
+			fundingHint(cfg) + "."
 	}
 	return append(prereqs, broadcast)
 }
