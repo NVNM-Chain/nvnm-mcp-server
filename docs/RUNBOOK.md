@@ -214,7 +214,7 @@ The following `NVNM_*` knobs are additive to the required chain config above. Th
 | `NVNM_BRIDGE_URL` | _(empty)_ | Bridge/funding-flow URL surfaced to the wizard's `unfunded` state. Optional. |
 | `NVNM_FAUCET_URL` | _(empty)_ | Faucet URL surfaced as `faucet_url` by `nvnm_overview` and the wizard's `needs_wallet` / `unfunded` states. Optional. |
 | `NVNM_FEE_TOKEN_ADDRESS` | built in for chain `787222` (`0x20c0…0000`), else required | Token contract fees are charged in. The chain has no native coin, so every balance the server reports is this token's `balanceOf`; `eth_getBalance` is not read. A mixed-case address must carry a valid EIP-55 checksum. |
-| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222`, else required | Symbol for the fee token. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `nUSD` on `787222`, else required | Symbol for the fee token. |
 | `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222`, else required | Fee token decimals (`0`-`36`). On a chain with no built-in fee token the server refuses to start unless all three are set. |
 | `NVNM_WALLET_GENERATOR_URL` | `https://wallet.nvnmchain.io` | Browser-hosted wallet generator page surfaced to the wizard's `needs_wallet` state. Default points at the canonical Inveniam-hosted instance (`NVNM-Chain/nvnm-wallet-page`); operators self-hosting the wallet page can override. |
 | `NVNM_KEY_REQUEST_ENABLED` | `false` | Opt-in flag for the public self-serve API-key request endpoint (`POST /api/v1/keys/request`). When `true`, `NVNM_KEY_PENDING_FILE` is required. Phase 11 L3 / RD3. |

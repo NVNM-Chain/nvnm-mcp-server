@@ -43,7 +43,7 @@ func assertBalanceOfCall(t *testing.T, m *mockEVM) {
 
 // TestWalletStatus_ReadsFeeToken proves the funded state comes from the
 // fee token's balanceOf. Amounts are the ones observed on chain 787222:
-// the faucet hands out 100 pathUSD at 6 decimals.
+// the faucet hands out 100 nUSD at 6 decimals.
 func TestWalletStatus_ReadsFeeToken(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -53,9 +53,9 @@ func TestWalletStatus_ReadsFeeToken(t *testing.T) {
 		wantWei    string
 		wantHuman  string
 	}{
-		{"no fee token held", 0, 0, WalletStatusUnfunded, "0", "0.000000 pathUSD"},
-		{"faucet amount, never used", 100_000_000, 0, WalletStatusFundedUnused, "100000000", "100.000000 pathUSD"},
-		{"funded and active", 99_946_588, 15, WalletStatusFundedActive, "99946588", "99.946588 pathUSD"},
+		{"no fee token held", 0, 0, WalletStatusUnfunded, "0", "0.000000 nUSD"},
+		{"faucet amount, never used", 100_000_000, 0, WalletStatusFundedUnused, "100000000", "100.000000 nUSD"},
+		{"funded and active", 99_946_588, 15, WalletStatusFundedActive, "99946588", "99.946588 nUSD"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,8 +76,8 @@ func TestWalletStatus_ReadsFeeToken(t *testing.T) {
 			if out.FeeTokenAddress != testFeeToken {
 				t.Errorf("fee_token_address = %q, want %q", out.FeeTokenAddress, testFeeToken)
 			}
-			if out.TokenNative != "pathUSD" || out.TokenWrapped != "pathUSD" {
-				t.Errorf("token names = (%q, %q), want pathUSD for both", out.TokenNative, out.TokenWrapped)
+			if out.TokenNative != "nUSD" || out.TokenWrapped != "nUSD" {
+				t.Errorf("token names = (%q, %q), want nUSD for both", out.TokenNative, out.TokenWrapped)
 			}
 			assertBalanceOfCall(t, m)
 		})
@@ -105,8 +105,8 @@ func TestSetupWizard_FundingText(t *testing.T) {
 		if out.State != WizardStateUnfunded {
 			t.Fatalf("state = %q, want unfunded", out.State)
 		}
-		want := "Wallet holds no pathUSD, the token this chain charges fees in (it has no native coin). " +
-			"Fund the address with pathUSD, then re-call this wizard. Faucet: https://faucet.example"
+		want := "Wallet holds no nUSD, the token this chain charges fees in (it has no native coin). " +
+			"Fund the address with nUSD, then re-call this wizard. Faucet: https://faucet.example"
 		if out.Message != want {
 			t.Errorf("message = %q, want %q", out.Message, want)
 		}
@@ -138,7 +138,7 @@ func TestSetupWizard_FundingText(t *testing.T) {
 		if out.State != WizardStateFundedUnused {
 			t.Fatalf("state = %q, want funded_unused", out.State)
 		}
-		if !strings.Contains(out.Message, "100.000000 pathUSD") {
+		if !strings.Contains(out.Message, "100.000000 nUSD") {
 			t.Errorf("message = %q, want the token amount", out.Message)
 		}
 	})
@@ -149,7 +149,7 @@ func TestSetupWizard_FundingText(t *testing.T) {
 		if err != nil {
 			t.Fatalf("wizard: %v", err)
 		}
-		if !strings.Contains(out.Message, "fund it with pathUSD (see `faucet_url`)") {
+		if !strings.Contains(out.Message, "fund it with nUSD (see `faucet_url`)") {
 			t.Errorf("message = %q", out.Message)
 		}
 		if out.FaucetURL != cfg.FaucetURL {
@@ -169,7 +169,7 @@ func TestFundingHint(t *testing.T) {
 		{"both", "https://f", "https://b", "see `faucet_url` or `bridge_url`"},
 		{
 			"nothing configured: no field to point at", "", "",
-			"this deployment lists no funding URL; ask its operator where to get pathUSD",
+			"this deployment lists no funding URL; ask its operator where to get nUSD",
 		},
 	}
 	for _, tt := range tests {
@@ -193,7 +193,7 @@ func TestFundingHint(t *testing.T) {
 // send the reader to either field.
 func TestNoFundingURLConfigured(t *testing.T) {
 	cfg := testServerConfig(false)
-	const operator = "ask its operator where to get pathUSD"
+	const operator = "ask its operator where to get nUSD"
 
 	_, wizard, err := makeSetupWizardHandler(&mockEVM{}, cfg)(ctx, nil, setupWizardInput{})
 	if err != nil {
@@ -232,10 +232,10 @@ func TestGetBalance_ReadsFeeToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evm_get_balance: %v", err)
 	}
-	if out.Wei != "2466" || out.Ether != "0.002466" || out.BalanceHuman != "0.002466 pathUSD" {
+	if out.Wei != "2466" || out.Ether != "0.002466" || out.BalanceHuman != "0.002466 nUSD" {
 		t.Errorf("balance = (%q, %q, %q)", out.Wei, out.Ether, out.BalanceHuman)
 	}
-	if out.TokenWrapped != "pathUSD" || out.BalanceDecimals != 6 || out.FeeTokenAddress != testFeeToken {
+	if out.TokenWrapped != "nUSD" || out.BalanceDecimals != 6 || out.FeeTokenAddress != testFeeToken {
 		t.Errorf("token = (%q, %d, %q)", out.TokenWrapped, out.BalanceDecimals, out.FeeTokenAddress)
 	}
 	assertBalanceOfCall(t, m)
@@ -270,7 +270,7 @@ func TestOverview_DescribesFeeAsset(t *testing.T) {
 	if !strings.HasPrefix(out.WhatIsNVNMChain, whatIsNVNMChainText) {
 		t.Errorf("what_is_nvnm_chain must start with the fixed chain text: %q", out.WhatIsNVNMChain)
 	}
-	for _, want := range []string{"an EVM chain", "no native coin", "pathUSD", "SHA-256", "fee_token_address"} {
+	for _, want := range []string{"an EVM chain", "no native coin", "nUSD", "SHA-256", "fee_token_address"} {
 		if !strings.Contains(out.WhatIsNVNMChain, want) {
 			t.Errorf("what_is_nvnm_chain missing %q: %q", want, out.WhatIsNVNMChain)
 		}
@@ -278,10 +278,10 @@ func TestOverview_DescribesFeeAsset(t *testing.T) {
 	if out.FeeTokenAddress != testFeeToken || out.FaucetURL != cfg.FaucetURL {
 		t.Errorf("fee token / faucet = (%q, %q)", out.FeeTokenAddress, out.FaucetURL)
 	}
-	if out.TokenNative != "pathUSD" || out.TokenWrapped != "pathUSD" {
+	if out.TokenNative != "nUSD" || out.TokenWrapped != "nUSD" {
 		t.Errorf("token names = (%q, %q)", out.TokenNative, out.TokenWrapped)
 	}
-	want := "That wallet funded with pathUSD, the token this chain charges fees in " +
+	want := "That wallet funded with nUSD, the token this chain charges fees in " +
 		"(it has no native coin); see `faucet_url`."
 	if got := out.Prereqs[1]; got != want {
 		t.Errorf("funding prerequisite = %q, want %q", got, want)

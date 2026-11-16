@@ -8,13 +8,13 @@ For write operations, the server constructs unsigned transactions but never hold
 
 ### Target Chain
 
-NVNM Chain is purpose-built for document anchoring and provenance verification. It has no native coin: transaction fees are charged in a token contract (`pathUSD`). This server is deployed as one instance per network (see § 8 Multi-chain).
+NVNM Chain is purpose-built for document anchoring and provenance verification. It has no native coin: transaction fees are charged in a token contract (`nUSD`). This server is deployed as one instance per network (see § 8 Multi-chain).
 
 | Property | Devnet |
 |---|---|
 | Network | `nvnm-tempo-devnet-1` |
 | EVM chain ID | `787222` (`0xc0316`) |
-| Fee token | `pathUSD`, `0x20c0000000000000000000000000000000000000`, 6 decimals |
+| Fee token | `nUSD`, `0x20c0000000000000000000000000000000000000`, 6 decimals |
 | EVM RPC | `https://rpc.nvnm.canary.mantrachain.dev` |
 | EVM explorer | `https://scan.nvnm.canary.mantrachain.dev` |
 | Anchor contract | `0x0000000000000000000000000000000000000A00` |

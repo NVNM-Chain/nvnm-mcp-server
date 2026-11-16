@@ -39,7 +39,7 @@ The server deploys **one instance per chain** (see [`docs/DESIGN.md`](../../../d
 | RPC URL | `https://rpc.nvnm.canary.mantrachain.dev` | that chain's RPC |
 | EVM chain ID | `787222` | that chain's ID |
 | Environment label | inferred (`testnet`) | set `NVNM_CHAIN_ENVIRONMENT` |
-| Fee token | built in (`pathUSD`) | set the three `NVNM_FEE_TOKEN_*` values |
+| Fee token | built in (`nUSD`) | set the three `NVNM_FEE_TOKEN_*` values |
 
 ## Gotchas
 

@@ -15,7 +15,7 @@ func testServerConfig(enableWrite bool) *config.Config {
 	return &config.Config{
 		ChainID:          58887,
 		ChainEnvironment: config.EnvTestnet,
-		FeeToken:         config.FeeToken{Symbol: "pathUSD", Decimals: 6, Address: testFeeToken},
+		FeeToken:         config.FeeToken{Symbol: "nUSD", Decimals: 6, Address: testFeeToken},
 		AnchorAddress:    "0x0000000000000000000000000000000000000A00",
 		EnableWriteTools: enableWrite,
 		// Onboarding URLs intentionally empty: the overview / wizard

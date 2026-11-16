@@ -240,7 +240,7 @@ NVNM_FEE_TOKEN_ADDRESS=<token> NVNM_FEE_TOKEN_SYMBOL=<symbol> NVNM_FEE_TOKEN_DEC
 ```
 
 The signing wallet must hold the fee token on that chain; on the devnet,
-fund it with pathUSD from the faucet. `internal/evm` tests that read a known
+fund it with nUSD from the faucet. `internal/evm` tests that read a known
 historical transaction use `NVNM_TEST_TX_HASH` and `NVNM_TEST_TX_SENDER` (a
 mined tx and its sender on the target chain); without them the built-in
 devnet fixture is used, and those tests skip on other chains. If the devnet

@@ -165,8 +165,8 @@ _No parameters._
 | `docs_url` | `string` | Operator-configured docs URL (omitted when empty). |
 | `bridge_url` | `string` | Operator-configured bridge URL (omitted when empty). |
 | `faucet_url` | `string` | Operator-configured faucet URL (`NVNM_FAUCET_URL`; omitted when empty). |
-| `token_native` | `string` | The fee token's symbol (`pathUSD`). The chain has no native coin; the field keeps its name for callers that read it. |
-| `token_wrapped` | `string` | The fee token's symbol (`pathUSD`), the same value as `token_native`. |
+| `token_native` | `string` | The fee token's symbol (`nUSD`). The chain has no native coin; the field keeps its name for callers that read it. |
+| `token_wrapped` | `string` | The fee token's symbol (`nUSD`), the same value as `token_native`. |
 | `fee_token_address` | `string` | Token contract fees are charged in. Every balance this server reports is this token's `balanceOf`. |
 | `what_is_nvnm_chain` | `string` | Prose explanation of the chain, ending with the fee token: the chain has no native coin. |
 | `privacy_by_design` | `string` | Verbatim caveat: anchored data (hash + registry name) is public on-chain, but a hash doesn't reveal the document; wallet_status reads only balance/nonce so it can't tell what a wallet anchored. |
@@ -198,8 +198,8 @@ The balance is in the token the chain charges fees in. The chain has no native c
 | --- | --- | --- |
 | `address` | `string` | EIP-55 checksummed address. |
 | `balance_wei` | `string` | Balance as a decimal integer in the fee token's smallest unit (`"0"` when unfunded). It is not wei, despite the name -- see `balance_decimals`. |
-| `balance_human` | `string` | Balance with its symbol, e.g. `"100.000000 pathUSD"`. |
-| `balance_decimals` | `int` | Scale of `balance_wei`: the fee token's decimals (`6` for pathUSD). |
+| `balance_human` | `string` | Balance with its symbol, e.g. `"100.000000 nUSD"`. |
+| `balance_decimals` | `int` | Scale of `balance_wei`: the fee token's decimals (`6` for nUSD). |
 | `fee_token_address` | `string` | Token contract the balance was read from. |
 | `nonce` | `uint64` | Pending nonce. |
 | `has_sent_tx` | `bool` | True iff `nonce > 0`. |
@@ -599,9 +599,9 @@ The chain has no native coin, so this is the fee token's `balanceOf` at that blo
 |-----------|----------|----------------------------------------|
 | `address` | `string` | Queried address (0x-prefixed)          |
 | `wei`     | `string` | Balance as a decimal integer in the fee token's smallest unit. It is not wei, despite the name |
-| `balance_human` | `string` | Balance with the fee token's symbol, e.g. `100.000000 pathUSD` (prefer this) |
-| `token_wrapped` | `string` | Fee token symbol for this deployment (`pathUSD`) |
-| `balance_decimals` | `int` | Scale of `wei`: the fee token's decimals (`6` for pathUSD) |
+| `balance_human` | `string` | Balance with the fee token's symbol, e.g. `100.000000 nUSD` (prefer this) |
+| `token_wrapped` | `string` | Fee token symbol for this deployment (`nUSD`) |
+| `balance_decimals` | `int` | Scale of `wei`: the fee token's decimals (`6` for nUSD) |
 | `fee_token_address` | `string` | Token contract the balance was read from |
 | `ether`   | `string` | Legacy alias for the same decimal amount. NOT denominated in ether -- this chain has no ether. Retained for wire compatibility |
 

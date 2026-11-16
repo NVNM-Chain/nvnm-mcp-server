@@ -85,7 +85,7 @@ Cold-reader assumptions to head off up front. The server is deliberately scoped 
 |---|---|
 | **Network** | NVNM Chain -- `nvnm-tempo-devnet-1` |
 | **EVM chain ID** | `787222` (`0xc0316`) |
-| **Fee token** | `pathUSD` at `0x20c0000000000000000000000000000000000000`, 6 decimals. The chain has no native coin; every fee is paid in this token |
+| **Fee token** | `nUSD` at `0x20c0000000000000000000000000000000000000`, 6 decimals. The chain has no native coin; every fee is paid in this token |
 | **EVM RPC** | `https://rpc.nvnm.canary.mantrachain.dev` |
 | **EVM explorer** | `https://scan.nvnm.canary.mantrachain.dev` |
 | **MCP service (hosted)** | `https://mcp-testnet.nvnmchain.io` (testnet); `https://mcp.nvnmchain.io` (mainnet) |
@@ -256,7 +256,7 @@ NVNM Chain has no native coin. Fees are charged in a token contract, and `eth_ge
 | Variable | Default | Description |
 |---|---|---|
 | `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else required | Token contract fees are charged in. A mixed-case address must carry a valid EIP-55 checksum; all-lowercase hex is accepted as is. |
-| `NVNM_FEE_TOKEN_SYMBOL` | `pathUSD` on `787222`, else required | Symbol shown for that token. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `nUSD` on `787222`, else required | Symbol shown for that token. |
 | `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222`, else required | The token's decimals, `0`-`36`. |
 | `NVNM_FAUCET_URL` | _(none)_ | Faucet URL returned by `nvnm_overview` and the setup wizard as `faucet_url`. Optional. |
 

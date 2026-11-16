@@ -59,10 +59,11 @@ reject `key` combined with a non-zero `offset`.
 
 ### 1.3 To confirm
 
-- The fee token's on-chain `name()` and `symbol()` are `nUSD`; the chain
-  overview calls the asset pathUSD. The server displays pathUSD
-  (`NVNM_FEE_TOKEN_SYMBOL` overrides it). Which name is final?
-- Is pathUSD (`0x20c0000000000000000000000000000000000000`) the only
+- The fee token's on-chain `name()` and `symbol()` are `nUSD`, and that
+  is the name the server displays (`NVNM_FEE_TOKEN_SYMBOL` overrides
+  it). The chain overview page calls the same asset pathUSD; one of the
+  two should change.
+- Is nUSD (`0x20c0000000000000000000000000000000000000`) the only
   token an account can pay fees in? The server reads that one balance.
   A wallet funded with a different fee token would read as unfunded.
 - The public RPC is behind Cloudflare and answered `403` to a client
@@ -92,7 +93,7 @@ Checked, handled by the server, nothing requested.
 | Chain behavior | Server behavior |
 |---|---|
 | Chain identity | `787222` is recognized and infers `testnet`; `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID` are the only chain settings it needs. Any other chain ID must set `NVNM_CHAIN_ENVIRONMENT` and the fee token, or the server refuses to start. The earlier chain IDs `787111` and `1611` are not recognized. |
-| No native coin | `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read `balanceOf` on the fee token and never `eth_getBalance`. Amounts are rendered at the token's decimals (`100.000000 pathUSD`). Responses carry `balance_decimals` and `fee_token_address`. A `balanceOf` that reverts or returns no word is an error, not zero. |
+| No native coin | `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read `balanceOf` on the fee token and never `eth_getBalance`. Amounts are rendered at the token's decimals (`100.000000 nUSD`). Responses carry `balance_decimals` and `fee_token_address`. A `balanceOf` that reverts or returns no word is an error, not zero. |
 | Fee token config | Built in for `787222`. `NVNM_FEE_TOKEN_ADDRESS` / `_SYMBOL` / `_DECIMALS` are all required on any other chain. A mixed-case address must carry a valid EIP-55 checksum. |
 | Chain description | `nvnm_overview` and the `initialize` instructions say the chain has no native coin and name the fee token. `token_native` and `token_wrapped` both carry its symbol. The funding text names `faucet_url` (`NVNM_FAUCET_URL`) or `bridge_url`, and sends the reader to the operator when neither is configured. |
 | Exact-only name index (1.1) | `match=prefix/suffix/contains` returns `match mode not supported on this chain: its registry name index serves match=exact only; …`. |
@@ -111,7 +112,7 @@ needed.
 
 ### Verified against the devnet (2026-11-12)
 
-The signing wallet was funded with 100 pathUSD.
+The signing wallet was funded with 100 nUSD.
 
 - **Live integration suite** (`internal/evm`, `internal/anchor`,
   `internal/mcp`, tag `integration`), run on its defaults with no chain
@@ -132,7 +133,7 @@ The signing wallet was funded with 100 pathUSD.
 A type-2 transaction with a zero tip is mined and pays exactly the base
 fee: `maxPriorityFeePerGas` 0 and `effectiveGasPrice` equal to the
 block's `baseFeePerGas` (0.6 gwei). Creating a registry costs about
-0.0025 pathUSD.
+0.0025 nUSD.
 
 ### Deployment
 

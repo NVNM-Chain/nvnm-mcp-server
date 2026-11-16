@@ -49,7 +49,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for every address on this chain, so `wallet_status`,
   `nvnm_setup_wizard`, and `evm_get_balance` read the fee token's
   `balanceOf` and render it at the token's scale
-  (`100.000000 pathUSD`). Responses gain `balance_decimals` and
+  (`100.000000 nUSD`). Responses gain `balance_decimals` and
   `fee_token_address`. `token_native` and `token_wrapped` are kept and
   both carry the fee token's symbol. `balance_wei` / `wei` keep their
   names but hold the token's smallest unit, not wei. An unreadable token

@@ -18,7 +18,7 @@ func envMap(m map[string]string) func(string) string {
 
 func TestFeeTokenFromEnv(t *testing.T) {
 	const other = "0x1111111111111111111111111111111111111111"
-	builtIn := FeeToken{Symbol: "pathUSD", Decimals: 6, Address: devnetFeeTokenAddress}
+	builtIn := FeeToken{Symbol: "nUSD", Decimals: 6, Address: devnetFeeTokenAddress}
 	tests := []struct {
 		name    string
 		chainID int64
@@ -34,14 +34,14 @@ func TestFeeTokenFromEnv(t *testing.T) {
 		{
 			name:    "each variable overrides one built-in field",
 			chainID: devnetChainID,
-			env:     map[string]string{envFeeAssetSymbol: "nUSD"},
-			want:    FeeToken{Symbol: "nUSD", Decimals: 6, Address: devnetFeeTokenAddress},
+			env:     map[string]string{envFeeAssetSymbol: "xUSD"},
+			want:    FeeToken{Symbol: "xUSD", Decimals: 6, Address: devnetFeeTokenAddress},
 		},
 		{
 			name:    "address and decimals override on a known chain",
 			chainID: devnetChainID,
 			env:     map[string]string{envFeeAssetAddress: other, envFeeAssetDecimals: "18"},
-			want:    FeeToken{Symbol: "pathUSD", Decimals: 18, Address: other},
+			want:    FeeToken{Symbol: "nUSD", Decimals: 18, Address: other},
 		},
 		{
 			name:    "unknown chain with a full description",
@@ -109,7 +109,7 @@ func TestFeeTokenFromEnv(t *testing.T) {
 				envFeeAssetAddress: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
 			},
 			want: FeeToken{
-				Symbol: "pathUSD", Decimals: 6,
+				Symbol: "nUSD", Decimals: 6,
 				Address: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207", // pragma: allowlist secret -- EIP-55 test vector
 			},
 		},
@@ -120,7 +120,7 @@ func TestFeeTokenFromEnv(t *testing.T) {
 				envFeeAssetAddress: "0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
 			},
 			want: FeeToken{
-				Symbol: "pathUSD", Decimals: 6,
+				Symbol: "nUSD", Decimals: 6,
 				Address: "0x57EB2E9EE9345CE3DD4063E130D58EC79ABA7207", // pragma: allowlist secret -- same vector, upper case
 			},
 		},
@@ -172,7 +172,7 @@ func TestLoad_Devnet(t *testing.T) {
 	if cfg.ChainEnvironment != EnvTestnet {
 		t.Errorf("ChainEnvironment = %q, want testnet (inferred from 787222)", cfg.ChainEnvironment)
 	}
-	want := FeeToken{Symbol: "pathUSD", Decimals: 6, Address: devnetFeeTokenAddress}
+	want := FeeToken{Symbol: "nUSD", Decimals: 6, Address: devnetFeeTokenAddress}
 	if cfg.FeeToken != want {
 		t.Errorf("FeeToken = %+v, want %+v", cfg.FeeToken, want)
 	}

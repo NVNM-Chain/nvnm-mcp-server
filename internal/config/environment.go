@@ -52,7 +52,7 @@ const maxFeeTokenDecimals = 36
 // 2026-11-09 on chain 787222), so the only meaningful balance is the
 // token's balanceOf.
 type FeeToken struct {
-	// Symbol is the customer-facing name, e.g. pathUSD.
+	// Symbol is the customer-facing name, e.g. nUSD.
 	Symbol string
 	// Decimals is the token's scale: the balance integer divided by
 	// 10^Decimals is the human amount.
@@ -63,12 +63,11 @@ type FeeToken struct {
 
 // knownFeeTokens is the built-in fee token per known chain. Observed on a
 // mined addRegistry receipt on chain 787222 (2026-11-09): feeToken
-// 0x20c0…0000, decimals() 6. The contract's own symbol() is nUSD; the
-// chain's documentation names the asset pathUSD, which is what users are
-// told to hold.
+// 0x20c0…0000, decimals() 6, and the contract's own name() and symbol()
+// are nUSD.
 var knownFeeTokens = map[int64]FeeToken{
 	devnetChainID: {
-		Symbol:   "pathUSD",
+		Symbol:   "nUSD",
 		Decimals: 6,
 		Address:  "0x20c0000000000000000000000000000000000000",
 	},
