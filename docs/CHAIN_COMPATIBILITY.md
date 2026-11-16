@@ -1,12 +1,21 @@
 # Chain compatibility: chain-side gaps and server status
 
 The server targets one chain type: an EVM chain with no native coin,
-where fees are charged in a token contract. The chain it was verified
-against is the devnet, `nvnm-tempo-devnet-1`, chain ID `787222`,
-`https://rpc.nvnm.canary.mantrachain.dev`, node `tempo/v1.16.0` (reth).
-The anchor contract is at `0x0000000000000000000000000000000000000A00`
-(an EIP-1167 proxy). Everything below was observed live between
-2026-11-09 and 2026-11-12.
+where fees are charged in a token contract. It was verified against two
+networks, both running node `tempo/v1.16.0` (reth):
+
+- the devnet, `nvnm-tempo-devnet-1`, chain ID `787222`,
+  `https://rpc.nvnm.canary.mantrachain.dev`;
+- the testnet, chain ID `787223`,
+  `https://rpc.nvnm.testnet.nvnmchain.io`.
+
+On both, the anchor contract is at
+`0x0000000000000000000000000000000000000A00` (an EIP-1167 proxy) and the
+fee token is `nUSD` at `0x20c0000000000000000000000000000000000000`.
+The chain behavior below was observed on the devnet between 2026-11-09
+and 2026-11-12. The testnet was run on 2026-11-16 with the integration
+and e2e suites only, and they passed there the same way; section 3 has
+the one difference seen.
 
 Send section 1 to the chain team. Section 2 is how the server handles
 what the chain does. Section 3 is what was verified and what is still
@@ -70,8 +79,8 @@ reject `key` combined with a non-zero `offset`.
   with a default Python user agent. The Go client this server uses was
   not blocked. A production deployment needs an endpoint that will not
   filter it.
-- Chain IDs and fee tokens for the networks that follow the devnet. The
-  server recognizes only `787222`.
+- The chain ID and fee token for mainnet. The server recognizes `787223`
+  (testnet) and `787222` (devnet).
 
 ### Accepted as the chain's contract
 
@@ -92,9 +101,9 @@ Checked, handled by the server, nothing requested.
 
 | Chain behavior | Server behavior |
 |---|---|
-| Chain identity | `787222` is recognized and infers `testnet`; `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID` are the only chain settings it needs. Any other chain ID must set `NVNM_CHAIN_ENVIRONMENT` and the fee token, or the server refuses to start. The earlier chain IDs `787111` and `1611` are not recognized. |
+| Chain identity | `787223` (testnet) and `787222` (devnet) are recognized and infer `testnet`; `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID` select the chain and are the only chain settings either needs. Any other chain ID must set `NVNM_CHAIN_ENVIRONMENT` and the fee token, or the server refuses to start. The earlier chain IDs `787111` and `1611` are not recognized. |
 | No native coin | `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` read `balanceOf` on the fee token and never `eth_getBalance`. Amounts are rendered at the token's decimals (`100.000000 nUSD`). Responses carry `balance_decimals` and `fee_token_address`. A `balanceOf` that reverts or returns no word is an error, not zero. |
-| Fee token config | Built in for `787222`. `NVNM_FEE_TOKEN_ADDRESS` / `_SYMBOL` / `_DECIMALS` are all required on any other chain. A mixed-case address must carry a valid EIP-55 checksum. |
+| Fee token config | Built in for `787223` and `787222`. `NVNM_FEE_TOKEN_ADDRESS` / `_SYMBOL` / `_DECIMALS` are all required on any other chain. A mixed-case address must carry a valid EIP-55 checksum. |
 | Chain description | `nvnm_overview` and the `initialize` instructions say the chain has no native coin and name the fee token. `token_native` and `token_wrapped` both carry its symbol. The funding text names `faucet_url` (`NVNM_FAUCET_URL`) or `bridge_url`, and sends the reader to the operator when neither is configured. |
 | Exact-only name index (1.1) | `match=prefix/suffix/contains` returns `match mode not supported on this chain: its registry name index serves match=exact only; …`. |
 | No name cursor (1.2) | Offset paging works and its stop rules hold. A `key` sent with `name` is rejected with `key is not supported with name on this chain: …`. Detection: the returned page starts below the registry id the cursor names. |
@@ -102,7 +111,7 @@ Checked, handled by the server, nothing requested.
 | Not-found and validation wording | `registry does not exist`, `record does not exist`, `uri cannot be empty`, and `cannot revoke the last registry admin` are returned as `registry not found`, `record not found`, and two stated validation reasons. |
 | Log-range and missing-block errors | `query exceeds max block range …`, `block range extends beyond current head block …`, and `block not found …` return curated errors. |
 | `anchor_get_registry` argument | `registry_id`, matching the other anchor tools. `id` still works. |
-| Live tests | Default to the devnet. Built-in historical-tx fixture for `787222`. The prefix cursor test skips on an exact-only name index. Write tests skip, naming the wallet and the token, when the signing wallet holds none of the fee token. |
+| Live tests | Take the chain from `NVNM_EVM_RPC_URL` / `NVNM_CHAIN_ID` (devnet when unset). Built-in historical-tx fixtures for `787223` and `787222`. The prefix cursor test skips on an exact-only name index. Write tests skip, naming the wallet and the token, when the signing wallet holds none of the fee token. |
 
 The two rejections for 1.1 and 1.2 come from the chain's answer. If the
 chain adds the missing support, they stop firing and no server change is
@@ -135,18 +144,36 @@ fee: `maxPriorityFeePerGas` 0 and `effectiveGasPrice` equal to the
 block's `baseFeePerGas` (0.6 gwei). Creating a registry costs about
 0.0025 nUSD.
 
+### Verified against the testnet (2026-11-16)
+
+Chain `787223`, with only `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID` set.
+The signing wallet was funded with 100 nUSD, and `cmd/seed-test-data`
+created the `mcp-test-data` registry (id 3028) the anchor read tests
+need.
+
+- **Live integration suite**: every test passes, all five write methods
+  mined. `TestIntegration_GetRegistriesByName_Cursor` skips, as on the
+  devnet.
+- **Deployment hot path**: passes in-process and against the built
+  server binary.
+
+One difference from the devnet: the base fee moves. It ranged from 0.6
+to about 1.5 gwei during the run, where the devnet stayed at 0.6. Zero-tip
+type-2 transactions paid exactly the base fee, and `max_fee_per_gas` at
+twice the gas price was enough headroom every time. Creating a registry
+cost about 0.005 nUSD.
+
 ### Deployment
 
-- One server instance per chain. A devnet instance needs
-  `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID=787222`, and optionally
-  `NVNM_EXPLORER_URL` (`https://scan.nvnm.canary.mantrachain.dev`) and
-  `NVNM_FAUCET_URL`.
+- One server instance per chain, chosen by `NVNM_EVM_RPC_URL` and
+  `NVNM_CHAIN_ID`: `787223` for the testnet, `787222` for the devnet.
+  Optionally `NVNM_EXPLORER_URL` and `NVNM_FAUCET_URL`.
 - This is a cutover. A deployment still configured for chain `787111` or
   `1611` will not start on this version.
-- `787222` is a devnet. A testnet or mainnet with a new chain id needs
-  either its id and fee token added next to `devnetChainID` in
-  `internal/config/environment.go`, or `NVNM_CHAIN_ENVIRONMENT` plus the
-  three `NVNM_FEE_TOKEN_*` variables.
+- Mainnet is not built in. It needs either its chain id and fee token
+  added next to `testnetChainID` in `internal/config/environment.go`, or
+  `NVNM_CHAIN_ENVIRONMENT=mainnet` plus the three `NVNM_FEE_TOKEN_*`
+  variables.
 
 ### Left in the code on purpose
 

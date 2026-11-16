@@ -88,6 +88,7 @@ func TestLiveEnvironment(t *testing.T) {
 		want    ChainEnvironment
 		wantErr error
 	}{
+		{name: "inferred for the testnet", chainID: testnetChainID, want: EnvTestnet},
 		{name: "inferred for the devnet", chainID: devnetChainID, want: EnvTestnet},
 		{
 			name:    "explicit mainnet",
@@ -132,6 +133,13 @@ func TestLiveMinedTx(t *testing.T) {
 		wantFx  *LiveTxFixture
 		wantErr error
 	}{
+		{
+			name: "built-in on the testnet", chainID: testnetChainID, wantOK: true,
+			wantFx: &LiveTxFixture{
+				Hash:   "0x4b727d96d21a566cba5f8418e196857dd16717f4880ae1765045a8b158019c85",
+				Sender: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207",
+			},
+		},
 		{
 			name: "built-in on the devnet", chainID: LiveDefaultChainID, wantOK: true,
 			wantFx: &LiveTxFixture{

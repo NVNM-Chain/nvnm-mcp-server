@@ -41,11 +41,17 @@ const (
 )
 
 // liveBuiltinTxFixtures are the mined transactions known per chain, used
-// when NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER are unset. The devnet entry
-// is the addRegistry that created registry 2227 (block 4881470, observed
-// 2026-11-09). A devnet can be reset; when it is, override the fixture
-// through the environment.
+// when NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER are unset. The testnet
+// entry is the addRegistry that created the seeded mcp-test-data registry
+// (3028, block 7861665, 2026-11-16). The devnet entry is the addRegistry
+// that created registry 2227 (block 4881470, observed 2026-11-09). A
+// network can be reset; when it is, override the fixture through the
+// environment.
 var liveBuiltinTxFixtures = map[int64]LiveTxFixture{
+	testnetChainID: {
+		Hash:   "0x4b727d96d21a566cba5f8418e196857dd16717f4880ae1765045a8b158019c85",
+		Sender: "0x57EB2e9ee9345ce3dD4063E130D58EC79aba7207",
+	},
 	devnetChainID: {
 		Hash:   "0xc3139110f81470f527de4d482125186eb0ca7142b44bd9bbd5d677c2872fb13a",
 		Sender: "0x50d476e5d2c044998eC185D86A0EF5CB32f3e8F4",

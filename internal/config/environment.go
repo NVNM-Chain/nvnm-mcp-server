@@ -23,21 +23,30 @@ func (e ChainEnvironment) IsValid() bool {
 // String satisfies the Stringer interface.
 func (e ChainEnvironment) String() string { return string(e) }
 
-// devnetChainID is nvnm-tempo-devnet-1, the one chain the server knows
-// without being told: its environment is inferred and its fee token is
-// built in. Any other chain sets NVNM_CHAIN_ENVIRONMENT and the
-// NVNM_FEE_TOKEN_* variables.
-const devnetChainID int64 = 787222
+// The chains the server knows without being told: for these the
+// environment is inferred and the fee token is built in, so
+// NVNM_EVM_RPC_URL and NVNM_CHAIN_ID are the only chain settings needed.
+// Which chain a server runs against is still chosen by those two
+// variables; nothing here selects a chain. Any other chain sets
+// NVNM_CHAIN_ENVIRONMENT and the NVNM_FEE_TOKEN_* variables.
+const (
+	// testnetChainID is the NVNM testnet.
+	testnetChainID int64 = 787223
+	// devnetChainID is nvnm-tempo-devnet-1.
+	devnetChainID int64 = 787222
+)
 
 // InferEnvironmentFromChainID returns the environment a chain ID maps
 // to, or an empty value if the chain ID is unrecognized. An empty
 // return is the signal that the operator must set
 // NVNM_CHAIN_ENVIRONMENT.
 func InferEnvironmentFromChainID(chainID int64) ChainEnvironment {
-	if chainID == devnetChainID {
+	switch chainID {
+	case testnetChainID, devnetChainID:
 		return EnvTestnet
+	default:
+		return ""
 	}
-	return ""
 }
 
 // maxFeeTokenDecimals bounds NVNM_FEE_TOKEN_DECIMALS. ERC-20 decimals is a
@@ -61,14 +70,18 @@ type FeeToken struct {
 	Address string
 }
 
-// knownFeeTokens is the built-in fee token per known chain. Observed on a
-// mined addRegistry receipt on chain 787222 (2026-11-09): feeToken
-// 0x20c0…0000, decimals() 6, and the contract's own name() and symbol()
-// are nUSD.
+// nUSD is the fee token of the known chains. Observed on mined anchor
+// receipts on chain 787222 (2026-11-09) and chain 787223 (2026-11-16):
+// feeToken 0x20c0…0000, decimals() 6, and the contract's own name() and
+// symbol() are nUSD.
+var nUSD = FeeToken{
+	Symbol:   "nUSD",
+	Decimals: 6,
+	Address:  "0x20c0000000000000000000000000000000000000",
+}
+
+// knownFeeTokens is the built-in fee token per known chain.
 var knownFeeTokens = map[int64]FeeToken{
-	devnetChainID: {
-		Symbol:   "nUSD",
-		Decimals: 6,
-		Address:  "0x20c0000000000000000000000000000000000000",
-	},
+	testnetChainID: nUSD,
+	devnetChainID:  nUSD,
 }

@@ -5,6 +5,7 @@ package config
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/NVNM-Chain/nvnm-mcp-server/internal/evm"
@@ -27,9 +28,20 @@ func TestFeeTokenFromEnv(t *testing.T) {
 		wantErr error
 	}{
 		{
+			name:    "the testnet has a built-in fee token",
+			chainID: testnetChainID,
+			want:    builtIn,
+		},
+		{
 			name:    "the devnet has a built-in fee token",
 			chainID: devnetChainID,
 			want:    builtIn,
+		},
+		{
+			name:    "a variable overrides the testnet's built-in field too",
+			chainID: testnetChainID,
+			env:     map[string]string{envFeeAssetDecimals: "8"},
+			want:    FeeToken{Symbol: "nUSD", Decimals: 8, Address: devnetFeeTokenAddress},
 		},
 		{
 			name:    "each variable overrides one built-in field",
@@ -156,28 +168,43 @@ func TestFeeTokenFromEnv(t *testing.T) {
 	}
 }
 
-// TestLoad_Devnet proves chain 787222 boots with no chain-specific
+// TestLoad_KnownChains proves a known chain boots with no chain-specific
 // variables beyond the RPC URL and chain ID: the environment is inferred
-// and the fee token is the built-in one.
-func TestLoad_Devnet(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.nvnm.canary.mantrachain.dev")
-	t.Setenv("NVNM_CHAIN_ID", "787222")
-	t.Setenv("NVNM_FAUCET_URL", "https://faucet.example.com")
+// and the fee token is the built-in one. The chain itself is whatever
+// those two variables name.
+func TestLoad_KnownChains(t *testing.T) {
+	chains := map[string]string{
+		"testnet": "787223",
+		"devnet":  "787222",
+	}
+	for name, chainID := range chains {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("NVNM_EVM_RPC_URL", "https://rpc.example.com")
+			t.Setenv("NVNM_CHAIN_ID", chainID)
+			t.Setenv("NVNM_FAUCET_URL", "https://faucet.example.com")
 
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.ChainEnvironment != EnvTestnet {
-		t.Errorf("ChainEnvironment = %q, want testnet (inferred from 787222)", cfg.ChainEnvironment)
-	}
-	want := FeeToken{Symbol: "nUSD", Decimals: 6, Address: devnetFeeTokenAddress}
-	if cfg.FeeToken != want {
-		t.Errorf("FeeToken = %+v, want %+v", cfg.FeeToken, want)
-	}
-	if cfg.FaucetURL != "https://faucet.example.com" {
-		t.Errorf("FaucetURL = %q", cfg.FaucetURL)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := strconv.FormatInt(cfg.ChainID, 10); got != chainID {
+				t.Errorf("ChainID = %s, want %s", got, chainID)
+			}
+			if cfg.EVMRPCURL != "https://rpc.example.com" {
+				t.Errorf("EVMRPCURL = %q, want the value from the environment", cfg.EVMRPCURL)
+			}
+			if cfg.ChainEnvironment != EnvTestnet {
+				t.Errorf("ChainEnvironment = %q, want testnet (inferred from %s)", cfg.ChainEnvironment, chainID)
+			}
+			want := FeeToken{Symbol: "nUSD", Decimals: 6, Address: devnetFeeTokenAddress}
+			if cfg.FeeToken != want {
+				t.Errorf("FeeToken = %+v, want %+v", cfg.FeeToken, want)
+			}
+			if cfg.FaucetURL != "https://faucet.example.com" {
+				t.Errorf("FaucetURL = %q", cfg.FaucetURL)
+			}
+		})
 	}
 }
 

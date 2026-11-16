@@ -230,8 +230,16 @@ address and the token named in the message, not a failure.
 same variables as the server, through `internal/config/testenv_config.go`: `NVNM_EVM_RPC_URL`
 (default `https://rpc.nvnm.canary.mantrachain.dev`) and `NVNM_CHAIN_ID` (default
 `787222`, the devnet). A set-but-invalid value fails the run immediately. The
-devnet's environment and fee token are built in. To run against another
-chain, describe it the way the server requires:
+testnet (`787223`) and the devnet have their environment, fee token, and a
+historical-tx fixture built in, so the testnet needs only its RPC URL and
+chain ID:
+
+```sh
+NVNM_EVM_RPC_URL=https://rpc.nvnm.testnet.nvnmchain.io NVNM_CHAIN_ID=787223 \
+  go test -mod=vendor -tags integration -count=1 ./internal/anchor
+```
+
+To run against any other chain, describe it the way the server requires:
 
 ```sh
 NVNM_EVM_RPC_URL=<rpc> NVNM_CHAIN_ID=<id> NVNM_CHAIN_ENVIRONMENT=testnet \
@@ -239,14 +247,14 @@ NVNM_FEE_TOKEN_ADDRESS=<token> NVNM_FEE_TOKEN_SYMBOL=<symbol> NVNM_FEE_TOKEN_DEC
   go test -mod=vendor -tags integration -count=1 ./internal/anchor
 ```
 
-The signing wallet must hold the fee token on that chain; on the devnet,
-fund it with nUSD from the faucet. `internal/evm` tests that read a known
+The signing wallet must hold the fee token on that chain; on the testnet
+and the devnet, fund it with nUSD from the faucet. `internal/evm` tests that read a known
 historical transaction use `NVNM_TEST_TX_HASH` and `NVNM_TEST_TX_SENDER` (a
 mined tx and its sender on the target chain); without them the built-in
-devnet fixture is used, and those tests skip on other chains. If the devnet
-is reset, set the two variables.
+fixture for the testnet or the devnet is used, and those tests skip on other
+chains. If a network is reset, set the two variables.
 
-What the suite expects of the chain, as observed on the devnet:
+What the suite expects of the chain, as observed on the testnet and the devnet:
 
 - The name index serves exact match only and has no cursor, so
   `TestIntegration_GetRegistriesByName_Cursor` (a prefix walk) skips.

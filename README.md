@@ -81,17 +81,18 @@ Cold-reader assumptions to head off up front. The server is deliberately scoped 
 
 ## Target Chain
 
-| Property | Value (devnet) |
-|---|---|
-| **Network** | NVNM Chain -- `nvnm-tempo-devnet-1` |
-| **EVM chain ID** | `787222` (`0xc0316`) |
-| **Fee token** | `nUSD` at `0x20c0000000000000000000000000000000000000`, 6 decimals. The chain has no native coin; every fee is paid in this token |
-| **EVM RPC** | `https://rpc.nvnm.canary.mantrachain.dev` |
-| **EVM explorer** | `https://scan.nvnm.canary.mantrachain.dev` |
-| **MCP service (hosted)** | `https://mcp-testnet.nvnmchain.io` (testnet); `https://mcp.nvnmchain.io` (mainnet) |
-| **Anchor contract** | `0x0000000000000000000000000000000000000A00` |
+| Property | Testnet | Devnet |
+|---|---|---|
+| **Network** | NVNM Chain testnet | `nvnm-tempo-devnet-1` |
+| **EVM chain ID** | `787223` (`0xc0317`) | `787222` (`0xc0316`) |
+| **EVM RPC** | `https://rpc.nvnm.testnet.nvnmchain.io` | `https://rpc.nvnm.canary.mantrachain.dev` |
+| **EVM explorer** | -- | `https://scan.nvnm.canary.mantrachain.dev` |
+| **Fee token** | `nUSD` at `0x20c0000000000000000000000000000000000000`, 6 decimals | same |
+| **Anchor contract** | `0x0000000000000000000000000000000000000A00` | same |
 
-> The devnet is the one chain the server knows without being told. Any other chain needs `NVNM_CHAIN_ENVIRONMENT` and the three `NVNM_FEE_TOKEN_*` variables (see [Configuration](#configuration)). The server runs as one instance per network.
+The chain has no native coin; every fee is paid in the fee token. Hosted MCP service: `https://mcp-testnet.nvnmchain.io` (testnet); `https://mcp.nvnmchain.io` (mainnet).
+
+> Which chain a server runs against comes from the environment: `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID`. For the two chains above that is all it needs; their environment label and fee token are built in. Any other chain also needs `NVNM_CHAIN_ENVIRONMENT` and the three `NVNM_FEE_TOKEN_*` variables (see [Configuration](#configuration)). The server runs as one instance per network.
 
 ## Status
 
@@ -246,18 +247,18 @@ All configuration is via environment variables. No config files required.
 | Variable | Description |
 |---|---|
 | `NVNM_EVM_RPC_URL` | Primary EVM JSON-RPC endpoint |
-| `NVNM_CHAIN_ID` | Expected chain ID (`787222` for the devnet) |
-| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Inferred for the devnet; required for any other chain. Legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
+| `NVNM_CHAIN_ID` | Expected chain ID (`787223` for the testnet, `787222` for the devnet) |
+| `NVNM_CHAIN_ENVIRONMENT` | Chain environment label: `testnet` or `mainnet`. Inferred for the testnet and the devnet; required for any other chain. Legacy `INVENIAM_*` env vars are hard-rejected at startup with a pointer to `docs/RUNBOOK.md#env-var-migration` |
 
 ### Fee token
 
-NVNM Chain has no native coin. Fees are charged in a token contract, and `eth_getBalance` is not a balance: it answers the same placeholder for every address. `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` report that token's `balanceOf`. The server knows the devnet's fee token. On any other chain all three variables below are required, and the server refuses to start without them.
+NVNM Chain has no native coin. Fees are charged in a token contract, and `eth_getBalance` is not a balance: it answers the same placeholder for every address. `wallet_status`, `nvnm_setup_wizard`, and `evm_get_balance` report that token's `balanceOf`. The server knows the fee token of the testnet (`787223`) and the devnet (`787222`). On any other chain all three variables below are required, and the server refuses to start without them.
 
 | Variable | Default | Description |
 |---|---|---|
-| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787222`, else required | Token contract fees are charged in. A mixed-case address must carry a valid EIP-55 checksum; all-lowercase hex is accepted as is. |
-| `NVNM_FEE_TOKEN_SYMBOL` | `nUSD` on `787222`, else required | Symbol shown for that token. |
-| `NVNM_FEE_TOKEN_DECIMALS` | `6` on `787222`, else required | The token's decimals, `0`-`36`. |
+| `NVNM_FEE_TOKEN_ADDRESS` | built in for `787223` and `787222`, else required | Token contract fees are charged in. A mixed-case address must carry a valid EIP-55 checksum; all-lowercase hex is accepted as is. |
+| `NVNM_FEE_TOKEN_SYMBOL` | `nUSD` on the two known chains, else required | Symbol shown for that token. |
+| `NVNM_FEE_TOKEN_DECIMALS` | `6` on the two known chains, else required | The token's decimals, `0`-`36`. |
 | `NVNM_FAUCET_URL` | _(none)_ | Faucet URL returned by `nvnm_overview` and the setup wizard as `faucet_url`. Optional. |
 
 ### Authentication (HTTP transport)

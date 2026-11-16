@@ -10,16 +10,16 @@ For write operations, the server constructs unsigned transactions but never hold
 
 NVNM Chain is purpose-built for document anchoring and provenance verification. It has no native coin: transaction fees are charged in a token contract (`nUSD`). This server is deployed as one instance per network (see § 8 Multi-chain).
 
-| Property | Devnet |
-|---|---|
-| Network | `nvnm-tempo-devnet-1` |
-| EVM chain ID | `787222` (`0xc0316`) |
-| Fee token | `nUSD`, `0x20c0000000000000000000000000000000000000`, 6 decimals |
-| EVM RPC | `https://rpc.nvnm.canary.mantrachain.dev` |
-| EVM explorer | `https://scan.nvnm.canary.mantrachain.dev` |
-| Anchor contract | `0x0000000000000000000000000000000000000A00` |
+| Property | Testnet | Devnet |
+|---|---|---|
+| Network | NVNM Chain testnet | `nvnm-tempo-devnet-1` |
+| EVM chain ID | `787223` (`0xc0317`) | `787222` (`0xc0316`) |
+| EVM RPC | `https://rpc.nvnm.testnet.nvnmchain.io` | `https://rpc.nvnm.canary.mantrachain.dev` |
+| EVM explorer | -- | `https://scan.nvnm.canary.mantrachain.dev` |
+| Fee token | `nUSD`, `0x20c0000000000000000000000000000000000000`, 6 decimals | same |
+| Anchor contract | `0x0000000000000000000000000000000000000A00` | same |
 
-The devnet is the one chain the server recognizes. For any other network the operator sets `NVNM_CHAIN_ENVIRONMENT` and the three `NVNM_FEE_TOKEN_*` variables.
+These are the two chains the server recognizes: for them it infers the environment and knows the fee token. Which one an instance runs against comes from `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID`. For any other network the operator also sets `NVNM_CHAIN_ENVIRONMENT` and the three `NVNM_FEE_TOKEN_*` variables.
 
 > **Privacy-by-design.** The chain stores only hash fingerprints of data (one-way SHA-256), never the underlying data itself. Anchor writes are publicly observable: `add_record` logs the SHA-256 hash and `add_registry` logs the registry name in public on-chain logs. A hash is one-way, so the underlying document is not derivable — counterparties exchange the file off-band and verify by recomputing the hash; encode or salt sensitive registry names before anchoring. The chain is a neutral notary that never reads documents.
 >

@@ -105,7 +105,8 @@ broadcast.
    are stable; any selector that does not match the operation you
    asked for is a substitution attack.
 4. **Do not submit on Chain ID mismatch.** Transactions for different
-   networks must not be confused (the devnet is `787222`). Verify the
+   networks must not be confused (the testnet is `787223`, the devnet
+   `787222`). Verify the
    `chainId` field in the unsigned transaction before signing.
 
 ## Reporting

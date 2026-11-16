@@ -32,9 +32,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recognized, the `mantraUSD` / `wmantraUSD` / `mmUSD` / `wmmUSD` naming
   is gone, and balances are never read with `eth_getBalance`. A
   deployment still pointed at either retired chain ID refuses to start.
-  The one recognized chain is the devnet, `787222`
-  (`nvnm-tempo-devnet-1`): it starts with `NVNM_EVM_RPC_URL` and
-  `NVNM_CHAIN_ID` alone. Any other chain must set
+  Two chains are recognized: the testnet, `787223`, and the devnet,
+  `787222` (`nvnm-tempo-devnet-1`). Either starts with
+  `NVNM_EVM_RPC_URL` and `NVNM_CHAIN_ID` alone, and those two variables
+  are what select the chain; the server has no default. Any other chain
+  must set
   `NVNM_CHAIN_ENVIRONMENT` and all three of `NVNM_FEE_TOKEN_ADDRESS`,
   `NVNM_FEE_TOKEN_SYMBOL`, `NVNM_FEE_TOKEN_DECIMALS`, or the server
   refuses to start. Chain-side gaps and verification:
@@ -101,7 +103,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   range errors instead of `upstream operation failed`.
 - **Live write tests skip on an unfunded signing wallet** instead of
   failing with `insufficient funds`: they read the fee token's
-  `balanceOf`. A built-in historical-tx fixture covers chain `787222`.
+  `balanceOf`. Built-in historical-tx fixtures cover chains `787223` and
+  `787222`.
 - **Live integration tests and `cmd/seed-test-data` no longer hardcode the
   testnet.** The RPC endpoint and chain ID come from `NVNM_EVM_RPC_URL` /
   `NVNM_CHAIN_ID` (devnet defaults when unset) via the live-test

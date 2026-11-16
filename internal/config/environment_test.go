@@ -30,6 +30,7 @@ func TestInferEnvironmentFromChainID(t *testing.T) {
 		chainID int64
 		want    ChainEnvironment
 	}{
+		{787223, EnvTestnet}, // testnet
 		{787222, EnvTestnet}, // devnet (nvnm-tempo-devnet-1)
 		{787111, ""},         // retired chain ID: no longer recognized
 		{1611, ""},           // retired chain ID: no longer recognized
