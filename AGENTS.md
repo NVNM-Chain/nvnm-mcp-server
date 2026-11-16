@@ -11,7 +11,7 @@ and [docs/TESTING.md](docs/TESTING.md); read those before large changes.
 ## What this server is
 
 A Go-based [Model Context Protocol](https://modelcontextprotocol.io/)
-server exposing the NVNM Chain (an Inveniam L2 on MANTRA) through a
+server exposing the NVNM Chain through a
 curated set of typed MCP tools: EVM reads, anchor-precompile reads, and
 prepare/broadcast write flows. Entrypoint: `cmd/nvnm-mcp-server`; core
 logic under `internal/` (see "Project Structure" in the README).

@@ -30,7 +30,7 @@ const (
 	testConnectTimeout = 15 * time.Second
 )
 
-// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (testnet
+// The live target comes from NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (devnet
 // defaults when unset); see internal/config/testenv_config.go.
 var (
 	testTarget  = config.MustLiveTarget()
@@ -39,7 +39,7 @@ var (
 )
 
 // minedTxFixture returns a known mined tx and its sender on the target
-// chain (NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER, or the built-in testnet
+// chain (NVNM_TEST_TX_HASH / NVNM_TEST_TX_SENDER, or the built-in devnet
 // fixture) and skips the test when none is available for this chain.
 func minedTxFixture(t *testing.T) config.LiveTxFixture {
 	t.Helper()

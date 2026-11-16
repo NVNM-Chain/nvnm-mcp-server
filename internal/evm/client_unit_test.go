@@ -62,6 +62,7 @@ type fakeRPC struct {
 
 	callOut []byte
 	callErr error
+	gotCall *defitypes.Call
 
 	gasEstimate uint64
 	estimateErr error
@@ -142,6 +143,7 @@ func (f *fakeRPC) MaxPriorityFeePerGas(_ context.Context) (*big.Int, error) {
 func (f *fakeRPC) Call(
 	_ context.Context, call *defitypes.Call, _ defitypes.BlockNumber,
 ) ([]byte, *defitypes.Call, error) {
+	f.gotCall = call
 	return f.callOut, call, f.callErr
 }
 

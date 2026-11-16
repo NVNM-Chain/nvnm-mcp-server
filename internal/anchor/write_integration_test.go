@@ -72,6 +72,7 @@ func loadCredentials(t *testing.T) testCredentials {
 	if address != "" && !strings.EqualFold(address, derived) {
 		t.Fatalf("credentials Address %s does not match key-derived %s", address, derived)
 	}
+	skipIfUnfunded(t, privKey.Address())
 	return testCredentials{Address: derived, PrivateKey: privKey}
 }
 

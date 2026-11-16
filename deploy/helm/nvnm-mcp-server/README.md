@@ -23,9 +23,10 @@ These pin the server's chain at startup. Operators **must** set them; the server
 
 | Value | Example |
 |---|---|
-| `env.NVNM_EVM_RPC_URL` | `https://evm.testnet.nvnmchain.io` (testnet) or `https://evm.nvnmchain.io` (mainnet) |
-| `env.NVNM_CHAIN_ID` | `787111` (testnet) or `1611` (mainnet) |
-| `env.NVNM_CHAIN_ENVIRONMENT` | `testnet` or `mainnet` |
+| `env.NVNM_EVM_RPC_URL` | `https://rpc.nvnm.testnet.nvnmchain.io` (testnet) or `https://rpc.nvnm.canary.mantrachain.dev` (devnet) |
+| `env.NVNM_CHAIN_ID` | `787223` (testnet) or `787222` (devnet) |
+| `env.NVNM_CHAIN_ENVIRONMENT` | `testnet` or `mainnet`. Inferred for those two chains; required for any other chain |
+| `env.NVNM_FEE_TOKEN_ADDRESS`, `env.NVNM_FEE_TOKEN_SYMBOL`, `env.NVNM_FEE_TOKEN_DECIMALS` | Built in for those two chains; all three required for any other chain |
 | `image.repository` | `ghcr.io/nvnm-chain/nvnm-mcp-server` |
 | `image.tag` | Matches a released artifact tag |
 
@@ -33,12 +34,12 @@ These pin the server's chain at startup. Operators **must** set them; the server
 
 The server deploys **one instance per chain** (see [`docs/DESIGN.md`](../../../docs/DESIGN.md) § Multi-chain). Same chart, different value files.
 
-| Aspect | Testnet | Mainnet |
-|---|---|---|
-| RPC URL | `https://evm.testnet.nvnmchain.io` | `https://evm.nvnmchain.io` |
-| EVM chain ID | `787111` | `1611` |
-| Environment label | `testnet` | `mainnet` |
-| Cosmos chain ID | `nvnm-testnet-1` | `nvnm-1` |
+| Aspect | Testnet | Devnet | Any other chain |
+|---|---|---|---|
+| RPC URL | `https://rpc.nvnm.testnet.nvnmchain.io` | `https://rpc.nvnm.canary.mantrachain.dev` | that chain's RPC |
+| EVM chain ID | `787223` | `787222` | that chain's ID |
+| Environment label | inferred (`testnet`) | inferred (`testnet`) | set `NVNM_CHAIN_ENVIRONMENT` |
+| Fee token | built in (`nUSD`) | built in (`nUSD`) | set the three `NVNM_FEE_TOKEN_*` values |
 
 ## Gotchas
 

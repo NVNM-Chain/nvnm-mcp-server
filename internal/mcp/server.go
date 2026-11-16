@@ -37,7 +37,7 @@ const serverName = "nvnm-chain"
 // tool response, which this string deliberately points at rather
 // than duplicates.
 const initializeInstructions = "NVNM Chain MCP server -- typed " +
-	"access to NVNM Chain, an EVM L2 on MANTRA Chain used as a " +
+	"access to NVNM Chain, an EVM chain used as a " +
 	"neutral notary for document anchoring. This server holds no " +
 	"private keys (writes are prepare-sign-submit, signed caller-side) " +
 	"and returns only public on-chain data; anchored hashes and " +

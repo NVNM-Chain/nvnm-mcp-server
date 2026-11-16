@@ -116,7 +116,7 @@ func TestGetRegistry_CapsAndLabelsUntrusted(t *testing.T) {
 	c := &fakeAnchor{registry: &anchor.Registry{ID: 1, Name: "ok", Metadata: big}}
 	h := makeGetRegistryHandler(c)
 
-	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRegistryInput{ID: 1})
+	_, out, err := h(context.Background(), &sdkmcp.CallToolRequest{}, getRegistryInput{RegistryID: u64p(1)})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}

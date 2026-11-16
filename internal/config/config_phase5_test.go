@@ -16,7 +16,7 @@ import (
 func setValidKeylessEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
-	t.Setenv("NVNM_CHAIN_ID", "787111") // recognized testnet chain ID; no NVNM_CHAIN_ENVIRONMENT needed
+	t.Setenv("NVNM_CHAIN_ID", "787222") // recognized chain ID; environment and fee token are built in
 	t.Setenv("MCP_TRANSPORT", "http")
 	t.Setenv("MCP_KEYLESS_READS", "true")
 	t.Setenv("MCP_KEYLESS_WRITES", "true")
@@ -26,7 +26,7 @@ func setValidKeylessEnv(t *testing.T) {
 
 func TestLoad_KeylessWritesRequiresReads(t *testing.T) {
 	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
-	t.Setenv("NVNM_CHAIN_ID", "787111")
+	t.Setenv("NVNM_CHAIN_ID", "787222")
 	t.Setenv("MCP_TRANSPORT", "http")
 	t.Setenv("MCP_KEYLESS_WRITES", "true")
 	t.Setenv("MCP_KEYLESS_PG_DSN", "postgres://x/y")

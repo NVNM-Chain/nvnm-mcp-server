@@ -32,7 +32,7 @@ import (
 //
 // Each test broadcasts a real anchor_prepare_add_registry transaction
 // against the chain selected by NVNM_EVM_RPC_URL / NVNM_CHAIN_ID (default:
-// nvnm-testnet-1, chain ID 787111; see internal/config/testenv_config.go). The
+// the devnet, chain ID 787222; see internal/config/testenv_config.go). The
 // signing key must be funded on that chain. The registry name is
 // timestamped so each run is idempotent against the on-chain
 // unique-name constraint.
@@ -66,7 +66,9 @@ func envCredentials(t *testing.T) (*defiwallet.PrivateKey, defitypes.Address) {
 		t.Fatalf("decode signing key: %v", err)
 	}
 	priv := defiwallet.NewKeyFromBytes(keyBytes)
-	return priv, priv.Address()
+	addr := priv.Address()
+	skipIfUnfunded(t, addr)
+	return priv, addr
 }
 
 // TestIntegration_PrepareAddRegistry_EIP1559_RoundTrip exercises the

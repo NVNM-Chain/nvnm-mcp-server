@@ -33,13 +33,11 @@ func TestEVMGetCodeNext_PrecompileIsNotAnEmptyAccount(t *testing.T) {
 	}
 }
 
-// TestGetBalance_ReportsChainGasToken guards the unit label. The chain's gas
-// token is wmantraUSD / wmmUSD, never ether, so an agent reading the legacy
+// TestGetBalance_ReportsChainGasToken guards the unit label. Fees are
+// charged in the fee token, never ether, so an agent reading the legacy
 // `ether` field alone would report the wrong unit to a user.
 func TestGetBalance_ReportsChainGasToken(t *testing.T) {
-	m := &mockEVM{balance: &evm.NormalizedBalance{
-		Address: testAddr, Wei: "1000000000000000000", Ether: "1.000000000000000000",
-	}}
+	m := &mockEVM{balance: &evm.NormalizedBalance{Address: testAddr, Wei: "1500000"}}
 	handler := makeGetBalanceHandler(m, testServerConfig(false))
 
 	_, out, err := handler(ctx, nil, getBalanceInput{Address: testAddr})
@@ -54,7 +52,7 @@ func TestGetBalance_ReportsChainGasToken(t *testing.T) {
 			out.BalanceHuman, out.TokenWrapped)
 	}
 	// Legacy field retained for wire compatibility.
-	if out.Ether != "1.000000000000000000" {
+	if out.Ether != "1.500000" {
 		t.Errorf("legacy ether field changed: %q", out.Ether)
 	}
 }

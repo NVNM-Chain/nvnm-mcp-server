@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"strings"
@@ -33,20 +34,23 @@ func blockNumArg(n int64) blockNumberArg {
 // ---------------------------------------------------------------------------
 
 type mockEVM struct {
-	chainInfo   *evm.ChainInfo
-	block       *evm.NormalizedBlock
-	tx          *evm.NormalizedTransaction
-	receipt     *evm.NormalizedReceipt
-	balance     *evm.NormalizedBalance
-	code        *evm.CodeResult
-	logs        []evm.NormalizedLog
-	callResult  []byte
-	sendTxHash  string
-	nonce       uint64 // returned by PendingNonceAt; default 0
-	returnErr   error
-	lastAddress defitypes.Address
-	lastHash    defitypes.Hash
-	lastCall    defitypes.Call
+	chainInfo  *evm.ChainInfo
+	block      *evm.NormalizedBlock
+	tx         *evm.NormalizedTransaction
+	receipt    *evm.NormalizedReceipt
+	balance    *evm.NormalizedBalance
+	code       *evm.CodeResult
+	logs       []evm.NormalizedLog
+	callResult []byte
+	sendTxHash string
+	nonce      uint64 // returned by PendingNonceAt; default 0
+	// nativeBalanceReads counts BalanceAt (eth_getBalance) calls. No tool
+	// may read it: the chain has no native coin.
+	nativeBalanceReads int
+	returnErr          error
+	lastAddress        defitypes.Address
+	lastHash           defitypes.Hash
+	lastCall           defitypes.Call
 }
 
 func (m *mockEVM) ChainID(_ context.Context) (*big.Int, error)         { return big.NewInt(58887), m.returnErr }
@@ -71,6 +75,7 @@ func (m *mockEVM) TransactionReceipt(_ context.Context, h defitypes.Hash) (*evm.
 }
 func (m *mockEVM) BalanceAt(_ context.Context, addr defitypes.Address, _ *big.Int) (*evm.NormalizedBalance, error) {
 	m.lastAddress = addr
+	m.nativeBalanceReads++
 	return m.balance, m.returnErr
 }
 func (m *mockEVM) CodeAt(_ context.Context, addr defitypes.Address, _ *big.Int) (*evm.CodeResult, error) {
@@ -78,10 +83,28 @@ func (m *mockEVM) CodeAt(_ context.Context, addr defitypes.Address, _ *big.Int) 
 	return m.code, m.returnErr
 }
 
+// CallContract answers a balanceOf on the fee token from m.balance, the
+// balance this mock node holds for a wallet: the server reads every
+// balance that way. Any other call returns callResult.
+//
 //nolint:gocritic // hugeParam: matches go-ethereum's CallContract signature
 func (m *mockEVM) CallContract(_ context.Context, call defitypes.Call, _ *big.Int) ([]byte, error) {
 	m.lastCall = call
+	if m.returnErr == nil && m.balance != nil && isFeeTokenBalanceOf(&call) {
+		amount, ok := new(big.Int).SetString(m.balance.Wei, 10)
+		if !ok {
+			return nil, fmt.Errorf("mock balance %q is not an integer", m.balance.Wei)
+		}
+		return amount.FillBytes(make([]byte, 32)), nil
+	}
 	return m.callResult, m.returnErr
+}
+
+// isFeeTokenBalanceOf reports whether call is balanceOf(address) on the
+// test fee token.
+func isFeeTokenBalanceOf(call *defitypes.Call) bool {
+	return call.To != nil && *call.To == defitypes.MustAddressFromHex(testFeeToken) &&
+		len(call.Input) == 36 && bytes.Equal(call.Input[:4], []byte{0x70, 0xa0, 0x82, 0x31})
 }
 func (m *mockEVM) FilterLogs(_ context.Context, _ defitypes.FilterLogsQuery) ([]evm.NormalizedLog, error) {
 	return m.logs, m.returnErr
@@ -828,7 +851,7 @@ func TestHandler_GetRegistry_ByID(t *testing.T) {
 	m := &mockAnchor{registry: &anchor.Registry{ID: 42, Name: "by-id"}}
 	handler := makeGetRegistryHandler(m)
 
-	_, out, err := handler(ctx, nil, getRegistryInput{ID: 42})
+	_, out, err := handler(ctx, nil, getRegistryInput{RegistryID: u64p(42)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -840,12 +863,14 @@ func TestHandler_GetRegistry_ByID(t *testing.T) {
 func TestHandler_GetRegistry_MissingID(t *testing.T) {
 	handler := makeGetRegistryHandler(&mockAnchor{})
 
-	_, _, err := handler(ctx, nil, getRegistryInput{})
+	_, _, err := handler(ctx, nil, getRegistryInput{RegistryID: u64p(0)})
 	if err == nil {
-		t.Fatal("expected error when id is zero")
+		t.Fatal("expected error when registry_id is zero")
 	}
-	// id=0 is present but invalid (IDs start at 1); an absent id is already
-	// a schema rejection, so "missing" was the wrong word (M-2).
+	// registry_id=0 is present but invalid (IDs start at 1), so "missing"
+	// is the wrong word for it (M-2). A call with neither registry_id nor
+	// the deprecated id is the missing case; see
+	// TestGetRegistry_RegistryIDAndAlias.
 	if !errors.Is(err, apperrors.ErrInvalidRegistryID) {
 		t.Errorf("error = %v, want ErrInvalidRegistryID", err)
 	}

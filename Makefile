@@ -343,8 +343,8 @@ docker-run:
 docker-smoke: docker-build
 	@echo "Starting container..."
 	@CONTAINER_ID=$$(docker run -d --rm \
-		-e NVNM_EVM_RPC_URL=https://evm.testnet.nvnmchain.io \
-		-e NVNM_CHAIN_ID=787111 \
+		-e NVNM_EVM_RPC_URL=https://rpc.nvnm.canary.mantrachain.dev \
+		-e NVNM_CHAIN_ID=787222 \
 		-e NVNM_CHAIN_ENVIRONMENT=testnet \
 		-e ANCHOR_ABI_PATH=/app/abi/anchoring.json \
 		-e ENABLE_WRITE_TOOLS=true \

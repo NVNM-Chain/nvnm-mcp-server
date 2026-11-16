@@ -15,7 +15,7 @@ data:
   # Chain configuration. The Phase 8.9 hard cut renamed the
   # former INVENIAM_* env vars to NVNM_*; the server fails loud
   # at startup if any legacy INVENIAM_* var is still set.
-  NVNM_CHAIN_ID: "787111" # current testnet (nvnm-testnet-1)
+  NVNM_CHAIN_ID: "787222" # devnet (nvnm-tempo-devnet-1)
   ANCHOR_ABI_PATH: "/app/abi/anchoring.json"
 
   # Transports and ports.

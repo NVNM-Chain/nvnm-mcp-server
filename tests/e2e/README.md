@@ -63,7 +63,7 @@ Set `NVNM_E2E_REQUIRE_CHAIN=1` to turn that skip into a failure.
 |---|---|---|
 | `NVNM_MCP_TEST_SERVER_URL` | *(unset → in-process)* | Deployed MCP server under test |
 | `NVNM_EVM_RPC_URL` | *(required for in-process)* | Chain RPC used to build real clients |
-| `NVNM_CHAIN_ID` | `787111` | In-process server chain ID |
+| `NVNM_CHAIN_ID` | `787222` | In-process server chain ID |
 | `NVNM_MCP_TEST_API_KEY` | *(unset)* | Bearer token; omit against a keyless server |
 | `NVNM_TEST_PRIVATE_KEY` | *(file fallback)* | Signing key |
 | `NVNM_MCP_TEST_CREDENTIALS` | `<repo>/.chain_credentials.txt` | Signing credentials file |

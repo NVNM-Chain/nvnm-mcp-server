@@ -85,6 +85,32 @@ var safePrecompileReverts = []struct {
 		apperrors.ErrPrecompileValidation,
 	},
 	{
+		// Observed 2026-11-11 on chain 787222 for addRecord with an empty
+		// uri: "execution reverted: uri cannot be empty".
+		"uri cannot be empty",
+		"uri cannot be empty: pass the document's URI",
+		apperrors.ErrPrecompileValidation,
+	},
+	{
+		// Observed 2026-11-11 on chain 787222 for revokeRole of the only
+		// admin: "execution reverted: cannot revoke the last registry
+		// admin". The contract checks this before the caller's own role.
+		"cannot revoke the last registry admin",
+		"cannot revoke the last admin of a registry: grant admin to " +
+			"another account first, then revoke this one",
+		apperrors.ErrPrecompileValidation,
+	},
+	{
+		// Observed 2026-11-09 on chain 787222 for registriesByName with
+		// matchMode 2/3/4: "execution reverted: only exact match is on
+		// chain; search prefix/suffix/contains off chain". The method
+		// exists and exact match works, so this is not the "method
+		// missing" case (ErrRegistriesByNameUnsupported).
+		"only exact match is on chain",
+		apperrors.ErrMatchModeUnsupported.Error(),
+		apperrors.ErrMatchModeUnsupported,
+	},
+	{
 		// On-chain role denial. Deliberately worded to distinguish it from
 		// this server's own API-key RBAC denial, which is about the caller's
 		// credential rather than the signing address's registry role.
@@ -109,6 +135,16 @@ const onChainRoleDenial = "on-chain authorization failed: the `from` address doe
 // which is exactly what must never reach a client; the type name is only
 // used here to pick between the two not-found sentinels.
 const collectionsNotFound = "collections: not found"
+
+// The anchoring contract's own miss phrasing, observed 2026-11-11 on
+// chain 787222 as "execution reverted: registry does not exist" and
+// "execution reverted: record does not exist" (also "record does not exist
+// in registry" for a role scoped to an unknown record checksum). They map
+// to the same not-found sentinels as collectionsNotFound.
+const (
+	contractRegistryMissing = "registry does not exist"
+	contractRecordMissing   = "record does not exist"
+)
 
 // curatePrecompileErr returns the client-facing error for a classified
 // precompile rejection: the canonical reason wrapped in its sentinel, or the
@@ -136,6 +172,14 @@ func classifyPrecompileRevert(err error) (reason string, ok bool, kind error) {
 			return apperrors.ErrRegistryNotFound.Error(), true, apperrors.ErrRegistryNotFound
 		}
 		return apperrors.ErrRecordNotFound.Error(), true, apperrors.ErrRecordNotFound
+	}
+	// The record phrase is checked first: its scoped form ("record does not
+	// exist in registry") also contains the word registry.
+	if strings.Contains(msg, contractRecordMissing) {
+		return apperrors.ErrRecordNotFound.Error(), true, apperrors.ErrRecordNotFound
+	}
+	if strings.Contains(msg, contractRegistryMissing) {
+		return apperrors.ErrRegistryNotFound.Error(), true, apperrors.ErrRegistryNotFound
 	}
 	for _, e := range safePrecompileReverts {
 		if strings.Contains(msg, e.match) {

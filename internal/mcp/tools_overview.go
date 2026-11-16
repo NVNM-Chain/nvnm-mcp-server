@@ -29,15 +29,21 @@ type canonicalJourneyStep struct {
 }
 
 type overviewOutput struct {
-	ChainName        string                 `json:"chain_name"`
-	ChainEnvironment string                 `json:"chain_environment"`
-	ChainID          int64                  `json:"chain_id"`
-	AnchorPrecompile string                 `json:"anchor_precompile"`
-	ExplorerURL      string                 `json:"explorer_url,omitempty"`
-	DocsURL          string                 `json:"docs_url,omitempty"`
-	BridgeURL        string                 `json:"bridge_url,omitempty"`
-	TokenNative      string                 `json:"token_native"`
-	TokenWrapped     string                 `json:"token_wrapped"`
+	ChainName        string `json:"chain_name"`
+	ChainEnvironment string `json:"chain_environment"`
+	ChainID          int64  `json:"chain_id"`
+	AnchorPrecompile string `json:"anchor_precompile"`
+	ExplorerURL      string `json:"explorer_url,omitempty"`
+	DocsURL          string `json:"docs_url,omitempty"`
+	BridgeURL        string `json:"bridge_url,omitempty"`
+	FaucetURL        string `json:"faucet_url,omitempty"`
+	TokenNative      string `json:"token_native"`
+	TokenWrapped     string `json:"token_wrapped"`
+	// FeeTokenAddress is the token contract fees are charged in.
+	// TokenNative and TokenWrapped are both that token's symbol: the chain
+	// has no native coin, and the two fields are kept for callers that
+	// read either.
+	FeeTokenAddress  string                 `json:"fee_token_address"`
 	WhatIsNVNMChain  string                 `json:"what_is_nvnm_chain"`
 	PrivacyByDesign  string                 `json:"privacy_by_design"`
 	Prereqs          []string               `json:"prereqs"`
@@ -50,8 +56,8 @@ type overviewOutput struct {
 // MUST set expectations about on-chain observability, because that
 // shapes what `wallet_status` and the wizard can and cannot tell the
 // agent about the wallet's history on chain.
-const whatIsNVNMChainText = "NVNM Chain is an EVM L2 on MANTRA Chain " +
-	"used as a neutral notary for document anchoring. It stores only " +
+const whatIsNVNMChainText = "NVNM Chain is an EVM chain used as a " +
+	"neutral notary for document anchoring. It stores only " +
 	"one-way hash fingerprints (SHA-256) of documents, never the " +
 	"documents themselves. Anchor writes are publicly observable: " +
 	"add_record logs the SHA-256 hash and add_registry logs the " +
@@ -59,6 +65,16 @@ const whatIsNVNMChainText = "NVNM Chain is an EVM L2 on MANTRA Chain " +
 	"underlying document is not derivable -- counterparties exchange " +
 	"the file off-band and verify by recomputing the hash; encode or " +
 	"salt sensitive registry names before anchoring."
+
+// whatIsNVNMChain is the chain description for this deployment: the
+// fixed text, then the fee asset. A reader has to know there is no native
+// coin before any balance in this server's output makes sense.
+func whatIsNVNMChain(cfg *config.Config) string {
+	return whatIsNVNMChainText + " This chain has no native coin: " +
+		"transaction fees are charged in the " + cfg.FeeToken.Symbol +
+		" token (fee_token_address), so that is the balance a wallet " +
+		"needs and the one this server reports."
+}
 
 // privacyByDesignText states the consequence for what this server can
 // and cannot do for an agent. The wizard message in funded_active
@@ -112,18 +128,22 @@ var canonicalJourney = []canonicalJourneyStep{
 	},
 }
 
-// basePrereqs lists the prerequisites that hold in every deployment,
-// regardless of the auth posture. The wizard's needs_wallet / unfunded
-// states walk the agent through these; the overview lists them up front
-// for self-aware consumers.
-//
-//nolint:gochecknoglobals // immutable text; package-level by design
-var basePrereqs = []string{
-	"An EVM wallet you control. Server never holds private keys.",
-	"That wallet funded with the gas token. See bridge_url for the funding flow.",
-	"A signing path: either a browser wallet (MetaMask via the wallet_tx_request " +
+// The prerequisites that do not depend on the deployment. The wizard's
+// needs_wallet / unfunded states walk the agent through these; the
+// overview lists them up front for self-aware consumers.
+const (
+	walletPrereq  = "An EVM wallet you control. Server never holds private keys."
+	signingPrereq = "A signing path: either a browser wallet (MetaMask via the wallet_tx_request " +
 		"field returned by anchor_prepare_*) or a local/headless signer " +
-		"(sign raw_tx, broadcast via evm_send_raw_transaction).",
+		"(sign raw_tx, broadcast via evm_send_raw_transaction)."
+)
+
+// fundingPrereq says which asset the wallet needs and where this
+// deployment points for it.
+func fundingPrereq(cfg *config.Config) string {
+	return "That wallet funded with " + cfg.FeeToken.Symbol +
+		", the token this chain charges fees in (it has no native coin); " +
+		fundingHint(cfg) + "."
 }
 
 // prereqsFor returns the prerequisite list for this deployment. The
@@ -143,7 +163,7 @@ func prereqsFor(cfg *config.Config) []string {
 			"the anchor precompile. Your wallet signature is the only identity the " +
 			"server sees. Per-signer volume quotas and a signer blacklist apply."
 	}
-	return append(append([]string(nil), basePrereqs...), broadcast)
+	return []string{walletPrereq, fundingPrereq(cfg), signingPrereq, broadcast}
 }
 
 func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
@@ -151,7 +171,7 @@ func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 		Name:  "nvnm_overview",
 		Title: "NVNM Chain Overview",
 		Description: "Lobby tool. Returns chain identity (env, chain ID, " +
-			"precompile address, explorer/docs/bridge URLs), the chain's " +
+			"precompile address, fee token, explorer/docs/faucet/bridge URLs), the chain's " +
 			"privacy-by-design property, prerequisites for writes, and a " +
 			"6-step canonical agent journey. Intended as the first call of a " +
 			"session that has not used this server before. No chain calls.",
@@ -160,7 +180,6 @@ func registerOverviewTool(srv *mcp.Server, cfg *config.Config) {
 }
 
 func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, overviewOutput] {
-	naming := config.NamingFor(cfg.ChainEnvironment)
 	return func(
 		ctx context.Context, _ *mcp.CallToolRequest, _ overviewInput,
 	) (*mcp.CallToolResult, overviewOutput, error) {
@@ -180,9 +199,11 @@ func makeOverviewHandler(cfg *config.Config) mcp.ToolHandlerFor[overviewInput, o
 			ExplorerURL:      cfg.ExplorerURL,
 			DocsURL:          cfg.DocsURL,
 			BridgeURL:        cfg.BridgeURL,
-			TokenNative:      naming.Native,
-			TokenWrapped:     naming.Wrapped,
-			WhatIsNVNMChain:  whatIsNVNMChainText,
+			FaucetURL:        cfg.FaucetURL,
+			TokenNative:      cfg.FeeToken.Symbol,
+			TokenWrapped:     cfg.FeeToken.Symbol,
+			FeeTokenAddress:  cfg.FeeToken.Address,
+			WhatIsNVNMChain:  whatIsNVNMChain(cfg),
 			PrivacyByDesign:  privacyByDesignText,
 			Prereqs:          prereqsFor(cfg),
 			CanonicalJourney: canonicalJourney,

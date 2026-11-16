@@ -8,7 +8,7 @@
 
 ## 1. What this server is (the 60-second version)
 
-A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and NVNM Chain (Inveniam's L2 on MANTRA). It exposes **23 curated, typed tools** across four surfaces — EVM reads, anchor reads, prepare-sign-submit **writes**, and a guided onboarding wizard — with normalized responses and **zero private-key custody**. It is deliberately **not** a JSON-RPC passthrough.
+A typed [Model Context Protocol](https://modelcontextprotocol.io/) bridge between AI agents and NVNM Chain. It exposes **23 curated, typed tools** across four surfaces — EVM reads, anchor reads, prepare-sign-submit **writes**, and a guided onboarding wizard — with normalized responses and **zero private-key custody**. It is deliberately **not** a JSON-RPC passthrough.
 
 Read next, in order:
 

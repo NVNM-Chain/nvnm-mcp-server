@@ -66,7 +66,7 @@ func TestLoad_RelayAllowAnyRejectedUnderKeylessWrites(t *testing.T) {
 // is accepted on the authenticated (non-keyless) path it is meant for.
 func TestLoad_RelayAllowAnyAllowedWithoutKeylessWrites(t *testing.T) {
 	t.Setenv("NVNM_EVM_RPC_URL", "https://evm.inveniam.mantrachain.io")
-	t.Setenv("NVNM_CHAIN_ID", "787111")
+	t.Setenv("NVNM_CHAIN_ID", "787222")
 	t.Setenv("MCP_TRANSPORT", "http")
 	t.Setenv("ANCHOR_ADDRESS", "0x0000000000000000000000000000000000000A00")
 	t.Setenv("MCP_RELAY_ALLOW_ANY", "true")

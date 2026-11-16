@@ -316,7 +316,7 @@ func TestMCP_Tools(t *testing.T) {
 		},
 		{
 			name: "anchor_get_registry",
-			args: map[string]any{"id": float64(1)},
+			args: map[string]any{"registry_id": float64(1)},
 			check: func(t *testing.T, raw []byte) {
 				out := decodeWire[wireRegistry](t, raw)
 				if out.ID != 1 {
@@ -422,6 +422,15 @@ func TestMCP_Tools(t *testing.T) {
 			tc.check(t, raw)
 		})
 	}
+
+	// id is the parameter's original name. A client written against it must
+	// keep working through the published schema, not only in the handler.
+	t.Run("anchor_get_registry_deprecated_id", func(t *testing.T) {
+		raw := callToolOK(t, session, "anchor_get_registry", map[string]any{"id": float64(1)})
+		if out := decodeWire[wireRegistry](t, raw); out.ID != 1 || out.Name != "docs" {
+			t.Errorf("registry = id=%d name=%q, want id=1 name=docs", out.ID, out.Name)
+		}
+	})
 
 	t.Run("anchor_get_registries_by_name", func(t *testing.T) {
 		raw := callToolOK(t, session, "anchor_get_registries", map[string]any{

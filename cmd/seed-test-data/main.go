@@ -22,10 +22,10 @@ import (
 )
 
 const (
-	// Defaults target the public NVNM testnet; override with the same env
-	// vars the server uses (NVNM_EVM_RPC_URL / NVNM_CHAIN_ID).
-	defaultRPCURL  = "https://evm.testnet.nvnmchain.io"
-	defaultChainID = int64(787111)
+	// Defaults target the devnet; override with the same env vars the
+	// server uses (NVNM_EVM_RPC_URL / NVNM_CHAIN_ID).
+	defaultRPCURL  = "https://rpc.nvnm.canary.mantrachain.dev"
+	defaultChainID = int64(787222)
 	envRPCURL      = "NVNM_EVM_RPC_URL"
 	envChainID     = "NVNM_CHAIN_ID"
 
